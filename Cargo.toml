@@ -1,0 +1,16 @@
+[package]
+name = "learn-pali"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+description = "learn-pali: learning Pāli, a PaliCanon service (its scope is defined in its first task)."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[dependencies]
+
+[lints.rust]
+missing_docs = "warn"
+
+[lints.clippy]
+pedantic = { level = "warn", priority = -1 }
