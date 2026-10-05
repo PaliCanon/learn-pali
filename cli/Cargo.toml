@@ -1,0 +1,18 @@
+[package]
+name = "learn_cli"
+description = "learn-pali: try the learning loop at the terminal."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "learn-cli"
+path = "src/main.rs"
+
+[dependencies]
+learn_core = { version = "0.0.0", path = "../core" }
+
+[lints]
+workspace = true

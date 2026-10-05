@@ -1,7 +1,11 @@
 # From Lsh0x/rankfusion's ci.yml and ui-lib's, adapted to a Leptos service:
 # every check runs for the server (`ssr`, native) and, for clippy, the
 # browser (`hydrate`, wasm32), the two builds this service makes. No
-# `--all-features`: `ssr` and `hydrate` do not build together.
+# `--all-features`, no `--workspace`: `ssr` and `hydrate` do not build
+# together. The three other crates (`learn_core`, `learn_cli`, `build_deck`)
+# have no feature and are named with `-p`; `learn_core` also builds for
+# wasm32 (the site will run it), hence its own clippy entry. `build_deck`
+# compiles a bundled SQLite (C): the runner's `cc` is enough.
 #
 # Two checkouts, in every job that runs cargo: this repository goes into
 # `learn-pali/` and `PaliCanon/ui-lib` beside it in `ui-lib/`, because the
@@ -54,9 +58,13 @@ jobs:
       matrix:
         include:
           - feature: ssr
-            args: --all-targets
+            args: -p learn_pali --features ssr --all-targets
           - feature: hydrate
-            args: --lib --target wasm32-unknown-unknown
+            args: -p learn_pali --features hydrate --lib --target wasm32-unknown-unknown
+          - feature: native
+            args: -p learn_core -p learn_cli -p build_deck --all-targets
+          - feature: core-wasm
+            args: -p learn_core --lib --target wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v7
         with:
@@ -73,10 +81,10 @@ jobs:
         with:
           components: clippy
           targets: wasm32-unknown-unknown
-      - run: cargo clippy --locked -p learn_pali --features ${{ matrix.feature }} ${{ matrix.args }} -- -D warnings
+      - run: cargo clippy --locked ${{ matrix.args }} -- -D warnings
 
   test:
-    name: test (ssr)
+    name: test
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -92,6 +100,7 @@ jobs:
           ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p learn_pali --features ssr
+      - run: cargo test --locked -p learn_core -p learn_cli -p build_deck
 
   docs:
     name: rustdoc
@@ -111,7 +120,7 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --locked --no-deps -p learn_pali --features ssr
+      - run: cargo doc --locked --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 
   msrv:
     name: msrv (1.88)
@@ -132,6 +141,7 @@ jobs:
       # --locked: the committed Cargo.lock is what the MSRV claim is verified
       # against; a fresh resolution could pull a dependency with a higher MSRV.
       - run: cargo check --locked -p learn_pali --features ssr
+      - run: cargo check --locked -p learn_core -p learn_cli -p build_deck
 
   deny:
     name: cargo-deny
@@ -174,7 +184,7 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --features ssr -p learn_pali --lcov --output-path lcov.info
+      - run: cargo llvm-cov -p learn_pali -p learn_core -p learn_cli -p build_deck --features learn_pali/ssr --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v7
         with:
           files: lcov.info

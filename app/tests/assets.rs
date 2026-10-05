@@ -50,9 +50,32 @@ fn the_readme_names_the_port_and_every_check_command() {
         "cargo clippy -p learn_pali --lib --features hydrate --target wasm32-unknown-unknown -- -D warnings",
         "cargo test -p learn_pali --features ssr",
         r#"RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr"#,
+        "cargo clippy -p learn_core -p learn_cli -p build_deck --all-targets -- -D warnings",
+        "cargo clippy -p learn_core --lib --target wasm32-unknown-unknown -- -D warnings",
+        "cargo test -p learn_core -p learn_cli -p build_deck",
+        r#"RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck"#,
         "cargo leptos build",
         "cargo deny check advisories bans sources licenses",
     ] {
         assert!(readme.contains(command), "README lacks: {command}");
+    }
+}
+
+#[test]
+fn the_readme_shows_the_loop_the_deck_command_and_the_deck_licence() {
+    let readme = root("README.md");
+    for needle in [
+        "cargo run -p learn_cli -- --deck core/fixtures/deck.json --state /tmp/state.json new 5",
+        "cargo run -p learn_cli -- --deck core/fixtures/deck.json --state /tmp/state.json review",
+        "cargo run -p learn_cli -- --deck core/fixtures/deck.json --state /tmp/state.json stats",
+        "--today 2026-10-13 review",
+        "cargo run -p build_deck -- ",
+        "--strict",
+        "50 terms, 41 with forms, 50 with a blank, 0 warnings, 0 notes, empty cells: 3",
+        "Digital Pāḷi Dictionary v0.4.20260926",
+        "CC BY-NC-SA 4.0",
+        "MIT OR Apache-2.0",
+    ] {
+        assert!(readme.contains(needle), "README lacks: {needle}");
     }
 }

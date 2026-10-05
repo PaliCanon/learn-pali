@@ -1,0 +1,52 @@
+# The 50 terms of the fixture deck, in order of entry (rank = line order).
+# Glue words, the five khandha, common verbs, the doctrinal core.
+kho
+ca 2.1
+vā 1
+evaṃ 1
+iti
+na 1
+hi 1
+atha 1
+api 1.1
+bhikkhave
+hoti 1
+ta 1.1
+tvaṃ 1
+ahaṃ
+ayaṃ
+yo
+so 1.1
+sabba 1
+eka 1
+rūpa 1
+vedanā 1
+saññā 1
+saṅkhāra 1
+viññāṇa 1
+gacchati 1
+karoti 1
+passati 1
+jānāti 1
+viharati 1
+vadati 1
+sati 1.1
+dukkha 1
+sukha 1
+anicca 1
+nibbāna 1
+saṅgha 1
+dhamma 1.01
+buddha 1
+bhikkhu
+bhagavā
+kamma 1
+paññā 1
+sīla 1
+samādhi 1
+jāti 1
+jarā
+maraṇa
+taṇhā 1
+magga 1
+sacca 1

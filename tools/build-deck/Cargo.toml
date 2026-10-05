@@ -1,0 +1,20 @@
+[package]
+name = "build_deck"
+description = "learn-pali: builds the deck JSON from the Digital Pāḷi Dictionary database (never part of the site's build)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "build-deck"
+path = "src/main.rs"
+
+[dependencies]
+learn_core = { version = "0.0.0", path = "../../core" }
+rusqlite = { version = "0.40", features = ["bundled"] }
+unicode-normalization = "0.1"
+
+[lints]
+workspace = true
