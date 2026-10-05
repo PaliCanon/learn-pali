@@ -6,7 +6,7 @@ status: merged · rank: 5 · level: hard · type: feature · request: learn-pali
 
 ```mermaid
 flowchart LR
-  Define["Define ✓ consensus v3, 2 rounds"]:::done --> Plan["Plan ✓ skeleton + 9 lanes, probes green, 4 questions"]:::done --> Build["Build ✓ all slices: S0, L1–L5 (L4b, L5 in)"]:::done --> Verify["Verify ✓ matrix green on 63a24be: core 92+5, cli 60+14, build_deck 60, app 48+5; coverage 98.25%; deny, +1.88, --locked, leptos build"]:::done --> Review["Review ✓ round 1: 5 Δ, 5 T; 1 code fix, 7 tests, 4 ruled; round 2: 3 tests, 5 ruled"]:::done --> Fix["Fix ✓ round 1: changed_at_start + 3 commits, matrix green"]:::done --> Rebase:::todo --> Check:::todo --> Merge["Merge ✓ e461276"]:::done --> Retro:::todo
+  Define["Define ✓ consensus v3, 2 rounds"]:::done --> Plan["Plan ✓ skeleton + 9 lanes, probes green, 4 questions"]:::done --> Build["Build ✓ all slices: S0, L1–L5 (L4b, L5 in)"]:::done --> Verify["Verify ✓ matrix green on 63a24be: core 92+5, cli 60+14, build_deck 60, app 48+5; coverage 98.25%; deny, +1.88, --locked, leptos build"]:::done --> Review["Review ✓ round 1: 5 Δ, 5 T; 1 code fix, 7 tests, 4 ruled; round 2: 3 tests, 5 ruled"]:::done --> Fix["Fix ✓ round 1: changed_at_start + 3 commits, matrix green"]:::done --> Rebase:::todo --> Check:::todo --> Merge["Merge ✓ e461276"]:::done --> Retro["Retro ✓ 4 lessons"]:::done
   classDef done fill:#2e7d32,color:#fff
   classDef doing fill:#f9a825,color:#000
   classDef todo fill:#9e9e9e,color:#fff
@@ -481,7 +481,39 @@ user (process.md: never accepted by silence):
 
 ## Errors
 
-(the error sweep fills this)
+Swept into the Retro below (retro-discussion 3235, 17 errors with message ids).
+
+## Retro
+
+Retro agent: retro-discussion 3235 (summary, 17 errors with ids), Deep
+3236 (lessons, questions, forks). Validated 2026-10-05.
+
+**Lessons written** (docs, `lessons/2026-10-05-*`): the design voted
+before reading one input row (the DPD facts found at Plan and Build);
+every lane edited the task file's tables (one conflict per rebase); a
+state change with no named writer (the start-time promotion, the task's
+one real bug, found by the review); a compile error is not a red test
+(tests after the code, mutation-only proof, a miscounted total).
+
+**Actions**: ask-yourself/common/reference-data.md (new) and state.md
+("who writes it after each change?"); prompts/task-brief.md and
+steps/build.md (a lane never edits the task file; red before green,
+compile errors excluded, mutation labelled); steps/close.md (counts from
+the runner's output); prompts/review.md (a2m sequence on impl methods:
+`--all`).
+
+**Weighed and not taken** (Deep 3236): append-only per-lane log
+fragments merged by a ledger (the single-writer rule is enough for now);
+a `define-evidence` slot in the Define brief (the ask-yourself question
+carries it). **What worked**: the lane cut by surface (session / cli /
+builder) merged green; the adversarial review of behaviour with two
+voices found Δ3; rulings recorded when made.
+
+**Operational**: Deep needed retries on long messages (a shorter repost
+works); Gemini on 503 answered on flash-lite; the Plan lead stalled once
+and was resumed; the merge went on the user's "continue" after their
+terminal check (kho, ca, vā), not an explicit "ok" — recorded.
+
 
 ## Merge
 
