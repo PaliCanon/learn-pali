@@ -6,7 +6,7 @@ status: merged · rank: 5 · level: standard · type: feature · request: learn-
 
 ```mermaid
 flowchart LR
-  Define:::done --> Plan["Plan ✓ 5 slices, no overlap"]:::done --> Build["Build — slices 1-4 ✓ 43 tests, cargo leptos build green (5 in the CI lane)"]:::done --> Verify["Verify ✓ 43 tests, matrix green, deny red then fixed (2 licenses, 2 advisories, 1 wildcard)"]:::done --> Review["Review ✓ round 1: 3 Δ, 5 T; 4 fixed, 4 ruled · round 2 clean"]:::done --> Fix["Fix ✓ deny policy: CC0, BSL, two advisories ignored, ui-lib versioned; round 1: deny dates, 3 tests, 52 tests green"]:::done --> Rebase["Rebase ✓ main not moved"]:::done --> Check["Check ✓ user: aller (2026-10-05)"]:::done --> Merge["Merge ✓ 6b0455b"]:::done --> Retro:::todo
+  Define:::done --> Plan["Plan ✓ 5 slices, no overlap"]:::done --> Build["Build — slices 1-4 ✓ 43 tests, cargo leptos build green (5 in the CI lane)"]:::done --> Verify["Verify ✓ 43 tests, matrix green, deny red then fixed (2 licenses, 2 advisories, 1 wildcard)"]:::done --> Review["Review ✓ round 1: 3 Δ, 5 T; 4 fixed, 4 ruled · round 2 clean"]:::done --> Fix["Fix ✓ deny policy: CC0, BSL, two advisories ignored, ui-lib versioned; round 1: deny dates, 3 tests, 52 tests green"]:::done --> Rebase["Rebase ✓ main not moved"]:::done --> Check["Check ✓ user: aller (2026-10-05)"]:::done --> Merge["Merge ✓ 6b0455b"]:::done --> Retro["Retro ✓ 4 lessons, docs 423a809"]:::done
   classDef done fill:#2e7d32,color:#fff
   classDef doing fill:#f9a825,color:#000
   classDef todo fill:#9e9e9e,color:#fff
@@ -340,3 +340,22 @@ Rulings (2426, 2443), no code change — the round is clean:
 ## Merge
 
 `6b0455b` on main (squash of feat/site-structure, 2026-10-05); branch and worktree deleted.
+
+## Retro
+
+Retro message 2501 (retro agent), Deep's review 2505 (gemini 429, sage 400,
+deep silent twice before answering). Closed by the main orchestrator of the
+palisearch session on 2026-10-05 (the hook blocked every stop until then).
+Lessons (docs 423a809): a probe outside its toolchain said the tool was
+absent (cargo-deny, deny.toml against a stub); a check piped into tail hid
+a red (pipefail, exit codes printed; no side-effecting loop into head); a
+CI lane merged before its run was seen (a CI slice hands back its run, the
+worktree stays until Verify); a phone capture without mobile emulation
+(CDP `setDeviceMetricsOverride`, scrollWidth quoted). Changed: process.md
+§6, steps/plan.md, steps/build.md, agents/lane.md, agents/lead.md.
+Not taken as lessons (already covered or out of scope): voice outages
+(lesson 2026-10-03 a silent voice was not retried), the MSRV probe (folded
+into the probe lesson), the hand-copied check matrix and the 1.5 MB lotus
+(followup-lotus-asset exists). Deep's ask for the real paths of the brief
+template and matrix source: the paths are `docs/prompts/task-brief.md` and
+each README's Checks block.
