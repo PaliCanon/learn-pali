@@ -335,7 +335,44 @@ Rulings (2426, 2443), no code change — the round is clean:
 
 ## Errors
 
-(the error sweep fills this)
+Swept into the Retro below (retro-discussion 2501: the list with message ids).
+
+## Retro
+
+Retro agent: retro-discussion 2501 (summary and errors), Deep 2505 (ten
+gates; weighed below). Validated 2026-10-05.
+
+**Lessons written** (docs 9421ecf, `lessons/2026-10-05-*`): a new
+dependency's facts probed at Plan (MSRV resolution and the deny policy on
+the real tree — never against a stub); a tool declared absent outside its
+env (`cargo-deny`, `timeout`); a lane merged before its artefact was
+checked; a check script hiding a red clippy (`| tail`); a bare headless
+window under 500 px faking an overflow (CDP device metrics only);
+`@`-names in a plain post summoning three voices; the merge gate not
+knowing the repository (`task-check` REPOS, docs 2e255fa).
+
+**Actions**: ask-yourself/common/dependency.md; prompts/task-brief.md
+(toolchain for probes, pipefail check scripts, no `timeout`);
+prompts/steps/verify.md (a lane checked before the fast-forward);
+conventions/process.md §6 (CDP phone capture); prompts/repo-init.md step
+14; tools/viewer.md; claude-memory `phone-capture-cdp` (6870c9d).
+
+**Weighed and not taken** (Deep 2505): a workflow run URL as a lane's exit
+(CI cannot run before the user's deploy key); a one-token pre-flight ping
+per voice (the viewer's `GET /settings` and the fallback order already
+serve); the T1 per-language render (allowed by the brief and ruled, not
+absorbed); one machine-readable check matrix generated into README, test
+and CI (a fork for later, `followup-check-matrix` not opened: three copies
+today, each tested against the README); an asset size budget
+(`followup-lotus-asset` holds it).
+
+**Operational, not lessons**: Gemini on quota and 503 most of the day,
+Sage refusing `reasoning_effort: none` and hitting its output ceiling —
+the user's viewer settings; Deep answered every round after a retry.
+
+**Open for the user**: the `UI_LIB_DEPLOY_KEY` deploy key (CI red until
+then); the Search entry in Learn's rail (kept); the Sage settings.
+
 
 ## Merge
 
