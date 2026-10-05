@@ -1,6 +1,10 @@
 [advisories]
 version = 2
-ignore = []
+ignore = [
+    # Unmaintained crates reached only through leptos.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; reached only through leptos — drop when leptos moves off it (ignored 2026-10-05)" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained; reached only through leptos — drop when leptos moves off it (ignored 2026-10-05)" },
+]
 
 [licenses]
 version = 2
@@ -15,10 +19,20 @@ allow = [
     "ISC",
     "Unicode-3.0",
     "Zlib",
+    # A public-domain dedication — base16, via leptos.
+    "CC0-1.0",
+    # Boost, permissive — xxhash-rust, via leptos.
+    "BSL-1.0",
 ]
 confidence-threshold = 0.9
 # The allow list is a policy, not an inventory of the current tree.
 unused-allowed-license = "allow"
+
+# ui-lib is PaliCanon's own private library (license LicenseRef-Proprietary,
+# not an SPDX license): the one exception, for that crate alone.
+[[licenses.exceptions]]
+name = "palicanon-ui-lib"
+allow = ["LicenseRef-Proprietary"]
 
 [bans]
 multiple-versions = "warn"
@@ -28,3 +42,7 @@ wildcards = "deny"
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+# The private ui-lib, fetched over ssh with the deploy key. cargo-deny warns
+# that the entry goes unmatched while the workspace `[patch]` resolves ui-lib
+# to `../ui-lib`: the git source is the fallback without the sibling checkout.
+allow-git = ["ssh://git@github.com/PaliCanon/ui-lib.git"]

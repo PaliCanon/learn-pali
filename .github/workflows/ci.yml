@@ -1,7 +1,17 @@
-# From Lsh0x/rankfusion's ci.yml (the PaliCanon model), every job kept:
-# fmt, clippy, tests, rustdoc, MSRV, cargo-deny, coverage → Codecov. No
-# bench job (no benches) and no deploy key yet (no private git
-# dependency); both are added the day they apply.
+# From Lsh0x/rankfusion's ci.yml and ui-lib's, adapted to a Leptos service:
+# every check runs for the server (`ssr`, native) and, for clippy, the
+# browser (`hydrate`, wasm32), the two builds this service makes. No
+# `--all-features`: `ssr` and `hydrate` do not build together.
+#
+# Two checkouts, in every job that runs cargo: this repository goes into
+# `learn-pali/` and `PaliCanon/ui-lib` beside it in `ui-lib/`, because the
+# workspace `[patch]`, `app/style/main.css` (`@import` of
+# `../../../ui-lib/style/theme.css`) and `app/build.rs` (`#[path]` to
+# `../../ui-lib/build/placeholders.rs`) all reach `../ui-lib`. ui-lib is a
+# private repository, also a git dependency: the secret `UI_LIB_DEPLOY_KEY`
+# is a read-only deploy key on ui-lib (its private half lives here, as a
+# repository secret), used by the clone and by the ssh agent cargo fetches
+# through. Cargo steps run in `learn-pali/` (`defaults.run`).
 name: CI
 
 on:
@@ -12,34 +22,76 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
+defaults:
+  run:
+    working-directory: learn-pali
+
 jobs:
   fmt:
     name: rustfmt
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
       - run: cargo fmt --check
 
   clippy:
-    name: clippy
+    name: clippy (${{ matrix.feature }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - feature: ssr
+            args: --all-targets
+          - feature: hydrate
+            args: --lib --target wasm32-unknown-unknown
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+          targets: wasm32-unknown-unknown
+      - run: cargo clippy --locked -p learn_pali --features ${{ matrix.feature }} ${{ matrix.args }} -- -D warnings
 
   test:
-    name: test
+    name: test (ssr)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test --locked --all-features
+      - run: cargo test --locked -p learn_pali --features ssr
 
   docs:
     name: rustdoc
@@ -48,26 +100,59 @@ jobs:
       RUSTDOCFLAGS: -D warnings
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo doc --locked --no-deps --all-features
+      - run: cargo doc --locked --no-deps -p learn_pali --features ssr
 
   msrv:
-    name: msrv (1.85)
+    name: msrv (1.88)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: dtolnay/rust-toolchain@1.88
       # --locked: the committed Cargo.lock is what the MSRV claim is verified
       # against; a fresh resolution could pull a dependency with a higher MSRV.
-      - run: cargo check --all-features --locked
+      - run: cargo check --locked -p learn_pali --features ssr
 
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      # The action runs in a container: it takes the key itself (and GitHub's
+      # ed25519 host key, from https://api.github.com/meta) instead of the
+      # runner's ssh agent. The manifest path is relative to the workspace root.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
+          manifest-path: learn-pali/Cargo.toml
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          ssh-known-hosts: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
           command: check advisories bans sources licenses
 
   coverage:
@@ -75,14 +160,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      - run: cargo llvm-cov --features ssr -p learn_pali --lcov --output-path lcov.info
       - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
+          working-directory: learn-pali
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
