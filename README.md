@@ -33,6 +33,7 @@ checkout too.
 ```sh
 export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PATH=$HOME/.rustup-pc/cargo/bin:$PATH RUSTC_WRAPPER=sccache
 cargo fmt --all --check
+leptosfmt --check .    # the view! macros (cargo install leptosfmt --locked)
 cargo clippy -p learn_pali --features ssr --all-targets -- -D warnings
 cargo clippy -p learn_pali --lib --features hydrate --target wasm32-unknown-unknown -- -D warnings
 cargo test -p learn_pali --features ssr

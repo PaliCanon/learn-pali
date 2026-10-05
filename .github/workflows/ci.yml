@@ -46,6 +46,10 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --check
+      - uses: taiki-e/cache-cargo-install-action@v2
+        with:
+          tool: leptosfmt
+      - run: leptosfmt --check .
 
   clippy:
     name: clippy (${{ matrix.feature }})
