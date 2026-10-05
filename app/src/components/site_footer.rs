@@ -152,7 +152,9 @@ mod tests {
     fn a_long_page_has_the_footer_after_its_content() {
         let html = plain(&Owner::new().with(|| {
             view! {
-                <AppShell footer=|| view! { <SiteFooter /> }>
+                <AppShell footer=|| {
+                    view! { <SiteFooter /> }
+                }>
                     {(0..200).map(|n| view! { <p>{format!("line {n}")}</p> }).collect_view()}
                 </AppShell>
             }
