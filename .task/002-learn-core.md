@@ -1,12 +1,12 @@
 # 002 learn-core — the learning loop as a library, tried at the terminal
 
-status: review · rank: 5 · level: hard · type: feature · request: learn-pali learning loop · session: learn-pali-002-learn-core · process: ../../docs/workflows/development-process.mmd (frozen v20), full path · after: []
+status: merged · rank: 5 · level: hard · type: feature · request: learn-pali learning loop · session: learn-pali-002-learn-core · process: ../../docs/workflows/development-process.mmd (frozen v20), full path · after: []
 
 ## Workflow
 
 ```mermaid
 flowchart LR
-  Define["Define ✓ consensus v3, 2 rounds"]:::done --> Plan["Plan ✓ skeleton + 9 lanes, probes green, 4 questions"]:::done --> Build["Build ✓ all slices: S0, L1–L5 (L4b, L5 in)"]:::done --> Verify["Verify ✓ matrix green on 63a24be: core 92+5, cli 60+14, build_deck 60, app 48+5; coverage 98.25%; deny, +1.88, --locked, leptos build"]:::done --> Review["Review ✓ round 1: 5 Δ, 5 T; 1 code fix, 7 tests, 4 ruled; round 2: 3 tests, 5 ruled"]:::done --> Fix["Fix ✓ round 1: changed_at_start + 3 commits, matrix green"]:::done --> Rebase:::todo --> Check:::todo --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ consensus v3, 2 rounds"]:::done --> Plan["Plan ✓ skeleton + 9 lanes, probes green, 4 questions"]:::done --> Build["Build ✓ all slices: S0, L1–L5 (L4b, L5 in)"]:::done --> Verify["Verify ✓ matrix green on 63a24be: core 92+5, cli 60+14, build_deck 60, app 48+5; coverage 98.25%; deny, +1.88, --locked, leptos build"]:::done --> Review["Review ✓ round 1: 5 Δ, 5 T; 1 code fix, 7 tests, 4 ruled; round 2: 3 tests, 5 ruled"]:::done --> Fix["Fix ✓ round 1: changed_at_start + 3 commits, matrix green"]:::done --> Rebase:::todo --> Check:::todo --> Merge["Merge ✓ e461276"]:::done --> Retro:::todo
   classDef done fill:#2e7d32,color:#fff
   classDef doing fill:#f9a825,color:#000
   classDef todo fill:#9e9e9e,color:#fff
@@ -38,6 +38,8 @@ flowchart LR
 | L5 | done | `README.md` rewritten (what is here, "Try the loop at the terminal", "Rebuild the fixture deck" with the report line, "Data": deck CC BY-NC-SA 4.0 from DPD v0.4.20260926, code MIT OR Apache-2.0, the check matrix for the three crates); `app/tests/assets.rs` README tests extended first (2 red), then green; the first green run failed once on a link splitting the DPD version string, fixed. `.github/workflows/ci.yml`: clippy entries `ssr`, `hydrate`, `native`, `core-wasm`; test, docs (one command with the mixed selection, probed exit 0), msrv, coverage over the four crates; YAML parsed with python. `cargo llvm-cov -p learn_pali -p learn_core -p learn_cli -p build_deck --features learn_pali/ssr --summary-only` exit 0: TOTAL lines 98.25% (4559, 80 missed), regions 97.33%, functions 96.86% (cli: lib 96.3%, review 95.8%, stats 96.1%; `main.rs` of both binaries are run by the integration test / not at all) |
 
 | Check (orchestrator) | done | learn-cli walked on the fixture (new 3, a review with one Fail and its practice question, stats, the state JSON) |
+
+| Merge | done | squash `e461276` on main; gate green; the user's check at the terminal |
 
 ## Summary
 
@@ -483,4 +485,4 @@ user (process.md: never accepted by silence):
 
 ## Merge
 
-(not merged)
+`e461276` on main (squash of feat/learn-core, 2026-10-05); branch and worktree deleted.
