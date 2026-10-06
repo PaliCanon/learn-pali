@@ -241,9 +241,9 @@ pub(crate) fn AddRow(
     sticky: bool,
 ) -> impl IntoView {
     let class = if sticky {
-        "sticky bottom-2 flex justify-end pointer-events-none"
+        "sticky bottom-2 flex justify-center pointer-events-none"
     } else {
-        "flex justify-end"
+        "flex justify-center"
     };
     view! {
         <div data-add-row="" class=class>

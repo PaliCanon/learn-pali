@@ -1233,7 +1233,7 @@ mod tests {
                 "sticky",
                 "bottom-2",
                 "flex",
-                "justify-end",
+                "justify-center",
                 "pointer-events-none",
             ] {
                 assert!(row_classes.contains(&class), "{class}: {row}");
@@ -1271,7 +1271,7 @@ mod tests {
     fn a_filter_with_no_term_still_offers_the_plus_at_the_right() {
         let html = with_progress(Language::En, HomeState::Due(5), Some(Stage::Month));
         let row = tag_before(&html, "div", r#"aria-label="New terms""#);
-        assert!(row.contains("justify-end"), "{row}");
+        assert!(row.contains("justify-center"), "{row}");
         assert!(
             at(&html, "No terms here yet") < at(&html, r#"aria-label="New terms""#),
             "{html}"
@@ -1410,7 +1410,7 @@ mod tests {
         assert!(!html.contains("Next review"), "{html}");
         let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
-        assert!(row.contains("justify-end"), "{row}");
+        assert!(row.contains("justify-center"), "{row}");
         assert!(
             at(&html, ">Daily<") < at(&html, r#"aria-label="New terms""#),
             "under the strip: {html}"
@@ -1433,7 +1433,7 @@ mod tests {
         assert!(!html.contains("data-cta-row"), "no CTA row: {html}");
         let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "the '+' alone: {row}");
-        assert!(row.contains("justify-end"), "at the right: {row}");
+        assert!(row.contains("justify-center"), "at the right: {row}");
         let add = tag_before(&html, "button", r#"aria-label="New terms""#);
         assert!(!has_attr(&add, "disabled"), "{add}");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
