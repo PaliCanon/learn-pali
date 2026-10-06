@@ -8,8 +8,8 @@
 //!
 //! The home also holds the progress (there is no other page for it): under
 //! the CTA row, the strip of the six stages, compact, whose cells filter the
-//! term list in place (the page's state, no URL: lost on reload), the list
-//! capped at about five rows, the
+//! term list in place (the page's state, no URL: lost on reload), the '+'
+//! of 'New terms' with its picker, the list capped at about five rows, the
 //! terms the deck does not know, then the data block (export, import).
 //! With nothing saved, or a damaged progress, the data block alone offers
 //! the import; a progress saved by a newer version offers none.
@@ -46,11 +46,9 @@ const CTA_BOX: &str = "flex flex-col gap-4";
 /// A state's wrapper: the box, then what sits under it.
 const FRAME: &str = "flex flex-col gap-6";
 
-/// The row of the CTA and 'Add new terms' (HC): side by side from `sm` up,
-/// 'Add new terms' at the right; on a phone the full-width CTA pushes it
-/// under, still at the right. At least an Lg button's height (`h-13`), with
-/// no CTA in it or in the skeleton: the layout does not move when the store
-/// has been read.
+/// The row of the state's CTA (HC), full width on a phone. At least an Lg
+/// button's height (`h-13`), the skeleton's too: the layout does not move
+/// when the store has been read.
 const CTA_ROW: &str = "flex flex-wrap items-center gap-3 min-h-13";
 
 /// The CTA's layout: the full width on a phone, in the thumb's reach.
@@ -357,9 +355,9 @@ fn download_raw() {
     }
 }
 
-/// What the home shows for `state`: the CTA row in a box of fixed height,
-/// the new-terms picker under it, the progress (the strip, the list, the
-/// data block), or the Broken banner.
+/// What the home shows for `state`: the CTA row (when the state has a CTA),
+/// the progress (the strip, 'New terms' and its picker, the list, the data
+/// block), or the Broken banner.
 #[allow(
     clippy::similar_names,
     reason = "`state` and `stage` are the design's names for the two props"
@@ -398,14 +396,14 @@ pub fn HomeView(
         HomeState::Loading => view! { <Skeleton /> }.into_any(),
         HomeState::Empty => view! { <EmptyBlock new_left=new_left act=act /> }.into_any(),
         HomeState::Due(_) => view! {
-            <DueBlock new_left=new_left act=act>
-                <HomeProgress counts=counts saved=saved stage=stage act=act />
+            <DueBlock act=act>
+                <HomeProgress new_left=new_left counts=counts saved=saved stage=stage act=act />
             </DueBlock>
         }
         .into_any(),
         HomeState::NothingDue { advance_possible } => view! {
-            <NothingDueBlock advance_possible=advance_possible new_left=new_left act=act>
-                <HomeProgress counts=counts saved=saved stage=stage act=act />
+            <NothingDueBlock advance_possible=advance_possible act=act>
+                <HomeProgress new_left=new_left counts=counts saved=saved stage=stage act=act />
             </NothingDueBlock>
         }
         .into_any(),
@@ -436,60 +434,55 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
-/// No progress yet: the teaching sentence and a row whose only action is
-/// 'Add new terms', the way in (at the left, the default size; user,
-/// 2026-10-06), the picker under it, then the data block, whose import is
-/// the way back to a saved progress.
+/// No progress yet: the teaching sentence, 'New terms' under it at the
+/// right (the way in), its picker, then the data block, whose import is the
+/// way back to a saved progress. No CTA row: there is no CTA.
 #[component]
 fn EmptyBlock(new_left: usize, act: Callback<HomeAction>) -> impl IntoView {
     let t = strings();
-    let open = RwSignal::new(false);
     view! {
         <div data-home-state="empty" class=FRAME>
             <div data-cta-box="" class=CTA_BOX>
                 <p class="max-w-prose text-body">{move || td_string!(t.locale(), home_teach)}</p>
-                <CtaRow cta=None new_left=new_left act=act open=open />
             </div>
-            <AddTermsPanel new_left=new_left act=act open=open />
+            <NewTermsRow new_left=new_left act=act />
             <ImportOnly act=act />
         </div>
     }
 }
 
 /// Cards due: the CTA row ('Resume', no count: the session's header gives
-/// it), the picker under it, then `children` (the progress).
+/// it), then `children` (the progress).
 #[component]
-fn DueBlock(new_left: usize, act: Callback<HomeAction>, children: Children) -> impl IntoView {
-    let open = RwSignal::new(false);
+fn DueBlock(act: Callback<HomeAction>, children: Children) -> impl IntoView {
     view! {
         <div data-home-state="due" class=FRAME>
             <div data-cta-box="" class=CTA_BOX>
-                <CtaRow cta=Some(Cta::Resume) new_left=new_left act=act open=open />
+                <CtaRow cta=Cta::Resume act=act />
             </div>
-            <AddTermsPanel new_left=new_left act=act open=open />
             {children()}
         </div>
     }
 }
 
-/// Nothing due: the CTA row ('Review the next stage' when advancing would
-/// move something, else 'Add new terms' alone at the left), the picker
-/// under it, then `children` (the progress).
+/// Nothing due: the CTA row ('Review the next stage') when advancing would
+/// move something, else no row at all; then `children` (the progress).
 #[component]
 fn NothingDueBlock(
     advance_possible: bool,
-    new_left: usize,
     act: Callback<HomeAction>,
     children: Children,
 ) -> impl IntoView {
-    let open = RwSignal::new(false);
-    let cta = advance_possible.then_some(Cta::NextStage);
     view! {
         <div data-home-state="nothing-due" class=FRAME>
-            <div data-cta-box="" class=CTA_BOX>
-                <CtaRow cta=cta new_left=new_left act=act open=open />
-            </div>
-            <AddTermsPanel new_left=new_left act=act open=open />
+            {advance_possible
+                .then(|| {
+                    view! {
+                        <div data-cta-box="" class=CTA_BOX>
+                            <CtaRow cta=Cta::NextStage act=act />
+                        </div>
+                    }
+                })}
             {children()}
         </div>
     }
@@ -522,39 +515,26 @@ impl Cta {
     }
 }
 
-/// The CTA row (HC): the state's CTA at the left when there is one, 'Add
-/// new terms' small at the right; with no CTA, 'Add new terms' is the row's
-/// only action and sits at the left at the default size (Empty, and nothing
-/// due with nothing to advance).
+/// The CTA row (HC): the state's CTA, alone ('New terms' sits above the
+/// term list, see [`NewTermsRow`]). A state with no CTA has no row.
 #[component]
 fn CtaRow(
-    /// The state's CTA; none leaves 'Add new terms' alone.
-    cta: Option<Cta>,
-    /// The deck's terms not started yet; 0 hides 'Add new terms'.
-    new_left: usize,
+    /// The state's CTA.
+    cta: Cta,
     /// Performs the CTA.
     act: Callback<HomeAction>,
-    /// The picker's disclosure, shared with [`AddTermsPanel`].
-    open: RwSignal<bool>,
 ) -> impl IntoView {
     let t = strings();
-    let way_in = cta.is_none();
     view! {
         <div data-cta-row="" class=CTA_ROW>
-            {cta
-                .map(|cta| {
-                    view! {
-                        <Button
-                            variant=Variant::Primary
-                            size=Size::Lg
-                            layout=CTA_LAYOUT
-                            on_click=move |_| act.run(cta.action())
-                        >
-                            {move || cta.label(t.locale())}
-                        </Button>
-                    }
-                })}
-            <AddTermsButton new_left=new_left open=open way_in=way_in />
+            <Button
+                variant=Variant::Primary
+                size=Size::Lg
+                layout=CTA_LAYOUT
+                on_click=move |_| act.run(cta.action())
+            >
+                {move || cta.label(t.locale())}
+            </Button>
         </div>
     }
 }
@@ -601,36 +581,59 @@ fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
     }
 }
 
-/// 'Add new terms': the disclosure that opens [`AddTermsPanel`], small, at
-/// the row's right (HC); as the way in, at the default size and at the
-/// left. Nothing when the deck has no term left to start.
+/// 'New terms': the button at the right, small, and the picker right under
+/// it (user, 2026-10-06: above the term list). Nothing when the deck has no
+/// term left to start.
+#[component]
+fn NewTermsRow(
+    /// The deck's terms not started yet; 0 renders nothing.
+    new_left: usize,
+    /// Performs the learner's choice.
+    act: Callback<HomeAction>,
+) -> impl IntoView {
+    let open = RwSignal::new(false);
+    (new_left > 0).then(|| {
+        view! {
+            <div data-new-terms="" class="flex flex-col gap-3">
+                <div class="flex">
+                    <AddTermsButton new_left=new_left open=open />
+                </div>
+                <AddTermsPanel new_left=new_left act=act open=open />
+            </div>
+        }
+    })
+}
+
+/// The disclosure that opens [`AddTermsPanel`]: a '+', small, Accent, at
+/// the right; its name is 'New terms' in the page's language. Nothing when
+/// the deck has no term left to start.
 #[component]
 fn AddTermsButton(
     /// The deck's terms not started yet; 0 renders nothing.
     new_left: usize,
     /// The disclosure's state, shared with [`AddTermsPanel`].
     open: RwSignal<bool>,
-    /// The row's only action: the default size, at the left.
-    #[prop(optional)]
-    way_in: bool,
 ) -> impl IntoView {
     let t = strings();
-    let (size, layout) = if way_in {
-        (Size::Md, "")
-    } else {
-        (Size::Sm, "ml-auto")
-    };
-    (new_left > 0).then(|| {
+    (new_left > 0).then_some(move || {
+        let label = td_string!(t.locale(), add_terms);
         view! {
-            <DisclosureButton controls=Disclosed::new("pc-new-terms", open) size=size layout=layout>
-                {move || td_string!(t.locale(), add_terms)}
+            <DisclosureButton
+                controls=Disclosed::new("pc-new-terms", open)
+                variant=Variant::Accent
+                size=Size::Sm
+                label_closed=label
+                label_open=label
+                layout="ml-auto"
+            >
+                <span class="text-lg leading-none">"+"</span>
             </DisclosureButton>
         }
     })
 }
 
 /// The region [`AddTermsButton`] controls: [`NewTerms`] at the column's
-/// full width, under the CTA row, while open. Empty (and taking no gap)
+/// full width, under the button, while open. Empty (and taking no gap)
 /// when closed; nothing when the deck has no term left to start.
 #[component]
 fn AddTermsPanel(
@@ -661,10 +664,11 @@ fn AddTermsPanel(
 }
 
 /// The progress under the CTA row: the strip (its cells filter the list
-/// in place), the term list and the orphans when a progress is saved,
-/// then the data block.
+/// in place), 'New terms' with its picker, the term list and the orphans
+/// when a progress is saved, then the data block.
 #[component]
 fn HomeProgress(
+    new_left: usize,
     counts: [usize; 6],
     saved: Option<Saved>,
     stage: RwSignal<Option<Stage>>,
@@ -685,6 +689,7 @@ fn HomeProgress(
     let export = saved.map(|saved| saved.state);
     view! {
         <StageStrip counts=counts stage=stage />
+        <NewTermsRow new_left=new_left act=act />
         {list}
         <DataBlock export_state=export today=today can_import=true on_replace=on_replace />
     }
@@ -914,46 +919,82 @@ mod tests {
             for absent in ["to review", "Nothing due today"] {
                 assert!(!html.contains(absent), "{state:?} {absent}: {html}");
             }
-            let cta_box = element_at(&html, at(&html, "data-cta-box"));
-            assert!(!cta_box.contains("<h2"), "{state:?}: {cta_box}");
+            if html.contains("data-cta-box") {
+                let cta_box = element_at(&html, at(&html, "data-cta-box"));
+                assert!(!cta_box.contains("<h2"), "{state:?}: {cta_box}");
+            }
         }
     }
 
-    /// HC: one row, the state's CTA at the left when there is one, 'Add
-    /// new terms' small (`Size::Sm`) at the right (`ml-auto`); the picker
-    /// opens under the row, never inside it. Not the Empty state's row,
-    /// where 'Add new terms' is the way in.
+    /// HC: the CTA row holds the state's CTA alone; 'New terms' is not in
+    /// it, it sits above the term list (user, 2026-10-06).
     #[test]
-    fn one_row_holds_the_cta_and_add_new_terms_small_at_the_right() {
+    fn the_cta_row_holds_only_the_cta() {
         for (state, cta) in [
-            (HomeState::Due(12), Some(">Resume<")),
+            (HomeState::Due(12), ">Resume<"),
             (
                 HomeState::NothingDue {
                     advance_possible: true,
                 },
-                Some("Review the next stage"),
+                "Review the next stage",
             ),
         ] {
             let html = en(state, 10);
             let row = element_at(&html, at(&html, "data-cta-row"));
             assert!(row.contains("flex flex-wrap items-center gap-3"), "{row}");
+            assert_eq!(row.matches("<button").count(), 1, "{row}");
+            assert!(row.contains(cta), "{cta}: {row}");
+            for absent in ["New terms", ">+<", "ml-auto", "pc-new-terms"] {
+                assert!(!row.contains(absent), "{absent}: {row}");
+            }
+        }
+    }
+
+    /// The button sits after the strip and before the term list (and its
+    /// picker right under it), small, at the right, in Accent.
+    #[test]
+    fn new_terms_sits_between_the_strip_and_the_list() {
+        for state in started() {
+            let html = with_progress(Language::En, state, None);
+            let order = [
+                at(&html, "data-cta-row"),
+                at(&html, ">Daily<"),
+                at(&html, r#"aria-label="New terms""#),
+                at(&html, r#"id="pc-new-terms""#),
+                at(&html, "data-term-list"),
+            ];
+            assert!(order.is_sorted(), "{order:?}: {html}");
             assert_eq!(
-                row.matches("<button").count(),
-                1 + usize::from(cta.is_some()),
-                "{row}"
-            );
-            if let Some(cta) = cta {
-                assert!(at(row, cta) < at(row, ">New terms<"), "{cta}: {row}");
-            }
-            let add = tag_before(row, "button", ">New terms<");
-            for class in ["h-8", "ml-auto"] {
-                assert!(add.split(['"', ' ']).any(|c| c == class), "{class}: {add}");
-            }
-            assert!(!row.contains(r#"id="pc-new-terms""#), "{row}");
-            assert!(
-                at(&html, r#"id="pc-new-terms""#) > at(&html, ">New terms<"),
+                html.matches(r#"aria-label="New terms""#).count(),
+                1,
                 "{html}"
             );
+            let add = tag_before(&html, "button", r#"aria-label="New terms""#);
+            let classes: Vec<&str> = add.split(['"', ' ']).collect();
+            for class in ["h-8", "ml-auto", "border-gold/40"] {
+                assert!(classes.contains(&class), "{class}: {add}");
+            }
+            assert!(!classes.contains(&"border-line"), "Accent, not Chip: {add}");
+        }
+    }
+
+    /// Just a '+', named 'New terms' in the language of the page; a click
+    /// flips `aria-expanded` and opens the picker under it.
+    #[test]
+    fn the_button_is_a_plus_named_in_the_language() {
+        for (language, name) in [
+            (Language::En, "New terms"),
+            (Language::Fr, "Nouveaux termes"),
+            (Language::Vi, "Thuật ngữ mới"),
+        ] {
+            let html = view_of(language, HomeState::Due(2), 10, [0; 6]);
+            let add = tag_before(&html, "button", &format!(r#"aria-label="{name}""#));
+            assert!(add.contains(&format!(r#"title="{name}""#)), "{add}");
+            let from = html.find(&add).expect(&html) + add.len();
+            let inner = &html[from..from + html[from..].find("</button>").expect(&html)];
+            assert!(inner.contains(r#"leading-none">+</span>"#), "{inner}");
+            assert!(inner.contains("text-lg"), "{inner}");
+            assert!(!inner.contains(name), "the name is the label only: {inner}");
         }
     }
 
@@ -962,8 +1003,8 @@ mod tests {
     #[test]
     fn the_add_terms_button_reads_new_terms() {
         let html = en(HomeState::Due(2), 10);
-        assert!(html.contains(">New terms<"), "{html}");
-        assert!(!html.contains(">Add new terms<"), "{html}");
+        assert!(html.contains(r#"aria-label="New terms""#), "{html}");
+        assert!(!html.contains("Add new terms"), "{html}");
     }
 
     /// The closed picker's empty region takes no gap in the column.
@@ -1033,52 +1074,49 @@ mod tests {
 
     // ---- T3: the states ----
 
-    /// The row's only action sits at the left at the default size: 'Add new
-    /// terms' alone, with nothing due and nothing to advance.
+    /// Nothing due and nothing to advance: no CTA, so no CTA row and no
+    /// box; 'New terms' is small and at the right, as in every state.
     #[test]
-    fn nothing_to_review_leaves_add_new_terms_alone_at_the_left() {
+    fn nothing_to_review_has_no_cta_row_and_new_terms_at_the_right() {
         let html = en(
             HomeState::NothingDue {
                 advance_possible: false,
             },
             10,
         );
-        let row = element_at(&html, at(&html, "data-cta-row"));
-        assert_eq!(row.matches("<button").count(), 1, "{row}");
-        let add = tag_before(row, "button", ">New terms<");
-        let classes: Vec<&str> = add.split(['"', ' ']).collect();
-        for absent in ["ml-auto", "h-8"] {
-            assert!(!classes.contains(&absent), "{absent}: {add}");
+        for absent in ["data-cta-row", "data-cta-box"] {
+            assert!(!html.contains(absent), "{absent}: {html}");
         }
-        assert!(classes.contains(&"h-11"), "the default size: {add}");
+        let add = tag_before(&html, "button", r#"aria-label="New terms""#);
+        let classes: Vec<&str> = add.split(['"', ' ']).collect();
+        for class in ["h-8", "ml-auto"] {
+            assert!(classes.contains(&class), "{class}: {add}");
+        }
+        assert!(!classes.contains(&"h-11"), "{add}");
     }
 
-    /// The Empty state: the teaching sentence, then a row whose only action
-    /// is 'Add new terms', at the left and at the default size (user,
-    /// 2026-10-06: no 'Start with 5 terms', the picker is the way in).
+    /// The Empty state: the teaching sentence, then 'New terms' at the same
+    /// right-aligned place, small, then its picker (user, 2026-10-06: no
+    /// 'Start with 5 terms', the picker is the way in); no CTA row.
     #[test]
-    fn the_empty_state_teaches_and_offers_the_picker_alone() {
+    fn the_empty_state_teaches_and_offers_new_terms_at_the_right() {
         let html = en(HomeState::Empty, 50);
         assert!(!html.contains(r#"aria-busy="true""#), "{html}");
-        assert!(
-            html.contains("A term is one word, asked four ways"),
-            "{html}"
-        );
+        let teach = at(&html, "A term is one word, asked four ways");
         assert!(!html.contains("Start with 5"), "{html}");
-        let row = element_at(&html, at(&html, "data-cta-row"));
-        assert_eq!(row.matches("<button").count(), 1, "{row}");
-        let add = tag_before(row, "button", ">New terms<");
+        assert!(!html.contains("data-cta-row"), "{html}");
+        let add = tag_before(&html, "button", r#"aria-label="New terms""#);
         assert!(!has_attr(&add, "disabled"), "{add}");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains(r#"aria-controls="pc-new-terms""#), "{add}");
         let classes: Vec<&str> = add.split(['"', ' ']).collect();
-        for absent in ["ml-auto", "h-8"] {
-            assert!(!classes.contains(&absent), "{absent}: {add}");
+        for class in ["h-8", "ml-auto"] {
+            assert!(classes.contains(&class), "{class}: {add}");
         }
-        assert!(classes.contains(&"h-11"), "the default size: {add}");
         assert!(
-            at(&html, r#"id="pc-new-terms""#) > at(&html, ">New terms<"),
-            "the picker under the row: {html}"
+            teach < at(&html, r#"aria-label="New terms""#)
+                && at(&html, r#"aria-label="New terms""#) < at(&html, r#"id="pc-new-terms""#),
+            "the sentence, the button, the picker: {html}"
         );
         assert!(!html.contains("<ul"), "no strip: {html}");
         assert!(!html.contains(r#"href="/progress"#), "{html}");
@@ -1172,10 +1210,10 @@ mod tests {
         ] {
             assert!(!html.contains(absent), "{absent}: {html}");
         }
-        tag_before(&html, "button", ">New terms<");
+        tag_before(&html, "button", r#"aria-label="New terms""#);
         let html = en(none, 0);
-        let row = element_at(&html, at(&html, "data-cta-row"));
-        assert!(!row.contains("<button"), "{row}");
+        assert!(!html.contains("data-cta-row"), "{html}");
+        assert!(!html.contains("New terms"), "{html}");
         assert!(!html.contains("All terms started"), "{html}");
     }
 
@@ -1270,14 +1308,18 @@ mod tests {
             (
                 Language::Fr,
                 [
-                    ">Nouveaux termes<",
+                    r#"aria-label="Nouveaux termes""#,
                     "Revoir l’étape suivante",
                     "Recommencer",
                 ],
             ),
             (
                 Language::Vi,
-                [">Thuật ngữ mới<", "Ôn giai đoạn tiếp theo", "Bắt đầu lại"],
+                [
+                    r#"aria-label="Thuật ngữ mới""#,
+                    "Ôn giai đoạn tiếp theo",
+                    "Bắt đầu lại",
+                ],
             ),
         ] {
             let empty = view_of(language, HomeState::Empty, 50, [0; 6]);
@@ -1335,6 +1377,9 @@ mod tests {
     fn the_cta_box_has_no_empty_height() {
         for (state, left) in every_state() {
             let html = en(state, left);
+            if !html.contains("data-cta-box") {
+                continue;
+            }
             let tag = tag_around(&html, "data-cta-box");
             for class in ["min-h-40", "justify-center"] {
                 assert!(
@@ -1345,22 +1390,21 @@ mod tests {
         }
     }
 
-    /// The first paint's row has the loaded row's height (an Lg button's,
-    /// `h-13`), even with no CTA in it: the layout does not move when the
-    /// store has been read.
+    /// The first paint's row has the loaded CTA row's height (an Lg
+    /// button's, `h-13`): the layout does not move when the store has been
+    /// read. A state with no CTA has no row.
     #[test]
     fn the_cta_row_has_the_same_height_from_the_first_paint() {
         let rows: Vec<(HomeState, String)> = every_state()
             .into_iter()
-            .filter(|(state, _)| !matches!(state, HomeState::Broken(_)))
-            .map(|(state, left)| {
-                (
-                    state,
-                    tag_around(&en(state, left), "data-cta-row").to_owned(),
-                )
+            .filter_map(|(state, left)| {
+                let html = en(state, left);
+                html.contains("data-cta-row")
+                    .then(|| (state, tag_around(&html, "data-cta-row").to_owned()))
             })
             .collect();
-        assert_eq!(rows.len(), 7, "{rows:?}");
+        // The skeleton and the two states with a CTA.
+        assert_eq!(rows.len(), 4, "{rows:?}");
         for (state, row) in &rows {
             assert!(
                 row.split(['"', ' ']).any(|c| c == "min-h-13"),
@@ -1450,15 +1494,16 @@ mod tests {
     }
 
     #[test]
-    fn under_the_cta_row_come_the_strip_the_list_the_orphans_then_the_data_block() {
+    fn under_the_cta_row_come_the_strip_new_terms_the_list_the_orphans_then_the_data_block() {
         for state in started() {
             let html = with_progress(Language::En, state, None);
             let order = [
                 at(&html, "data-cta-row"),
                 at(&html, ">Daily<"),
+                at(&html, r#"aria-label="New terms""#),
                 at(&html, "data-term-list"),
                 at(&html, "Not in this deck"),
-                at(&html, "Your progress is on this device"),
+                at(&html, ">Export<"),
             ];
             assert!(order.is_sorted(), "{order:?}: {html}");
             let export = button_labelled(&html, "Export");
@@ -1515,7 +1560,7 @@ mod tests {
     #[test]
     fn the_empty_home_offers_the_import_and_no_list() {
         let html = en(HomeState::Empty, 50);
-        assert!(html.contains("Your progress is on this device"), "{html}");
+        assert!(!html.contains("Your progress is on this device"), "{html}");
         let import = button_labelled(&html, "Import");
         assert!(
             !import.contains("disabled"),
@@ -1555,7 +1600,6 @@ mod tests {
             for text in [
                 td_string!(locale, progress_terms),
                 td_string!(locale, orphans_heading),
-                td_string!(locale, data_notice),
                 td_string!(locale, export),
                 td_string!(locale, import),
             ] {

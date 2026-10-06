@@ -1,6 +1,6 @@
 # 007 The home tidied: New terms at the right, the data block bare, yellower buttons
 
-status: building · rank: 2 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-06) · after: [ui-lib 054]
+status: review · rank: 2 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-06) · after: [ui-lib 054]
 
 ## Summary
 The user, 2026-10-06: « new terme à droite. "Your progress is on this device / It is kept in this browser only…" tu peux le delete, et mettre les boutons à droite. Change la couleur des boutons, plus dans le jaune. »
@@ -9,6 +9,7 @@ Decided: 'New terms' always sits at the right (small), also when it is the only 
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
-| Define | done | the user's words |
+| Define | done | the user's words (four messages, folded in before the hand-back) |
+| Build | done | lane Sonnet: c560111 New terms as a + above the list in Accent, the CTA row Resume only; 590e803 the data block two Accent buttons at the right, three keys removed; 277 tests; clippy ssr + wasm, fmt, rustdoc, leptosfmt EXIT 0 |
 
 ## Retro

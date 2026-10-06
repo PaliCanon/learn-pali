@@ -14,7 +14,8 @@ use crate::catalogue::strings;
 use crate::store::{self, ImportError, export_name, validate_import};
 
 /// Where the progress lives, and how to move it: export, import (with its
-/// confirmation and its refusal), 'Not synced across devices yet'.
+/// confirmation and its refusal): two Accent buttons at the right, nothing
+/// else on view.
 #[component]
 pub(crate) fn DataBlock(
     /// What Export downloads; `None`: nothing to export yet.
@@ -26,20 +27,16 @@ pub(crate) fn DataBlock(
     /// Called with an imported state once confirmed.
     on_replace: Callback<State>,
 ) -> impl IntoView {
-    let t = strings();
     let dialog = Disclosed::new("pc-import", RwSignal::new(false));
     let pending = RwSignal::new(None::<State>);
     let refusal = RwSignal::new(None::<ImportError>);
     view! {
         <section class="flex flex-col gap-3">
-            <h2 class="font-medium text-heading">{move || td_string!(t.locale(), data_notice)}</h2>
-            <p class="text-sm text-muted">{move || td_string!(t.locale(), data_sentence)}</p>
-            <div class="flex flex-wrap gap-3">
+            <div class="flex flex-wrap justify-end gap-3">
                 <ExportButton state=export_state today=today />
                 <ImportPicker can_import=can_import dialog=dialog pending=pending refusal=refusal />
             </div>
             <ImportStatus error=refusal.into() />
-            <p class="text-sm text-muted">{move || td_string!(t.locale(), not_synced)}</p>
             <ImportDialog dialog=dialog pending=pending on_replace=on_replace />
         </section>
     }
@@ -62,7 +59,7 @@ fn ExportButton(
         }
     };
     view! {
-        <Button disabled=disabled on_click=export>
+        <Button variant=Variant::Accent disabled=disabled on_click=export>
             {move || td_string!(t.locale(), export)}
         </Button>
     }
@@ -96,7 +93,7 @@ fn ImportPicker(
         reset_picker(input);
     };
     view! {
-        <Button disabled=!can_import on_click=move |_| open_picker(input)>
+        <Button variant=Variant::Accent disabled=!can_import on_click=move |_| open_picker(input)>
             {move || td_string!(t.locale(), import)}
         </Button>
         <input
@@ -220,15 +217,9 @@ mod tests {
     }
 
     #[test]
-    fn the_data_block_says_where_the_progress_lives_and_offers_export_and_import() {
+    fn the_data_block_offers_export_and_import() {
         let html = block(Some(progress_fixture()), true, Language::En);
-        for text in [
-            "Your progress is on this device",
-            "It is kept in this browser only",
-            "Not synced across devices yet",
-            ">Export<",
-            ">Import<",
-        ] {
+        for text in [">Export<", ">Import<"] {
             assert!(html.contains(text), "{text}: {html}");
         }
         let input = tag_around(&html, r#"type="file""#);
@@ -266,14 +257,73 @@ mod tests {
         );
     }
 
+    /// The block is two buttons: no heading, no sentence, no 'not synced'
+    /// line (user, 2026-10-06).
     #[test]
-    fn the_data_blocks_notice_is_its_heading_with_no_your_data_label() {
+    fn the_data_block_has_no_heading_no_sentence_and_no_sync_line() {
+        for (language, gone) in [
+            (
+                Language::En,
+                [
+                    "Your progress is on this device",
+                    "kept in this browser",
+                    "Not synced",
+                ],
+            ),
+            (
+                Language::Fr,
+                [
+                    "Votre progression est sur cet appareil",
+                    "dans ce navigateur seulement",
+                    "Pas encore synchronisée",
+                ],
+            ),
+            (
+                Language::Vi,
+                [
+                    "nằm trên thiết bị này",
+                    "chỉ được lưu trong trình duyệt này",
+                    "Chưa đồng bộ",
+                ],
+            ),
+        ] {
+            let html = block(Some(progress_fixture()), true, language);
+            for text in gone {
+                assert!(!html.contains(text), "{language:?} {text}: {html}");
+            }
+            // The buttons' row is the block's first child: no heading above it.
+            assert!(
+                html.starts_with(
+                    r#"<section class="flex flex-col gap-3"><div class="flex flex-wrap justify-end gap-3">"#
+                ),
+                "{language:?}: {html}"
+            );
+        }
+    }
+
+    /// Export and Import sit at the right of their row, in Accent (gold
+    /// border and tint); the import dialog's own buttons keep their look.
+    #[test]
+    fn export_and_import_are_accent_buttons_at_the_right() {
         let html = block(Some(progress_fixture()), true, Language::En);
-        assert!(!html.contains("Your data"), "{html}");
-        let heading = tag_around(&html, "Your progress is on this device");
-        assert!(heading.starts_with("<h2"), "{heading}");
-        let html = block(Some(progress_fixture()), true, Language::Fr);
-        assert!(!html.contains("Vos données"), "{html}");
+        let row = tag_around(&html, "justify-end");
+        for class in ["flex", "flex-wrap", "justify-end", "gap-3"] {
+            assert!(row.split(['"', ' ']).any(|c| c == class), "{class}: {row}");
+        }
+        assert!(
+            position(&html, "justify-end") < position(&html, ">Export<"),
+            "{html}"
+        );
+        for label in ["Export", "Import"] {
+            let button = tag_around(&html, &format!(">{label}<"));
+            let classes: Vec<&str> = button.split(['"', ' ']).collect();
+            assert!(classes.contains(&"border-gold/40"), "{label}: {button}");
+            assert!(!classes.contains(&"border-line"), "{label}: {button}");
+        }
+        for label in ["Replace", "Cancel"] {
+            let button = tag_around(&html, &format!(">{label}<"));
+            assert!(!button.contains("border-gold/40"), "{label}: {button}");
+        }
     }
 
     #[test]
