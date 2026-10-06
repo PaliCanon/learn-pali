@@ -943,18 +943,27 @@ mod tests {
                 "{row}"
             );
             if let Some(cta) = cta {
-                assert!(at(row, cta) < at(row, ">Add new terms<"), "{cta}: {row}");
+                assert!(at(row, cta) < at(row, ">New terms<"), "{cta}: {row}");
             }
-            let add = tag_before(row, "button", ">Add new terms<");
+            let add = tag_before(row, "button", ">New terms<");
             for class in ["h-8", "ml-auto"] {
                 assert!(add.split(['"', ' ']).any(|c| c == class), "{class}: {add}");
             }
             assert!(!row.contains(r#"id="pc-new-terms""#), "{row}");
             assert!(
-                at(&html, r#"id="pc-new-terms""#) > at(&html, ">Add new terms<"),
+                at(&html, r#"id="pc-new-terms""#) > at(&html, ">New terms<"),
                 "{html}"
             );
         }
+    }
+
+    /// The button's label is 'New terms', not 'Add new terms' (user,
+    /// 2026-10-06).
+    #[test]
+    fn the_add_terms_button_reads_new_terms() {
+        let html = en(HomeState::Due(2), 10);
+        assert!(html.contains(">New terms<"), "{html}");
+        assert!(!html.contains(">Add new terms<"), "{html}");
     }
 
     /// The closed picker's empty region takes no gap in the column.
@@ -1036,7 +1045,7 @@ mod tests {
         );
         let row = element_at(&html, at(&html, "data-cta-row"));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
-        let add = tag_before(row, "button", ">Add new terms<");
+        let add = tag_before(row, "button", ">New terms<");
         let classes: Vec<&str> = add.split(['"', ' ']).collect();
         for absent in ["ml-auto", "h-8"] {
             assert!(!classes.contains(&absent), "{absent}: {add}");
@@ -1058,7 +1067,7 @@ mod tests {
         assert!(!html.contains("Start with 5"), "{html}");
         let row = element_at(&html, at(&html, "data-cta-row"));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
-        let add = tag_before(row, "button", ">Add new terms<");
+        let add = tag_before(row, "button", ">New terms<");
         assert!(!has_attr(&add, "disabled"), "{add}");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains(r#"aria-controls="pc-new-terms""#), "{add}");
@@ -1068,7 +1077,7 @@ mod tests {
         }
         assert!(classes.contains(&"h-11"), "the default size: {add}");
         assert!(
-            at(&html, r#"id="pc-new-terms""#) > at(&html, ">Add new terms<"),
+            at(&html, r#"id="pc-new-terms""#) > at(&html, ">New terms<"),
             "the picker under the row: {html}"
         );
         assert!(!html.contains("<ul"), "no strip: {html}");
@@ -1088,7 +1097,7 @@ mod tests {
             assert!(!html.contains("/review"), "{html}");
         }
         let html = en(HomeState::Due(12), 40);
-        let add = tag_before(&html, "button", "Add new terms");
+        let add = tag_before(&html, "button", "New terms");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains("aria-controls"), "{add}");
         assert!(!html.contains("radiogroup"), "closed: {html}");
@@ -1119,20 +1128,19 @@ mod tests {
             }
             .to_html()
         });
-        let add = tag_before(&html, "button", "Add new terms");
+        let add = tag_before(&html, "button", "New terms");
         assert!(add.contains(r#"aria-expanded="true""#), "{add}");
         assert!(html.contains(r#"role="radiogroup""#), "{html}");
         for label in ["+5", "+10", "Custom"] {
             assert!(html.contains(label), "{label}: {html}");
         }
-        assert!(!html.contains("New terms"), "no label, HC: {html}");
     }
 
     #[test]
     fn nothing_to_add_hides_the_new_terms_disclosure() {
         let html = en(HomeState::Due(3), 0);
         assert!(html.contains(">Resume<"), "{html}");
-        assert!(!html.contains("Add new terms"), "{html}");
+        assert!(!html.contains("New terms"), "{html}");
     }
 
     #[test]
@@ -1164,7 +1172,7 @@ mod tests {
         ] {
             assert!(!html.contains(absent), "{absent}: {html}");
         }
-        tag_before(&html, "button", ">Add new terms<");
+        tag_before(&html, "button", ">New terms<");
         let html = en(none, 0);
         let row = element_at(&html, at(&html, "data-cta-row"));
         assert!(!row.contains("<button"), "{row}");
@@ -1186,7 +1194,7 @@ mod tests {
         }
         for absent in [
             "Start with 5",
-            "Add new terms",
+            "New terms",
             "Add 5 new terms",
             "Review",
             "<ul",
@@ -1201,7 +1209,7 @@ mod tests {
         assert!(html.contains("saved by a newer version"), "{html}");
         assert!(html.contains("Download the raw copy"), "{html}");
         assert!(!html.contains("Start again"), "never overwritten: {html}");
-        assert!(!html.contains("Add new terms"), "{html}");
+        assert!(!html.contains("New terms"), "{html}");
     }
 
     #[test]
@@ -1262,18 +1270,14 @@ mod tests {
             (
                 Language::Fr,
                 [
-                    ">Ajouter des termes<",
+                    ">Nouveaux termes<",
                     "Revoir l’étape suivante",
                     "Recommencer",
                 ],
             ),
             (
                 Language::Vi,
-                [
-                    ">Thêm thuật ngữ mới<",
-                    "Ôn giai đoạn tiếp theo",
-                    "Bắt đầu lại",
-                ],
+                [">Thuật ngữ mới<", "Ôn giai đoạn tiếp theo", "Bắt đầu lại"],
             ),
         ] {
             let empty = view_of(language, HomeState::Empty, 50, [0; 6]);

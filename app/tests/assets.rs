@@ -87,7 +87,7 @@ fn the_readme_names_the_screens_the_store_key_and_the_embedded_deck() {
         "| `/` |",
         "filters the term list in place",
         "lost on reload",
-        "'Add new terms' and its picker",
+        "'New terms' and its picker",
         "`pc_learn`",
         "pc_learn-<YYYY-MM-DD>.json",
         "export",

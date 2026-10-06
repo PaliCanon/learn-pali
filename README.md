@@ -33,7 +33,7 @@ state file; the site keeps it in the browser's `localStorage`.
 
 | Route | What |
 | --- | --- |
-| `/` | The home, under the brand (the lotus and PaliLearn name the page): one row with the call to action of its state at the left (Resume, or Review the next stage) and 'Add new terms' small at the right; with no progress yet, or nothing to review, 'Add new terms' and its picker are the way in, alone at the left (+5, +10 or a custom number, then Add starts the session). Then the progress: the six stages (Daily to Yearly), compact, each a button that filters the term list in place (pressed again: every term; no URL, the choice is lost on reload), the list (about five rows, scrolling; a term opens its detail), the terms the deck does not know, and the data block: export, import. A progress this build cannot read is shown as a banner, never overwritten. |
+| `/` | The home, under the brand (the lotus and PaliLearn name the page): one row with the call to action of its state at the left (Resume, or Review the next stage) and 'New terms' small at the right; with no progress yet, or nothing to review, 'New terms' and its picker are the way in, alone at the left (+5, +10 or a custom number, then Add starts the session). Then the progress: the six stages (Daily to Yearly), compact, each a button that filters the term list in place (pressed again: every term; no URL, the choice is lost on reload), the list (about five rows, scrolling; a term opens its detail), the terms the deck does not know, and the data block: export, import. A progress this build cannot read is shown as a banner, never overwritten. |
 
 The review runs in place: a call to action swaps the home's content for a
 session (one card at a time: the facet, reveal, "Knew it" / "Didn't
