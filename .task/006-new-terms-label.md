@@ -1,6 +1,6 @@
 # 006 The button reads New terms
 
-status: review · rank: 1 · level: simple · type: fix · path: light · request: learn-pali (user, 2026-10-06: « juste new term devrait suffire, no add »)
+status: merged · rank: 1 · level: simple · type: fix · path: light · request: learn-pali (user, 2026-10-06: « juste new term devrait suffire, no add »)
 
 ## Summary
 The home's 'Add new terms' reads 'New terms' (fr 'Nouveaux termes', vi 'Thuật ngữ mới'); the picker's own 'Add' confirm stays. Rank 1: difficulty 1 (three strings), impact 1.
@@ -12,4 +12,8 @@ The home's 'Add new terms' reads 'New terms' (fr 'Nouveaux termes', vi 'Thuật 
 | Build | done | 343202d fix(locales): New terms / Nouveaux termes / Thuật ngữ mới; red first; 274 lib + 9 assets, clippy, fmt EXIT 0 |
 | Check | done | the user's own words are the spec; the orchestrator checks the served text after the merge |
 
+## Merge
+8ca4f50 (squash, 2026-10-06).
+
 ## Retro
+One line: three strings and their tests, red first; nothing beyond the slice.
