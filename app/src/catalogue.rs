@@ -266,12 +266,14 @@ mod tests {
     }
 
     /// The keys of the home (with its progress and data block) and the review.
-    const SCREEN_KEYS: [&str; 70] = [
+    const SCREEN_KEYS: [&str; 72] = [
         "home_title",
         "home_teach",
         "home_loading",
-        "cta_next_stage",
-        "cta_resume",
+        "cta_practice",
+        "cta_practice_label",
+        "cta_practice_ahead_label",
+        "practice_batch_label",
         "add_terms",
         "broken_invalid",
         "broken_newer",
@@ -321,7 +323,7 @@ mod tests {
         "detail_lapses",
         "detail_due",
         "next_review",
-        "cta_resume_label",
+        "summary_practice_done",
         "facet_meaning",
         "facet_recall",
         "facet_forms",

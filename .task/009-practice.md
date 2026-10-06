@@ -1,6 +1,6 @@
 # 009 Practice: study ahead without moving a stage
 
-status: building · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008, ui-lib 056]
+status: review · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008, ui-lib 056]
 
 ## Summary
 The orchestrator proposed, the user agreed (2026-10-06): « Oui ça peut être bien, et la practice prend de tous les decks ? »
@@ -15,6 +15,8 @@ Rank 4: difficulty 3 (a core session mode, its rule pair with the normal session
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
+| Build | done | lane Opus: fc3315a core Session::practice + nearest (practice changes nothing; rule pair tested), 7927da2 home: one Practice button, practice ahead with ui-lib's Slider (5 by default), 'Practice done'; 291 + 9 app tests, 107 + 5 core; clippy ssr/hydrate/native/core-wasm, rustdoc, fmt, leptosfmt, deny EXIT 0. Accepted: Reload during a practice starts a normal review; an empty stage leaves Practice doing nothing; the slider's max is all started terms; advance_possible left computed (follow-up) |
+| Capture | done | orchestrator, :3201 on the branch: nothing due → '▶ Practice', slider 1–5 at 5 ('Practice ahead, 5 terms', 3 after a drag), 'Next review: 10 October 2026', the '+'; a practice of 9 cards with the badge, Knew it and Didn't know mixed, ends 'Practice done'; the progress in localStorage byte-identical before and after; no console error; phone 390 no overflow |
 | Define | done | the proposal, the user's yes, then one Practice button and a slider (the user's words); after 008 (merged e1ac116) and ui-lib 056 (the slider) |
 
 ## Retro

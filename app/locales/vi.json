@@ -6,9 +6,9 @@
   "broken_newer": "Không đọc được tiến độ đã lưu: nó được lưu bởi một phiên bản mới hơn.",
   "broken_start_again": "Bắt đầu lại",
   "cancel": "Hủy",
-  "cta_next_stage": "Ôn giai đoạn tiếp theo",
-  "cta_resume": "Tiếp tục",
-  "cta_resume_label": "Tiếp tục, {{ count }} thẻ",
+  "cta_practice": "Luyện tập",
+  "cta_practice_ahead_label": "Luyện tập trước, {{ count }} thuật ngữ",
+  "cta_practice_label": "Luyện tập, {{ count }} thẻ cần ôn",
   "detail_due": "Lần ôn tới",
   "detail_lapses": "Số lần quên",
   "detail_stage": "Giai đoạn",
@@ -46,6 +46,7 @@
   "orphans_heading": "Không có trong bộ thẻ này",
   "pause_banner": "Tiến độ đã thay đổi ở một thẻ trình duyệt khác",
   "practice_badge": "Luyện tập · xem lại",
+  "practice_batch_label": "Số thuật ngữ luyện tập",
   "practice_note": "Câu trả lời này không thay đổi giai đoạn của bạn.",
   "progress_empty": "Chưa có thuật ngữ nào ở đây",
   "progress_terms": "Các thuật ngữ của bạn",
@@ -73,6 +74,7 @@
   "summary_moved_up_n": "{{ count }} thuật ngữ đã lên giai đoạn",
   "summary_next_due": "Lần ôn tiếp theo: {{ date }}",
   "summary_nothing_due": "Hôm nay không có gì cần ôn",
+  "summary_practice_done": "Đã luyện xong",
   "summary_title": "Xong buổi ôn",
   "unit_cards": "thẻ"
 }

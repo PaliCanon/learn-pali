@@ -6,9 +6,13 @@
 //! after hydration the page reads the store ([`Home`]) and shows one of the
 //! home's states (empty, due, nothing due, broken) in the same box.
 //!
-//! The CTA row holds the state's CTA at the left (a compact '▶ Resume · N',
-//! '▶ Review the next stage', or the next review's date) and, at the
-//! right, the '+' of 'New terms', which opens a dialog with the picker.
+//! The CTA row holds the state's CTA at the left and, at the right, the
+//! '+' of 'New terms', which opens a dialog with the picker. The CTA is one
+//! button, Practice: '▶ Practice · N' while cards are due (the review:
+//! stages move), else '▶ Practice' with the batch slider and the next
+//! review's date beside (a practice ahead of the nearest terms, of the
+//! strip's selected stage when one is: nothing in the progress changes).
+//! With no term started there is no Practice: the '+' is the way in.
 //! On `sm` and up the column sits in the middle of the page's height when
 //! it is shorter; a phone keeps it at the top.
 //!
@@ -34,13 +38,13 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::{
-    Button, Dialog, Disclosed, DisclosureButton, Size, Variant, language_signal,
+    Button, Dialog, Disclosed, DisclosureButton, Language, Size, Slider, Variant, language_signal,
 };
 
 use crate::catalogue::{Locale, strings};
 use crate::components::data_block::DataBlock;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
-use crate::components::session::{Phase, SessionView, start_phase};
+use crate::components::session::{Phase, SessionView, practice_phase, start_phase};
 use crate::components::term_list::{Orphans, StageStrip, StageTerms, next_review, orphan_rows};
 use crate::deck::deck;
 use crate::learn::home_state::{BrokenKind, HomeState, home_state, new_left};
@@ -59,6 +63,10 @@ const FRAME: &str = "flex flex-col gap-6";
 /// compact button's height (`h-8`), the skeleton's too, so the layout does
 /// not move when the store has been read.
 const CTA_ROW: &str = "flex flex-wrap items-center gap-3 min-h-8";
+
+/// How many terms a practice ahead asks at first (user, 2026-10-06:
+/// « pourquoi pas 5 de base »).
+const BATCH: u32 = 5;
 
 /// The stored progress the home lists, with the session's today (the
 /// export's file name).
@@ -94,10 +102,18 @@ impl Default for Model {
 /// What the learner can ask of the home; [`Home`] performs it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HomeAction {
-    /// Review what is due: a session on the stored progress, in place.
-    Resume,
-    /// Bring the next stage forward (nothing due).
-    AdvanceBatch,
+    /// Review what is due ('▶ Practice · N'): a session on the stored
+    /// progress, in place; stages move.
+    Review,
+    /// Practise ahead (nothing due): the `n` started terms with the nearest
+    /// next review, of stage `only` when given; nothing in the progress
+    /// changes.
+    PracticeAhead {
+        /// How many terms.
+        n: usize,
+        /// The strip's selected stage, if any.
+        only: Option<Stage>,
+    },
     /// Add this many new terms.
     AddNew(usize),
     /// Replace the unreadable progress by an empty one.
@@ -142,6 +158,7 @@ pub fn Home() -> impl IntoView {
                         mode=mode
                         model=model
                         stage=page.stage
+                        batch=page.batch
                         on_action=page.on_action
                         paused=page.paused
                         on_reload=page.start
@@ -170,6 +187,8 @@ struct Page {
     on_action: Callback<HomeAction>,
     /// The strip's filter: the page's state, not the URL (lost on reload).
     stage: RwSignal<Option<Stage>>,
+    /// The practice-ahead batch (the slider): the page's state.
+    batch: RwSignal<u32>,
 }
 
 impl Page {
@@ -204,15 +223,19 @@ impl Page {
                 paused.set(true);
             }
         });
-        let start = Callback::new(move |()| {
-            paused.set(false);
-            mode.set(Mode::Session(start_phase(&owner)));
-        });
+        let (start, ahead) = starters(owner, mode, paused, refresh);
         let home = Callback::new(move |()| {
             refresh();
             mode.set(Mode::Home);
         });
-        let on_action = Callback::new(move |action| perform(action, refresh, || start.run(())));
+        let on_action = Callback::new(move |action| {
+            perform(
+                action,
+                refresh,
+                || start.run(()),
+                |n, only| ahead.run((n, only)),
+            );
+        });
         Page {
             model,
             mode,
@@ -221,8 +244,31 @@ impl Page {
             home,
             on_action,
             stage: RwSignal::new(None),
+            batch: RwSignal::new(BATCH),
         }
     }
+}
+
+/// The two ways into a session in place: `start`, the review on the stored
+/// state; `ahead`, a practice ahead of `(n, only)`, or a fresh read of the
+/// store when there is nothing to practise.
+fn starters(
+    owner: Owner,
+    mode: RwSignal<Mode>,
+    paused: RwSignal<bool>,
+    refresh: impl Fn() + Send + Sync + 'static,
+) -> (Callback<()>, Callback<(usize, Option<Stage>)>) {
+    let open = move |phase| {
+        paused.set(false);
+        mode.set(Mode::Session(phase));
+    };
+    let review_owner = owner.clone();
+    let start = Callback::new(move |()| open(start_phase(&review_owner)));
+    let ahead = Callback::new(move |(n, only)| match practice_phase(&owner, n, only) {
+        Some(phase) => open(phase),
+        None => refresh(),
+    });
+    (start, ahead)
 }
 
 /// The page's column for `mode`: the brand, then the title (screen readers
@@ -235,6 +281,8 @@ fn HomeScreen(
     model: Model,
     /// The strip's filter.
     stage: RwSignal<Option<Stage>>,
+    /// The practice-ahead batch.
+    batch: RwSignal<u32>,
     /// The CTAs; [`Home`] performs them.
     on_action: Callback<HomeAction>,
     /// The session is paused (another tab changed the progress).
@@ -263,6 +311,7 @@ fn HomeScreen(
                     counts=counts
                     saved=saved
                     stage=stage
+                    batch=batch
                     on_action=on_action
                 />
             }
@@ -307,14 +356,14 @@ fn compute(load: &Load, deck: &Deck, browser: Date) -> Model {
     }
 }
 
-/// The state after `action` (new terms, or the next stage), to be saved;
-/// `None` when it moved nothing (or the day is before the state's last).
+/// The state after `action` (new terms), to be saved; `None` when it
+/// moved nothing (or the day is before the state's last).
 fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<State> {
     let mut session = Session::start(deck, state, today).ok()?;
     let moved = match action {
         HomeAction::AddNew(n) => session.request_new(n),
-        HomeAction::AdvanceBatch => session.advance(5),
-        HomeAction::Resume
+        HomeAction::Review
+        | HomeAction::PracticeAhead { .. }
         | HomeAction::StartAgain
         | HomeAction::DownloadRaw
         | HomeAction::Replace(_) => 0,
@@ -322,11 +371,18 @@ fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<S
     (moved > 0).then(|| session.snapshot())
 }
 
-/// Does what the learner asked: grow the progress, save it and start a
-/// session in place (`go`); or, when nothing moved, read the store again.
-fn perform(action: HomeAction, refresh: impl Fn(), go: impl Fn()) {
+/// Does what the learner asked: start the review in place (`go`), a
+/// practice ahead (`ahead`), or grow the progress, save it and start a
+/// session in place; or, when nothing moved, read the store again.
+fn perform(
+    action: HomeAction,
+    refresh: impl Fn(),
+    go: impl Fn(),
+    ahead: impl Fn(usize, Option<Stage>),
+) {
     match action {
-        HomeAction::Resume => go(),
+        HomeAction::Review => go(),
+        HomeAction::PracticeAhead { n, only } => ahead(n, only),
         HomeAction::StartAgain => {
             store::save(&State::empty());
             refresh();
@@ -336,7 +392,7 @@ fn perform(action: HomeAction, refresh: impl Fn(), go: impl Fn()) {
             store::save(&state);
             refresh();
         }
-        HomeAction::AddNew(_) | HomeAction::AdvanceBatch => {
+        HomeAction::AddNew(_) => {
             let state = match store::load() {
                 Load::Ok(state) => state,
                 Load::Empty => State::empty(),
@@ -373,10 +429,10 @@ pub fn HomeView(
     /// The home's state ([`crate::learn::home_state::home_state`]).
     state: HomeState,
     /// The deck's terms not started yet
-    /// ([`crate::learn::home_state::new_left`]): 0 disables the CTA when
-    /// nothing is due nor to advance (Q4).
+    /// ([`crate::learn::home_state::new_left`]): 0 hides the '+' (Q4).
     new_left: usize,
-    /// Started terms per stage, Day first (the strip); zeros by default.
+    /// Started terms per stage, Day first (the strip); their sum is the
+    /// practice slider's maximum, 0 offers no Practice. Zeros by default.
     #[prop(optional)]
     counts: [usize; 6],
     /// The stored progress (the term list, the orphans, the export); none:
@@ -384,15 +440,21 @@ pub fn HomeView(
     #[prop(default = None)]
     saved: Option<Saved>,
     /// The strip's filter: the list shows that stage only; `None`, every
-    /// term. A filter of its own when not given.
+    /// term. A filter of its own when not given. A practice ahead asks
+    /// that stage only.
     #[prop(optional)]
     stage: Option<RwSignal<Option<Stage>>>,
+    /// The practice-ahead batch (the slider's value). One of its own, at
+    /// 5, when not given.
+    #[prop(optional)]
+    batch: Option<RwSignal<u32>>,
     /// Called with what the learner chose; [`Home`] performs it. Nothing
     /// happens without it.
     #[prop(optional, into)]
     on_action: Option<Callback<HomeAction>>,
 ) -> impl IntoView {
     let stage = stage.unwrap_or_else(|| RwSignal::new(None));
+    let batch = batch.unwrap_or_else(|| RwSignal::new(BATCH));
     let act = Callback::new(move |action| {
         if let Some(on_action) = on_action {
             on_action.run(action);
@@ -407,15 +469,8 @@ pub fn HomeView(
             </DueBlock>
         }
         .into_any(),
-        HomeState::NothingDue { advance_possible } => {
-            let cta = if advance_possible {
-                Some(CtaSlot::NextStage)
-            } else {
-                saved
-                    .as_ref()
-                    .and_then(|saved| next_review(&saved.state))
-                    .map(CtaSlot::NextReview)
-            };
+        HomeState::NothingDue { .. } => {
+            let cta = nothing_due_cta(counts, saved.as_ref(), stage, batch);
             view! {
                 <NothingDueBlock cta=cta new_left=new_left act=act>
                     <HomeProgress counts=counts saved=saved stage=stage act=act />
@@ -424,6 +479,29 @@ pub fn HomeView(
             .into_any()
         }
         HomeState::Broken(kind) => view! { <BrokenBlock kind=kind act=act /> }.into_any(),
+    }
+}
+
+/// Nothing due: '▶ Practice' ahead when a term the deck knows is started,
+/// the next review's date beside; with none started, the date alone (or
+/// nothing).
+fn nothing_due_cta(
+    counts: [usize; 6],
+    saved: Option<&Saved>,
+    stage: RwSignal<Option<Stage>>,
+    batch: RwSignal<u32>,
+) -> Option<CtaSlot> {
+    let next = saved.and_then(|saved| next_review(&saved.state));
+    let started = counts.iter().sum();
+    if started > 0 {
+        Some(CtaSlot::Ahead(Ahead {
+            started,
+            batch,
+            stage,
+            next,
+        }))
+    } else {
+        next.map(CtaSlot::NextReview)
     }
 }
 
@@ -461,7 +539,7 @@ fn EmptyBlock(new_left: usize, act: Callback<HomeAction>) -> impl IntoView {
     }
 }
 
-/// Cards due: the CTA row ('▶ Resume · N' and the '+'), then `children`
+/// Cards due: the CTA row ('▶ Practice · N' and the '+'), then `children`
 /// (the progress).
 #[component]
 fn DueBlock(
@@ -472,15 +550,16 @@ fn DueBlock(
 ) -> impl IntoView {
     view! {
         <div data-home-state="due" class=FRAME>
-            <CtaBox cta=Some(CtaSlot::Resume(due)) new_left=new_left act=act />
+            <CtaBox cta=Some(CtaSlot::Practice(due)) new_left=new_left act=act />
             {children()}
         </div>
     }
 }
 
-/// Nothing due: the CTA row ('▶ Review the next stage' when advancing would
-/// move something, else the next review's date, else nothing, and the
-/// '+'); no row when it would be empty; then `children` (the progress).
+/// Nothing due: the CTA row ('▶ Practice' ahead with its slider and the
+/// next review's date when a term is started, else the date, else nothing,
+/// and the '+'); no row when it would be empty; then `children` (the
+/// progress).
 #[component]
 fn NothingDueBlock(
     cta: Option<CtaSlot>,
@@ -500,12 +579,48 @@ fn NothingDueBlock(
 /// headline; or a date, muted).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CtaSlot {
-    /// '▶ Resume · N', N the cards due.
-    Resume(usize),
-    /// '▶ Review the next stage' (nothing due, a stage to advance).
-    NextStage,
-    /// 'Next review: <date>' (nothing due nor to advance), muted.
+    /// '▶ Practice · N', N the cards due: the review.
+    Practice(usize),
+    /// '▶ Practice', its batch slider and the next review's date (nothing
+    /// due, terms started): a practice ahead.
+    Ahead(Ahead),
+    /// 'Next review: <date>' (nothing due, nothing started), muted.
     NextReview(Date),
+}
+
+/// What a practice ahead is built from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Ahead {
+    /// The started terms the deck knows: the slider's maximum.
+    started: usize,
+    /// How many terms to practise: the slider's value, the page's state.
+    batch: RwSignal<u32>,
+    /// The strip's selected stage: the practice asks that stage only.
+    stage: RwSignal<Option<Stage>>,
+    /// The next review's date, shown beside.
+    next: Option<Date>,
+}
+
+/// The terms a practice ahead asks for a slider at `batch`: at least 1, at
+/// most the `started` terms.
+fn batch_of(started: usize, batch: u32) -> usize {
+    usize::try_from(batch)
+        .unwrap_or(usize::MAX)
+        .clamp(1, started.max(1))
+}
+
+/// What a click on the CTA asks: the review while cards are due, else a
+/// practice ahead of the slider's batch in the selected stage; the date
+/// asks nothing.
+fn cta_action(cta: CtaSlot) -> Option<HomeAction> {
+    match cta {
+        CtaSlot::Practice(_) => Some(HomeAction::Review),
+        CtaSlot::Ahead(ahead) => Some(HomeAction::PracticeAhead {
+            n: batch_of(ahead.started, ahead.batch.get_untracked()),
+            only: ahead.stage.get_untracked(),
+        }),
+        CtaSlot::NextReview(_) => None,
+    }
 }
 
 /// The CTA box: `children` (the Empty state's sentence) above the CTA row,
@@ -572,23 +687,53 @@ fn Cta(
         let language = language.get();
         let locale = Locale::from(language);
         match cta {
-            CtaSlot::Resume(due) => {
-                let name = td_string!(locale, cta_resume_label, count = due).to_string();
-                let label = td_string!(locale, cta_resume);
-                view! { <CompactCta action=HomeAction::Resume label=label count=due name=name act=act /> }
-                .into_any()
+            CtaSlot::Practice(due) => {
+                let name = td_string!(locale, cta_practice_label, count = due).to_string();
+                let label = td_string!(locale, cta_practice);
+                view! { <CompactCta cta=cta label=label count=due name=name act=act /> }.into_any()
             }
-            CtaSlot::NextStage => {
-                let label = td_string!(locale, cta_next_stage);
-                view! { <CompactCta action=HomeAction::AdvanceBatch label=label act=act /> }
-                    .into_any()
-            }
-            CtaSlot::NextReview(date) => {
-                let date = date_words(language, date);
-                view! { <p class="text-muted">{td!(locale, next_review, date = date)}</p> }
-                    .into_any()
-            }
+            CtaSlot::Ahead(ahead) => view! { <PracticeAhead ahead=ahead act=act /> }.into_any(),
+            CtaSlot::NextReview(date) => next_review_line(language, date),
         }
+    }
+}
+
+/// 'Next review: <date>', muted.
+fn next_review_line(language: Language, date: Date) -> AnyView {
+    let locale = Locale::from(language);
+    let date = date_words(language, date);
+    view! { <p class="text-muted">{td!(locale, next_review, date = date)}</p> }.into_any()
+}
+
+/// Nothing due: '▶ Practice', named 'Practice ahead, N terms' (N follows
+/// the slider), then ui-lib's `Slider` (1 to the started terms), then the
+/// next review's date.
+#[component]
+fn PracticeAhead(
+    /// The batch, the stage, the started terms, the date.
+    ahead: Ahead,
+    /// Performs the practice.
+    act: Callback<HomeAction>,
+) -> impl IntoView {
+    let language = language_signal();
+    let button = move || {
+        let locale = Locale::from(language.get());
+        let count = batch_of(ahead.started, ahead.batch.get());
+        let name = td_string!(locale, cta_practice_ahead_label, count = count).to_string();
+        let label = td_string!(locale, cta_practice);
+        view! { <CompactCta cta=CtaSlot::Ahead(ahead) label=label name=name act=act /> }
+    };
+    view! {
+        {button}
+        <Slider
+            value=ahead.batch
+            min=1
+            max=u32::try_from(ahead.started).unwrap_or(u32::MAX)
+            label=Signal::derive(move || {
+                td_string!(Locale::from(language.get()), practice_batch_label).to_owned()
+            })
+        />
+        {move || ahead.next.map(|date| next_review_line(language.get(), date))}
     }
 }
 
@@ -596,8 +741,8 @@ fn Cta(
 /// '· count'; named `name` when given (the ▶ and the dot are not read).
 #[component]
 fn CompactCta(
-    /// What it asks of the home.
-    action: HomeAction,
+    /// The slot it stands for: what a click asks ([`cta_action`]).
+    cta: CtaSlot,
     /// Its label.
     label: &'static str,
     /// A count shown after the label.
@@ -609,7 +754,11 @@ fn CompactCta(
     /// Performs it.
     act: Callback<HomeAction>,
 ) -> impl IntoView {
-    let on_click = move |_| act.run(action.clone());
+    let on_click = move |_| {
+        if let Some(action) = cta_action(cta) {
+            act.run(action);
+        }
+    };
     let body = move || {
         view! {
             <span aria-hidden="true">"▶"</span>
@@ -882,6 +1031,15 @@ mod tests {
         view_of(Language::En, state, new_left, [0; 6])
     }
 
+    /// Started terms per stage: 21 in all.
+    const STARTED: [usize; 6] = [6, 5, 4, 3, 2, 1];
+
+    /// Nothing due (whether `Session::advance` could move a term no longer
+    /// matters to the home).
+    const NOTHING_DUE: HomeState = HomeState::NothingDue {
+        advance_possible: false,
+    };
+
     /// The `<tag …>` open tag just before the first `text`.
     fn tag_before(html: &str, tag: &str, text: &str) -> String {
         let at = html
@@ -1020,16 +1178,9 @@ mod tests {
     /// right (user, 2026-10-06: « passe le bouton + au niveau du resume »).
     #[test]
     fn the_cta_row_holds_the_cta_at_the_left_and_the_plus_at_the_right() {
-        for (state, cta) in [
-            (HomeState::Due(12), ">Resume<"),
-            (
-                HomeState::NothingDue {
-                    advance_possible: true,
-                },
-                "Review the next stage",
-            ),
-        ] {
-            let html = en(state, 10);
+        for state in [HomeState::Due(12), NOTHING_DUE] {
+            let cta = ">Practice<";
+            let html = view_of(Language::En, state, 10, STARTED);
             let row = element_at(&html, at(&html, "data-cta-row"));
             assert!(row.contains("flex flex-wrap items-center gap-3"), "{row}");
             assert_eq!(row.matches("<button").count(), 2, "{row}");
@@ -1256,14 +1407,16 @@ mod tests {
         &html[start..at + html[at..].find("</button>").expect(html)]
     }
 
-    /// Due cards offer a compact Resume (user, 2026-10-06): Primary, Sm (the
-    /// '+' height), '▶ Resume · N', named 'Resume, N cards'; the session
-    /// starts in place.
+    /// Due cards offer one Practice (user, 2026-10-06: « on resume s'il
+    /// reste des cards, sinon practice »): Primary, Sm (the '+' height),
+    /// '▶ Practice · N', named 'Practice, N cards due'; no slider (the due
+    /// cards are the batch).
     #[test]
-    fn cards_due_offer_a_compact_resume_with_the_count() {
+    fn cards_due_offer_practice_with_the_count_and_no_slider() {
         for n in [1, 12] {
-            let html = en(HomeState::Due(n), 40);
-            let resume = button_with(&html, ">Resume<");
+            let html = view_of(Language::En, HomeState::Due(n), 40, STARTED);
+            assert!(!html.contains(r#"type="range""#), "{html}");
+            let resume = button_with(&html, ">Practice<");
             let tag = &resume[..=resume.find('>').expect(resume)];
             assert!(!has_attr(tag, "disabled"), "{tag}");
             let classes: Vec<&str> = tag.split(['"', ' ']).collect();
@@ -1272,12 +1425,12 @@ mod tests {
             }
             assert!(!classes.contains(&"h-13"), "compact: {tag}");
             assert!(
-                tag.contains(&format!(r#"aria-label="Resume, {n} cards""#)),
+                tag.contains(&format!(r#"aria-label="Practice, {n} cards due""#)),
                 "{tag}"
             );
             let order = [
                 at(resume, r#"aria-hidden="true">▶<"#),
-                at(resume, ">Resume<"),
+                at(resume, ">Practice<"),
                 at(resume, ">·<"),
                 at(resume, &format!(">{n}<")),
             ];
@@ -1291,10 +1444,14 @@ mod tests {
     }
 
     #[test]
-    fn resume_reads_in_french_and_vietnamese() {
+    fn practice_reads_in_french_and_vietnamese() {
         for (language, resume, name) in [
-            (Language::Fr, "Reprendre", "Reprendre, 3 cartes"),
-            (Language::Vi, "Tiếp tục", "Tiếp tục, 3 thẻ"),
+            (
+                Language::Fr,
+                "S’entraîner",
+                "S’entraîner, 3 cartes à revoir",
+            ),
+            (Language::Vi, "Luyện tập", "Luyện tập, 3 thẻ cần ôn"),
         ] {
             let html = view_of(language, HomeState::Due(3), 10, [0; 6]);
             let button = button_with(&html, &format!(">{resume}<"));
@@ -1306,47 +1463,173 @@ mod tests {
         }
     }
 
-    /// 'Review the next stage' takes the same compact form.
+    /// Nothing due, terms started: '▶ Practice' (compact, no count), named
+    /// 'Practice ahead, 5 terms', then ui-lib's `Slider` at 5 (1 to the
+    /// started terms, step 1, its value shown).
     #[test]
-    fn review_the_next_stage_is_compact_too() {
-        let html = en(
-            HomeState::NothingDue {
-                advance_possible: true,
-            },
-            10,
-        );
-        let button = button_with(&html, "Review the next stage");
+    fn nothing_due_offers_practice_ahead_with_the_slider_at_five() {
+        let html = view_of(Language::En, NOTHING_DUE, 10, STARTED);
+        let button = button_with(&html, ">Practice<");
         let tag = &button[..=button.find('>').expect(button)];
         assert!(tag.split(['"', ' ']).any(|c| c == "h-8"), "{tag}");
         assert!(tag.contains("bg-primary"), "{tag}");
         assert!(
-            at(button, r#"aria-hidden="true">▶<"#) < at(button, "Review the next stage"),
-            "{button}"
+            tag.contains(r#"aria-label="Practice ahead, 5 terms""#),
+            "{tag}"
         );
-        assert!(!html.contains("Next review"), "{html}");
+        assert!(!button.contains(">·<"), "no count: {button}");
+        let row = element_at(&html, at(&html, "data-cta-row"));
+        let slider = tag_before(row, "input", r#"type="range""#);
+        for attr in [
+            r#"type="range""#,
+            r#"min="1""#,
+            r#"max="21""#,
+            r#"step="1""#,
+            r#"value="5""#,
+            r#"aria-label="Terms to practise""#,
+        ] {
+            assert!(slider.contains(attr), "{attr}: {slider}");
+        }
+        assert!(
+            row.contains(r#"<span class="tabular-nums text-sm text-heading">5</span>"#),
+            "ui-lib's Slider shows its value: {row}"
+        );
+        assert!(
+            at(row, ">Practice<") < at(row, r#"type="range""#)
+                && at(row, r#"type="range""#) < at(row, r#"aria-label="New terms""#),
+            "Practice, the slider, then the '+': {row}"
+        );
     }
 
-    /// Nothing due and nothing to advance: 'Next review: <date>', muted,
-    /// where Resume would be, the earliest due of the started terms.
+    /// Fewer started terms than the batch: the name counts what will be
+    /// asked, and the slider stops at the started terms.
     #[test]
-    fn nothing_due_shows_the_next_review_date_where_resume_would_be() {
-        let none = HomeState::NothingDue {
-            advance_possible: false,
-        };
+    fn the_batch_never_names_more_terms_than_are_started() {
+        let html = view_of(Language::En, NOTHING_DUE, 10, [2, 1, 0, 0, 0, 0]);
+        let button = button_with(&html, ">Practice<");
+        assert!(
+            button.contains(r#"aria-label="Practice ahead, 3 terms""#),
+            "{button}"
+        );
+        let slider = tag_before(&html, "input", r#"type="range""#);
+        assert!(slider.contains(r#"max="3""#), "{slider}");
+    }
+
+    #[test]
+    fn practice_ahead_reads_in_french_and_vietnamese() {
+        for (language, label, name) in [
+            (
+                Language::Fr,
+                ">S’entraîner<",
+                "S’entraîner en avance, 5 termes",
+            ),
+            (Language::Vi, ">Luyện tập<", "Luyện tập trước, 5 thuật ngữ"),
+        ] {
+            let html = view_of(language, NOTHING_DUE, 10, STARTED);
+            let button = button_with(&html, label);
+            assert!(
+                button.contains(&format!(r#"aria-label="{name}""#)),
+                "{button}"
+            );
+        }
+    }
+
+    /// Nothing due: 'Next review: <date>', muted, stays beside Practice,
+    /// before the '+'.
+    #[test]
+    fn nothing_due_keeps_the_next_review_date_beside_practice() {
         for (language, text) in [
             (Language::En, "Next review: 5 October 2026"),
             (Language::Fr, "Prochaine révision : 5 octobre 2026"),
             (Language::Vi, "Lần ôn tới: ngày 5 tháng 10 năm 2026"),
         ] {
-            let html = with_progress(language, none, None);
+            let html = with_progress(language, NOTHING_DUE, None);
             let row = element_at(&html, at(&html, "data-cta-row"));
             let p = tag_before(row, "p", text);
             assert!(p.contains(r#"class="text-muted""#), "{p}");
-            assert!(
-                at(row, text) < at(row, "<button"),
-                "the date, then the '+': {row}"
+            let order = [
+                at(row, "bg-primary"),
+                at(row, r#"type="range""#),
+                at(row, text),
+                at(row, r#"aria-controls="pc-new-terms""#),
+            ];
+            assert!(order.is_sorted(), "Practice, slider, date, '+': {row}");
+        }
+    }
+
+    /// The CTA's click: due cards run the normal review; nothing due runs a
+    /// practice ahead of the slider's batch (at most the started terms),
+    /// limited to the stage selected in the strip.
+    #[test]
+    fn the_cta_asks_a_review_when_due_and_a_practice_ahead_otherwise() {
+        assert_eq!(cta_action(CtaSlot::Practice(3)), Some(HomeAction::Review));
+        Owner::new().with(|| {
+            let (batch, stage) = (RwSignal::new(7), RwSignal::new(Some(Stage::Week)));
+            let ahead = |started| {
+                CtaSlot::Ahead(Ahead {
+                    started,
+                    batch,
+                    stage,
+                    next: None,
+                })
+            };
+            assert_eq!(
+                cta_action(ahead(21)),
+                Some(HomeAction::PracticeAhead {
+                    n: 7,
+                    only: Some(Stage::Week)
+                })
             );
-            assert!(!row.contains("bg-primary"), "no CTA: {row}");
+            stage.set(None);
+            assert_eq!(
+                cta_action(ahead(4)),
+                Some(HomeAction::PracticeAhead { n: 4, only: None }),
+                "the batch stops at the started terms"
+            );
+        });
+        assert_eq!(cta_action(CtaSlot::NextReview(today())), None);
+    }
+
+    /// `perform`: a review starts the normal session, a practice ahead
+    /// starts the practice with its batch and stage, neither the other.
+    #[test]
+    fn perform_runs_the_review_or_the_practice_ahead() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(Vec::new());
+        let run = |action| {
+            perform(
+                action,
+                || calls.borrow_mut().push("refresh".to_owned()),
+                || calls.borrow_mut().push("review".to_owned()),
+                |n, only| calls.borrow_mut().push(format!("ahead {n} {only:?}")),
+            );
+        };
+        run(HomeAction::Review);
+        run(HomeAction::PracticeAhead {
+            n: 5,
+            only: Some(Stage::Month),
+        });
+        assert_eq!(calls.into_inner(), ["review", "ahead 5 Some(Month)"]);
+    }
+
+    /// One Practice replaces Resume and 'Review the next stage' in every
+    /// state and language.
+    #[test]
+    fn no_resume_and_no_next_stage_anywhere() {
+        for language in [Language::En, Language::Fr, Language::Vi] {
+            for (state, left) in every_state() {
+                let html = view_of(language, state, left, STARTED);
+                for gone in [
+                    "Resume",
+                    "Reprendre",
+                    "Tiếp tục",
+                    "Review the next stage",
+                    "Revoir l’étape suivante",
+                    "Ôn giai đoạn tiếp theo",
+                ] {
+                    assert!(!html.contains(gone), "{state:?} {gone}: {html}");
+                }
+            }
         }
     }
 
@@ -1375,35 +1658,21 @@ mod tests {
     #[test]
     fn nothing_to_add_hides_the_new_terms_disclosure() {
         let html = en(HomeState::Due(3), 0);
-        assert!(html.contains(">Resume<"), "{html}");
+        assert!(html.contains(">Practice<"), "{html}");
         assert!(!html.contains("New terms"), "{html}");
     }
 
+    /// No term started (only terms the deck does not know): no Practice
+    /// (the '+' is the way in), 'New terms' alone; with the deck exhausted
+    /// too, nothing to press.
     #[test]
-    fn nothing_due_with_a_stage_to_advance_offers_the_next_stage() {
-        let html = en(
-            HomeState::NothingDue {
-                advance_possible: true,
-            },
-            0,
-        );
-        assert!(!html.contains("Nothing due today"), "{html}");
-        let button = tag_before(&html, "button", "Review the next stage");
-        assert!(!has_attr(&button, "disabled"), "{button}");
-        assert!(!html.contains(r#"href="/review""#), "{html}");
-    }
-
-    /// HC: nothing due and nothing to advance: no CTA, 'Add new terms'
-    /// alone; with the deck exhausted too, nothing to press.
-    #[test]
-    fn nothing_due_and_nothing_to_advance_offers_no_cta() {
-        let none = HomeState::NothingDue {
-            advance_possible: false,
-        };
+    fn nothing_started_offers_no_practice() {
+        let none = NOTHING_DUE;
         let html = en(none, 5);
         for absent in [
             "Add 5 new terms",
-            "Review the next stage",
+            "Practice",
+            r#"type="range""#,
             "All terms started",
         ] {
             assert!(!html.contains(absent), "{absent}: {html}");
@@ -1509,8 +1778,8 @@ mod tests {
         ] {
             assert!(html.contains(&format!(">{label}<")), "{label}: {html}");
         }
-        assert!(!html.contains("cartes à revoir"), "{html}");
-        assert!(html.contains(">Reprendre<"), "{html}");
+        assert!(!html.contains("cartes à revoir<"), "{html}");
+        assert!(html.contains(">S’entraîner<"), "{html}");
     }
 
     #[test]
@@ -1520,7 +1789,7 @@ mod tests {
                 Language::Fr,
                 [
                     r#"aria-label="Nouveaux termes""#,
-                    "Revoir l’étape suivante",
+                    ">S’entraîner<",
                     "Recommencer",
                 ],
             ),
@@ -1528,7 +1797,7 @@ mod tests {
                 Language::Vi,
                 [
                     r#"aria-label="Thuật ngữ mới""#,
-                    "Ôn giai đoạn tiếp theo",
+                    ">Luyện tập<",
                     "Bắt đầu lại",
                 ],
             ),
@@ -1538,14 +1807,7 @@ mod tests {
             for gone in ["Commencer avec 5", "Bắt đầu với 5"] {
                 assert!(!empty.contains(gone), "{gone}: {empty}");
             }
-            let none = view_of(
-                language,
-                HomeState::NothingDue {
-                    advance_possible: true,
-                },
-                0,
-                [0; 6],
-            );
+            let none = view_of(language, NOTHING_DUE, 0, STARTED);
             assert!(none.contains(want[1]), "{none}");
             let broken = view_of(language, HomeState::Broken(BrokenKind::Invalid), 0, [0; 6]);
             assert!(broken.contains(want[2]), "{broken}");
@@ -1614,8 +1876,9 @@ mod tests {
                     .then(|| (state, tag_around(&html, "data-cta-row").to_owned()))
             })
             .collect();
-        // Every state but the broken ones and the one with nothing to do.
-        assert_eq!(rows.len(), 6, "{rows:?}");
+        // Every state but the broken ones and the two with nothing to do
+        // (nothing started, nothing left to add).
+        assert_eq!(rows.len(), 5, "{rows:?}");
         for (state, row) in &rows {
             let classes: Vec<&str> = row.split(['"', ' ']).collect();
             assert!(classes.contains(&"min-h-8"), "{state:?}: {row}");
@@ -1766,7 +2029,7 @@ mod tests {
             !html.contains("/review"),
             "the review runs in place: {html}"
         );
-        assert_eq!(html.matches(">Resume<").count(), 1, "{html}");
+        assert_eq!(html.matches(">Practice<").count(), 1, "{html}");
         assert!(!html.contains("Your progress<"), "no progress link: {html}");
     }
 
@@ -1860,6 +2123,7 @@ mod tests {
                         mode=mode
                         model=model
                         stage=RwSignal::new(None)
+                        batch=RwSignal::new(5)
                         on_action=Callback::new(|_| ())
                         paused=Signal::stored(false)
                         on_reload=none
@@ -1989,33 +2253,6 @@ mod tests {
         let all = grown(HomeAction::AddNew(60), State::empty(), deck(), today()).expect("all");
         assert_eq!(all.progress.len(), 50);
         assert_eq!(grown(HomeAction::AddNew(5), all, deck(), today()), None);
-    }
-
-    #[test]
-    fn advancing_brings_the_long_terms_forward() {
-        let progress = deck()
-            .terms
-            .iter()
-            .map(|term| entry(&term.id.0, Stage::Month, today() + 20))
-            .collect();
-        let state = grown(
-            HomeAction::AdvanceBatch,
-            state_of(progress),
-            deck(),
-            today(),
-        )
-        .expect("five brought forward");
-        let due = state.progress.iter().filter(|p| p.due <= today()).count();
-        assert_eq!(due, 5);
-    }
-
-    #[test]
-    fn advancing_with_terms_left_to_start_moves_nothing() {
-        let state = state_of(vec![entry("kho", Stage::Month, today() + 20)]);
-        assert_eq!(
-            grown(HomeAction::AdvanceBatch, state, deck(), today()),
-            None
-        );
     }
 
     #[test]

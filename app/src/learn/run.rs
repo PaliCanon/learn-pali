@@ -39,6 +39,9 @@ pub(crate) struct ReviewRun {
     /// Practice questions queued by a Fail and not answered yet (the
     /// session keeps them private): the header counts them (Q1).
     practice_pending: usize,
+    /// A practice ahead ([`Session::practice`]): every question is
+    /// practice, nothing in the progress changes.
+    practice: bool,
 }
 
 impl ReviewRun {
@@ -53,7 +56,23 @@ impl ReviewRun {
             counter: 0,
             done: 0,
             practice_pending: 0,
+            practice: false,
         }
+    }
+
+    /// A run over a practice ahead (`session` from [`Session::practice`]):
+    /// its header counts every question it asks, its end says 'Practice
+    /// done'.
+    pub(crate) fn practice(session: Session<'static>, before: State) -> ReviewRun {
+        ReviewRun {
+            practice: true,
+            ..ReviewRun::new(session, before)
+        }
+    }
+
+    /// True for a practice ahead ([`ReviewRun::practice`]).
+    pub(crate) fn is_practice(&self) -> bool {
+        self.practice
     }
 
     /// The question shown, `None` once the session is over (or when
@@ -145,8 +164,11 @@ impl ReviewRun {
     /// The header's total (Q1): done + the snapshot's due cards + the
     /// practice still pending, recomputed after each answer (a Fail drops
     /// the term's other queued cards, so the queue at start would
-    /// overcount).
+    /// overcount). A practice ahead counts done + what is left to ask.
     pub(crate) fn total(&self) -> usize {
+        if self.practice {
+            return self.done + self.session.remaining();
+        }
         let snapshot = self.session.snapshot();
         self.done + due_cards(deck(), &snapshot, self.session.today()) + self.practice_pending
     }

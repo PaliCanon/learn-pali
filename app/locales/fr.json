@@ -6,9 +6,9 @@
   "broken_newer": "Votre progression enregistrée n’a pas pu être lue : elle a été enregistrée par une version plus récente.",
   "broken_start_again": "Recommencer",
   "cancel": "Annuler",
-  "cta_next_stage": "Revoir l’étape suivante",
-  "cta_resume": "Reprendre",
-  "cta_resume_label": "Reprendre, {{ count }} cartes",
+  "cta_practice": "S’entraîner",
+  "cta_practice_ahead_label": "S’entraîner en avance, {{ count }} termes",
+  "cta_practice_label": "S’entraîner, {{ count }} cartes à revoir",
   "detail_due": "Prochaine révision",
   "detail_lapses": "Oublis",
   "detail_stage": "Étape",
@@ -46,6 +46,7 @@
   "orphans_heading": "Absents de ce paquet",
   "pause_banner": "La progression a changé dans un autre onglet",
   "practice_badge": "Entraînement · à revoir",
+  "practice_batch_label": "Termes à pratiquer",
   "practice_note": "Cette réponse ne change pas votre étape.",
   "progress_empty": "Aucun terme ici pour l’instant",
   "progress_terms": "Vos termes",
@@ -73,6 +74,7 @@
   "summary_moved_up_n": "{{ count }} termes ont avancé",
   "summary_next_due": "Prochaine révision le {{ date }}",
   "summary_nothing_due": "Rien à revoir aujourd’hui",
+  "summary_practice_done": "Entraînement terminé",
   "summary_title": "Séance terminée",
   "unit_cards": "cartes"
 }

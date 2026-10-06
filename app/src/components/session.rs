@@ -1,7 +1,9 @@
 //! A review session, shown in place of the home's content (one page, no
 //! route): [`start_phase`] starts one on the stored state, synchronously,
-//! and [`SessionView`] shows it: the session header, the card, the
-//! grades, the summary, the pause when another tab changed the progress.
+//! [`practice_phase`] a practice ahead (every question practice, nothing in
+//! the progress changes), and [`SessionView`] shows it: the session
+//! header, the card, the grades, the summary, the pause when another tab
+//! changed the progress.
 //! Every way out (Stop, 'Back home') is a button that calls `on_home`: the
 //! home shows its own content again and reads the store anew.
 //!
@@ -23,10 +25,12 @@
 //! no-ops on the server, covered by the orchestrator's browser probe, not
 //! by a native test.
 
+use learn_core::date::Date;
 use learn_core::deck::Blank;
 use learn_core::facet::Facet;
 use learn_core::progress::State;
-use learn_core::session::{Answer, Session};
+use learn_core::session::{Answer, Session, nearest};
+use learn_core::stage::Stage;
 use leptos::ev::KeyboardEvent;
 use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
@@ -91,6 +95,40 @@ fn begin(owner: &Owner, state: State) -> Phase {
         }
         Err(_) => Phase::Broken(BrokenKind::Invalid),
     }
+}
+
+/// Reads the store and starts a practice ahead of `n` terms (of stage
+/// `only` when given) on it ([`practice_run`]); `None` when there is
+/// nothing to practise (nothing stored, no started term in the batch).
+pub(crate) fn practice_phase(owner: &Owner, n: usize, only: Option<Stage>) -> Option<Phase> {
+    match load() {
+        Load::Ok(state) => {
+            let today = session_today(browser_today(), &state);
+            let run = practice_run(state, today, n, only)?;
+            Some(Phase::Running(owner.with(|| RwSignal::new(run))))
+        }
+        Load::Empty => None,
+        Load::Invalid { .. } => Some(Phase::Broken(BrokenKind::Invalid)),
+        Load::NewerVersion { .. } => Some(Phase::Broken(BrokenKind::NewerVersion)),
+    }
+}
+
+/// A practice ahead on `state`: the `n` started terms with the nearest
+/// next review ([`nearest`]), of stage `only` when given, every facet of
+/// each asked as practice ([`Session::practice`]); `None` when no term is
+/// picked.
+pub(crate) fn practice_run(
+    state: State,
+    today: Date,
+    n: usize,
+    only: Option<Stage>,
+) -> Option<ReviewRun> {
+    let terms = nearest(&state, deck(), only, n);
+    if terms.is_empty() {
+        return None;
+    }
+    let session = Session::practice(deck(), &state, today, &terms);
+    Some(ReviewRun::practice(session, state))
 }
 
 /// The stored progress cannot be used: the sentence and the way home.
@@ -662,7 +700,8 @@ fn details_view(card: Card, locale: Locale) -> impl IntoView {
 }
 
 /// The end: the summary of a session, or 'Nothing due today' when none
-/// started (Q6), then the way home and the new-terms control.
+/// started (Q6), then the way home and the new-terms control; for a
+/// practice ahead, [`practice_done`].
 #[component]
 fn Finished(
     /// The session, over.
@@ -679,6 +718,9 @@ fn Finished(
     move || {
         let language = language.get();
         let locale = Locale::from(language);
+        if run.with_untracked(ReviewRun::is_practice) {
+            return practice_done(locale, on_home);
+        }
         let (nothing, summary, new_left) =
             run.with_untracked(|run| (run.done() == 0, run.summary(), run.new_left()));
         let heading = if nothing {
@@ -695,7 +737,24 @@ fn Finished(
                 </Button> <NewTerms on_add=add new_left=new_left />
             </div>
         }
+        .into_any()
     }
+}
+
+/// The end of a practice ahead: 'Practice done' and 'Back home'; nothing
+/// moved, so no summary lines and no new terms.
+fn practice_done(locale: Locale, on_home: Callback<()>) -> AnyView {
+    view! {
+        <div class="flex flex-col items-start gap-6">
+            <h2 class="font-serif text-xl text-heading">
+                {td_string!(locale, summary_practice_done)}
+            </h2>
+            <Button variant=Variant::Primary size=Size::Lg on_click=move |_| on_home.run(())>
+                {td_string!(locale, back_home)}
+            </Button>
+        </div>
+    }
+    .into_any()
 }
 
 /// 'Session done', the terms that moved up and those that start again
@@ -1258,6 +1317,112 @@ pub(crate) mod tests {
         ] {
             let text = text_of(&render_with(language, nothing_due(), false));
             assert!(text.contains(said), "{language:?}: {text}");
+        }
+    }
+
+    // ---- practice ahead ----
+
+    /// Three started terms, nothing due: `kho` and `evaṃ 1` in Week,
+    /// `hoti 1` in Month; `last_today` already today.
+    fn ahead_state() -> State {
+        let mut state = State::empty();
+        for (term, stage, days) in [
+            ("hoti 1", Stage::Month, 4),
+            ("evaṃ 1", Stage::Week, 6),
+            ("kho", Stage::Week, 3),
+        ] {
+            let mut entry = Progress::new(TermId(term.to_string()), today() + days);
+            entry.stage = stage;
+            state.progress.push(entry);
+        }
+        state.last_today = Some(today());
+        state
+    }
+
+    /// Grades every question with `answer`: what was asked, `(term,
+    /// practice)`, and every state saved.
+    fn drain(run: &mut ReviewRun, answer: Answer) -> (Vec<(String, bool)>, Vec<State>) {
+        let (mut asked, mut saved) = (Vec::new(), Vec::new());
+        while let Some(question) = run.current().cloned() {
+            asked.push((question.term.0.clone(), question.practice));
+            run.grade(answer, |state| saved.push(state.clone()));
+        }
+        (asked, saved)
+    }
+
+    #[test]
+    fn practice_ahead_asks_the_nearest_terms_of_the_stage_all_as_practice() {
+        let state = ahead_state();
+        for answer in [Answer::Pass, Answer::Fail] {
+            let mut run =
+                practice_run(state.clone(), today(), 5, Some(Stage::Week)).expect("a run");
+            let (asked, saved) = drain(&mut run, answer);
+            let mut terms: Vec<&str> = asked.iter().map(|(term, _)| term.as_str()).collect();
+            terms.dedup();
+            assert_eq!(terms, ["kho", "evaṃ 1"], "Week only, nearest first");
+            assert!(asked.iter().all(|(_, practice)| *practice), "{asked:?}");
+            assert!(
+                saved.iter().all(|saved| *saved == state),
+                "{answer:?}: the progress never changes"
+            );
+        }
+    }
+
+    #[test]
+    fn practice_ahead_takes_the_batch_and_every_stage_when_none_is_selected() {
+        let mut run = practice_run(ahead_state(), today(), 2, None).expect("a run");
+        let (asked, _) = drain(&mut run, Answer::Pass);
+        let mut terms: Vec<&str> = asked.iter().map(|(term, _)| term.as_str()).collect();
+        terms.dedup();
+        assert_eq!(terms, ["kho", "hoti 1"]);
+    }
+
+    #[test]
+    fn practice_ahead_with_nothing_to_ask_starts_nothing() {
+        assert!(practice_run(ahead_state(), today(), 5, Some(Stage::Year)).is_none());
+        assert!(practice_run(State::empty(), today(), 5, None).is_none());
+        assert!(practice_run(ahead_state(), today(), 0, None).is_none());
+    }
+
+    /// The header counts every question of the practice (`kho`: Meaning,
+    /// Recall, Context).
+    #[test]
+    fn the_practice_header_counts_every_question() {
+        let run = practice_run(ahead_state(), today(), 1, None).expect("kho");
+        assert!(run.is_practice());
+        let text = text_of(&render(run));
+        assert!(text.contains("0 / 3 cards"), "{text}");
+    }
+
+    /// The end of a practice: 'Practice done' and 'Back home'; nothing
+    /// moved, so no 'moved up', no 'start again', no next date, no new
+    /// terms.
+    #[test]
+    fn a_practice_ends_with_practice_done_and_back_home_only() {
+        for (language, done) in [
+            (Language::En, "Practice done"),
+            (Language::Fr, "Entraînement terminé"),
+            (Language::Vi, "Đã luyện xong"),
+        ] {
+            let mut run = practice_run(ahead_state(), today(), 1, None).expect("kho");
+            drain(&mut run, Answer::Fail);
+            let html = render_with(language, run, false);
+            let text = text_of(&html);
+            assert!(text.contains(done), "{language:?}: {text}");
+            let heading = &html[html[..html.find(done).expect(&html)]
+                .rfind('<')
+                .expect(&html)..];
+            assert!(heading.starts_with("<h2"), "{heading}");
+            let back = td_string!(Locale::from(language), back_home);
+            assert!(button_tag(&html, back).starts_with("<button"), "{html}");
+            for absent in [
+                td_string!(Locale::from(language), summary_title),
+                td_string!(Locale::from(language), summary_nothing_due),
+            ] {
+                assert!(!text.contains(absent), "{absent}: {text}");
+            }
+            assert!(!html.contains("<li"), "no summary lines: {html}");
+            assert!(!html.contains("data-new-terms"), "{html}");
         }
     }
 }

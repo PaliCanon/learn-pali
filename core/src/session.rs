@@ -22,10 +22,15 @@
 //! - A **practice** question changes nothing in the state, Pass or Fail, and
 //!   is never queued again, so a session always ends.
 //!
+//! [`Session::practice`] builds a session of practice questions only, to
+//! study ahead: every facet of each term it is given, so it changes nothing
+//! in the state whatever the answers. [`nearest`] picks those terms: the
+//! started ones with the nearest next review.
+//!
 //! [`Session::into_state`] gives the state back with `last_today` recorded;
 //! a later session refuses a `today` before it.
 
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::fmt;
 
 use crate::date::Date;
@@ -147,6 +152,50 @@ impl<'d> Session<'d> {
         })
     }
 
+    /// A session of practice questions only (studying ahead): every facet
+    /// of each term of `terms`, in their order and in [`Facet`] order,
+    /// whatever it has passed. A term the deck does not know, one the state
+    /// has not started and a repeat are skipped. Every answer, Pass or Fail,
+    /// changes nothing in the state; nothing is promoted at the start
+    /// ([`Session::changed_at_start`] is false).
+    ///
+    /// The session's day is `today`, or the state's last day when it is
+    /// later: a practice never moves `last_today` back.
+    pub fn practice(deck: &'d Deck, state: &State, today: Date, terms: &[TermId]) -> Session<'d> {
+        let today = state.last_today.map_or(today, |last| today.max(last));
+        let mut seen = HashSet::new();
+        let queue = terms
+            .iter()
+            .filter(|id| seen.insert(*id))
+            .filter(|id| state.get(id).is_some())
+            .filter_map(|id| deck.term(id))
+            .flat_map(|term| {
+                facets_of(term)
+                    .iter()
+                    .map(|facet| Question {
+                        term: term.id.clone(),
+                        facet,
+                        practice: true,
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        Session {
+            deck,
+            state: state.clone(),
+            today,
+            queue,
+            practice: VecDeque::new(),
+            current: None,
+            changed_at_start: false,
+        }
+    }
+
+    /// How many questions are left to answer, the current one included.
+    pub fn remaining(&self) -> usize {
+        self.queue.len() + self.practice.len() + usize::from(self.current.is_some())
+    }
+
     /// True when [`Session::start`] changed the state it was given: a due
     /// term with nothing left to ask was promoted. A caller that persists
     /// the state saves it then, even when it did nothing else, or the term
@@ -243,6 +292,25 @@ impl<'d> Session<'d> {
         }
         Ok(())
     }
+}
+
+/// The started terms the deck knows, the nearest next review first (the
+/// earliest `due`, then the deck's `rank`), only those at stage `only` when
+/// it is given, at most `n`: what a practice ahead asks
+/// ([`Session::practice`]). A term the deck does not know is skipped.
+pub fn nearest(state: &State, deck: &Deck, only: Option<Stage>, n: usize) -> Vec<TermId> {
+    let mut started: Vec<(&Progress, &Term)> = state
+        .progress
+        .iter()
+        .filter(|progress| only.is_none_or(|stage| progress.stage == stage))
+        .filter_map(|progress| deck.term(&progress.term).map(|term| (progress, term)))
+        .collect();
+    started.sort_by_key(|(progress, term)| (progress.due, term.rank));
+    started
+        .into_iter()
+        .take(n)
+        .map(|(_, term)| term.id.clone())
+        .collect()
 }
 
 /// The pass transition: the facet is passed; when every facet of the term
@@ -935,5 +1003,200 @@ mod tests {
                 .to_string()
                 .contains("zzz")
         );
+    }
+
+    // ---- practice: a session that changes nothing ----
+
+    /// A state with `last_today` already today: a snapshot adds nothing.
+    fn dated(progress: Vec<Progress>) -> State {
+        State {
+            last_today: Some(day(TODAY)),
+            ..state_of(progress)
+        }
+    }
+
+    fn practice_deck() -> Deck {
+        deck_of(vec![
+            noun("sati 1.1", 1),
+            indeclinable("kho", 2),
+            indeclinable("ca", 3),
+        ])
+    }
+
+    #[test]
+    fn a_practice_session_asks_every_facet_of_each_term_all_as_practice() {
+        let deck = practice_deck();
+        let mut kho = entry("kho", Stage::Week, day(TODAY + 3));
+        kho.passed.insert(Facet::Meaning);
+        let state = dated(vec![kho, entry("sati 1.1", Stage::Month, day(TODAY + 9))]);
+        let mut session =
+            Session::practice(&deck, &state, day(TODAY), &[id("kho"), id("sati 1.1")]);
+        assert!(!session.changed_at_start());
+        let seen = drain(&mut session, Answer::Pass);
+        assert_eq!(
+            seen,
+            vec![
+                ("kho".to_string(), Facet::Meaning, true),
+                ("kho".to_string(), Facet::Recall, true),
+                ("sati 1.1".to_string(), Facet::Meaning, true),
+                ("sati 1.1".to_string(), Facet::Recall, true),
+                ("sati 1.1".to_string(), Facet::Forms, true),
+                ("sati 1.1".to_string(), Facet::Context, true),
+            ],
+            "every facet, a passed one too, in the order of the terms"
+        );
+    }
+
+    #[test]
+    fn a_practice_session_leaves_the_state_byte_identical_pass_or_fail() {
+        let deck = practice_deck();
+        let mut sati = entry("sati 1.1", Stage::Quarter, day(TODAY + 40));
+        sati.passed.insert(Facet::Recall);
+        sati.lapses = 2;
+        let state = dated(vec![sati, entry("kho", Stage::Week, day(TODAY + 2))]);
+        let before = state.to_json();
+        for answer in [Answer::Pass, Answer::Fail] {
+            let mut session =
+                Session::practice(&deck, &state, day(TODAY), &[id("sati 1.1"), id("kho")]);
+            assert_eq!(session.snapshot().to_json(), before);
+            let mut asked = 0;
+            while let Some(question) = session.next().cloned() {
+                session
+                    .answer(&question.term, question.facet, answer)
+                    .unwrap();
+                asked += 1;
+                assert_eq!(
+                    session.snapshot().to_json(),
+                    before,
+                    "{answer:?} {question:?}"
+                );
+            }
+            assert_eq!(asked, 6, "{answer:?}: nothing dropped, nothing asked twice");
+            assert_eq!(session.into_state().to_json(), before, "{answer:?}");
+        }
+    }
+
+    #[test]
+    fn a_practice_session_skips_unknown_and_unstarted_terms_and_repeats() {
+        let deck = practice_deck();
+        let state = dated(vec![
+            entry("kho", Stage::Day, day(TODAY + 1)),
+            entry("ghost", Stage::Year, day(TODAY + 1)),
+        ]);
+        let terms = [id("ghost"), id("kho"), id("ca"), id("kho"), id("zzz")];
+        let mut session = Session::practice(&deck, &state, day(TODAY), &terms);
+        let seen = drain(&mut session, Answer::Fail);
+        assert_eq!(
+            seen,
+            vec![
+                ("kho".to_string(), Facet::Meaning, true),
+                ("kho".to_string(), Facet::Recall, true),
+            ]
+        );
+        let mut empty = Session::practice(&deck, &state, day(TODAY), &[]);
+        assert_eq!(empty.next(), None);
+    }
+
+    #[test]
+    fn a_practice_never_moves_the_last_day_back() {
+        let deck = practice_deck();
+        let mut state = dated(vec![entry("kho", Stage::Week, day(TODAY + 2))]);
+        state.last_today = Some(day(TODAY + 1));
+        let session = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        assert_eq!(session.today(), day(TODAY + 1));
+        assert_eq!(session.into_state(), state);
+    }
+
+    #[test]
+    fn remaining_counts_what_is_left_to_ask_the_current_question_included() {
+        let deck = practice_deck();
+        let state = dated(vec![entry("kho", Stage::Week, day(TODAY + 2))]);
+        let mut session = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        assert_eq!(session.remaining(), 2);
+        let first = session.next().cloned().unwrap();
+        assert_eq!(session.remaining(), 2, "the current one is still to answer");
+        session
+            .answer(&first.term, first.facet, Answer::Fail)
+            .unwrap();
+        assert_eq!(session.remaining(), 1, "a practice Fail queues nothing");
+        drain(&mut session, Answer::Pass);
+        assert_eq!(session.remaining(), 0);
+    }
+
+    /// The rule pair: on the same state, a normal session moves the due
+    /// term's stage, a practice session over it moves nothing.
+    #[test]
+    fn only_the_normal_session_moves_stages() {
+        let deck = practice_deck();
+        let state = dated(vec![entry("kho", Stage::Week, day(TODAY))]);
+        let mut normal = start(&deck, state.clone(), TODAY);
+        drain(&mut normal, Answer::Pass);
+        assert_eq!(normal.into_state().progress[0].stage, Stage::Month);
+        let mut practice = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        drain(&mut practice, Answer::Pass);
+        assert_eq!(practice.into_state().progress[0].stage, Stage::Week);
+        let mut failed = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        drain(&mut failed, Answer::Fail);
+        let kho = failed.into_state().progress.remove(0);
+        assert_eq!(
+            (kho.stage, kho.lapses, kho.due),
+            (Stage::Week, 0, day(TODAY))
+        );
+    }
+
+    // ---- nearest: the terms a practice ahead asks ----
+
+    fn nearest_state() -> State {
+        dated(vec![
+            entry("ca", Stage::Month, day(TODAY + 5)),
+            entry("kho", Stage::Week, day(TODAY + 2)),
+            entry("ghost", Stage::Day, day(TODAY + 1)),
+            entry("sati 1.1", Stage::Week, day(TODAY + 2)),
+        ])
+    }
+
+    fn names(ids: &[TermId]) -> Vec<&str> {
+        ids.iter().map(|id| id.0.as_str()).collect()
+    }
+
+    #[test]
+    fn nearest_is_earliest_due_first_then_rank_orphans_skipped() {
+        let deck = practice_deck();
+        let terms = nearest(&nearest_state(), &deck, None, 5);
+        assert_eq!(names(&terms), ["sati 1.1", "kho", "ca"]);
+    }
+
+    #[test]
+    fn nearest_keeps_at_most_n() {
+        let deck = practice_deck();
+        assert_eq!(
+            names(&nearest(&nearest_state(), &deck, None, 2)),
+            ["sati 1.1", "kho"]
+        );
+        assert_eq!(
+            nearest(&nearest_state(), &deck, None, 0),
+            Vec::<TermId>::new()
+        );
+        assert_eq!(nearest(&nearest_state(), &deck, None, 99).len(), 3);
+    }
+
+    #[test]
+    fn nearest_keeps_the_stage_asked_only() {
+        let deck = practice_deck();
+        let state = nearest_state();
+        assert_eq!(
+            names(&nearest(&state, &deck, Some(Stage::Month), 5)),
+            ["ca"]
+        );
+        assert_eq!(
+            names(&nearest(&state, &deck, Some(Stage::Week), 1)),
+            ["sati 1.1"]
+        );
+        assert_eq!(
+            nearest(&state, &deck, Some(Stage::Day), 5).len(),
+            0,
+            "the orphan"
+        );
+        assert_eq!(nearest(&State::empty(), &deck, None, 5).len(), 0);
     }
 }

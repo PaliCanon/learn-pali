@@ -6,9 +6,9 @@
   "broken_newer": "Your saved progress could not be read: it was saved by a newer version.",
   "broken_start_again": "Start again",
   "cancel": "Cancel",
-  "cta_next_stage": "Review the next stage",
-  "cta_resume": "Resume",
-  "cta_resume_label": "Resume, {{ count }} cards",
+  "cta_practice": "Practice",
+  "cta_practice_ahead_label": "Practice ahead, {{ count }} terms",
+  "cta_practice_label": "Practice, {{ count }} cards due",
   "detail_due": "Next review",
   "detail_lapses": "Lapses",
   "detail_stage": "Stage",
@@ -46,6 +46,7 @@
   "orphans_heading": "Not in this deck",
   "pause_banner": "Progress changed in another tab",
   "practice_badge": "Practice · to see again",
+  "practice_batch_label": "Terms to practise",
   "practice_note": "This answer won't change your stage.",
   "progress_empty": "No terms here yet",
   "progress_terms": "Your terms",
@@ -73,6 +74,7 @@
   "summary_moved_up_n": "{{ count }} terms moved up",
   "summary_next_due": "Next due {{ date }}",
   "summary_nothing_due": "Nothing due today",
+  "summary_practice_done": "Practice done",
   "summary_title": "Session done",
   "unit_cards": "cards"
 }
