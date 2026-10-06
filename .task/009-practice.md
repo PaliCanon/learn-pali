@@ -4,12 +4,12 @@ status: design · rank: 4 · level: standard · type: feature · request: learn-
 
 ## Summary
 The orchestrator proposed, the user agreed (2026-10-06): « Oui ça peut être bien, et la practice prend de tous les decks ? »
-Decided (to confirm at the user check):
-- **A Practice button** when nothing is due (where 'Next review: <date>' shows today, beside it): `[ ▶ Practice ]`, the compact form of Resume (008).
-- **What it asks**: the started terms with the nearest next-review dates, from **every stage** (the user's "all decks": the six stages); when a stage is selected in the strip, only that stage's terms. A batch of 5 terms, every facet each has.
-- **What it changes**: nothing in the progress — no stage moves, no lapse, no date; the same rule as learn_core's practice questions after a fail (`Question { practice: true }`): « a practice question changes nothing in the state, Pass or Fail ».
-- **Where it lives**: learn_core gains `Session::practice(deck, state, terms)` (a session whose every question is practice), tested natively; the home starts it in place like Resume; the summary says "Practice done" with no "moved up" line.
-Open: the batch size (5, or the + dialog's choice); Practice also offered when cards are due (today: only when nothing is due).
+Decided (the user, 2026-10-06: « pourquoi ne pas avoir que practice comme bouton ? on resume s'il reste des cards, sinon practice ? pourquoi pas 5 de base, et après un slider pour augmenter / diminuer ? »):
+- **One button, Practice**: `[ ▶ Practice · 15 ]` while cards are due — it runs the normal review (stages move, as Resume did); `[ ▶ Practice ]` when nothing is due — it runs a practice session ahead. 'Resume' and 'Review the next stage' go (the next-stage advance becomes the practice-ahead path: the nearest dates, every stage). The accessible name says which: 'Practice, 15 cards due' / 'Practice ahead, 5 terms'.
+- **How many, when practising ahead**: 5 terms by default, a slider beside the button (1 to the number of started terms, step 1, the value shown), its value kept for the session (page state). While cards are due the slider is hidden (the due cards are the batch).
+- **What practice ahead asks**: the started terms with the nearest next-review dates, from every stage (the six stages are what the user calls "decks"); when a stage is selected in the strip, only that stage. Every facet each term has.
+- **What it changes**: nothing in the progress — no stage moves, no lapse, no date (learn_core's practice rule: « a practice question changes nothing in the state, Pass or Fail »).
+- **Where it lives**: learn_core `Session::practice(deck, state, terms)` (every question practice), tested natively; the slider is generic → ui-lib (task 056 `Slider`: a styled range input with its value, tokens only, keyboard and touch, a gallery section); the summary of a practice says "Practice done", no "moved up".
 Rank 4: difficulty 3 (a core session mode, its rule pair with the normal session), impact 4 (the learner's state must stay untouched).
 
 ## Log
