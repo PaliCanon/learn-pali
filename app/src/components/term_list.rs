@@ -89,8 +89,12 @@ pub(crate) fn StageTerms(
     /// The filter in force.
     #[prop(into)]
     stage: Signal<Option<Stage>>,
+    /// What sits at the list's bottom right (the home's '+'); none by
+    /// default.
+    #[prop(default = None)]
+    add: Option<ViewFn>,
 ) -> impl IntoView {
-    move || view! { <TermRows rows=known_rows(&progress, stage.get()) /> }
+    move || view! { <TermRows rows=known_rows(&progress, stage.get()) add=add.clone() /> }
 }
 
 /// A known term and where it stands, ready to list.
@@ -186,16 +190,24 @@ fn detail_id(rank: u32) -> &'static str {
 }
 
 /// The term list: a row per known term, in a region capped at about five
-/// rows at every width that scrolls (keyboard too, `tabindex="0"`), or 'No
-/// terms here yet'.
+/// rows at every width that scrolls (keyboard too, `tabindex="0"`), `add`
+/// after the list at the region's bottom right ([`AddRow`], sticky); or 'No
+/// terms here yet', `add` under it at the right.
 #[component]
 pub(crate) fn TermRows(
     /// The rows, already filtered and sorted.
     rows: Vec<Row>,
+    /// What sits at the list's bottom right (the home's '+'); none by
+    /// default.
+    #[prop(default = None)]
+    add: Option<ViewFn>,
 ) -> impl IntoView {
     let t = strings();
     if rows.is_empty() {
-        return view! { <p class="text-muted">{move || td_string!(t.locale(), progress_empty)}</p> }
+        return view! {
+            <p class="text-muted">{move || td_string!(t.locale(), progress_empty)}</p>
+            {add.map(|add| view! { <AddRow add=add /> })}
+        }
         .into_any();
     }
     view! {
@@ -209,9 +221,35 @@ pub(crate) fn TermRows(
             <ul class="flex flex-col gap-2">
                 {rows.into_iter().map(|row| view! { <TermRow row=row /> }).collect_view()}
             </ul>
+            {add.map(|add| view! { <AddRow add=add sticky=true /> })}
         </div>
     }
     .into_any()
+}
+
+/// The row that holds `add` (the home's '+') at the right. `sticky`: after
+/// the list, inside its scroll region, it stays at the region's bottom
+/// while the list scrolls, and lets clicks through to the cards under it
+/// (what it holds takes its own, `pointer-events-auto`). Otherwise a plain
+/// row, where the list would be.
+#[component]
+pub(crate) fn AddRow(
+    /// What it holds.
+    add: ViewFn,
+    /// Inside the list's scroll region.
+    #[prop(optional)]
+    sticky: bool,
+) -> impl IntoView {
+    let class = if sticky {
+        "sticky bottom-2 flex justify-end pointer-events-none"
+    } else {
+        "flex justify-end"
+    };
+    view! {
+        <div data-add-row="" class=class>
+            {add.run()}
+        </div>
+    }
 }
 
 /// One term in the list: a [`TermCard`] with its own disclosure, closed.

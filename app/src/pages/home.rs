@@ -6,12 +6,14 @@
 //! after hydration the page reads the store ([`Home`]) and shows one of the
 //! home's states (empty, due, nothing due, broken) in the same box.
 //!
-//! The CTA row holds the state's CTA at the left and, at the right, the
-//! '+' of 'New terms', which opens a dialog with the picker. The CTA is one
-//! button, Practice: '▶ Practice · N' while cards are due (the review:
-//! stages move), else '▶ Practice' with the batch slider and the next
-//! review's date beside (a practice ahead of the nearest terms, of the
-//! strip's selected stage when one is: nothing in the progress changes).
+//! The CTA row holds the state's CTA. The '+' of 'New terms', which opens a
+//! dialog with the picker, sits inside the term list's scroll region, at its
+//! bottom right, sticky while the list scrolls (with no list, right-aligned
+//! where the list would be). The CTA is one button, Practice: '▶ Practice
+//! · N' while cards are due (the review: stages move), else '▶ Practice'
+//! with the batch slider and the next review's date beside (a practice
+//! ahead of the nearest terms, of the strip's selected stage when one is:
+//! nothing in the progress changes).
 //! With no term started there is no Practice: the '+' is the way in.
 //! On `sm` and up the column sits in the middle of the page's height when
 //! it is shorter; a phone keeps it at the top.
@@ -19,10 +21,12 @@
 //! The home also holds the progress (there is no other page for it): under
 //! the CTA row, the strip of the six stages, three by three, whose cells
 //! filter the term list in place (the page's state, no URL: lost on
-//! reload), the list capped at about five rows, the terms the deck does
-//! not know, then the data block (export, import).
-//! With nothing saved, or a damaged progress, the data block alone offers
-//! the import; a progress saved by a newer version offers none.
+//! reload), the list capped at about five rows, then the terms the deck
+//! does not know. Export and import live in Settings
+//! ([`crate::components::data_block`]); a damaged progress's banner points
+//! there. The home reads the store again when Settings replaced it
+//! ([`StoreWrites`], the same tab: the `storage` event reaches the others
+//! only).
 //!
 //! The review runs in place: a CTA swaps the home's content for a session
 //! ([`crate::components::session`]) under the brand, and Stop or 'Back
@@ -42,10 +46,12 @@ use palicanon_ui_lib::{
 };
 
 use crate::catalogue::{Locale, strings};
-use crate::components::data_block::DataBlock;
+use crate::components::data_block::StoreWrites;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
-use crate::components::term_list::{Orphans, StageStrip, StageTerms, next_review, orphan_rows};
+use crate::components::term_list::{
+    AddRow, Orphans, StageStrip, StageTerms, next_review, orphan_rows,
+};
 use crate::deck::deck;
 use crate::learn::home_state::{BrokenKind, HomeState, home_state, new_left};
 use crate::learn::stages::stage_counts;
@@ -59,23 +65,20 @@ const CTA_BOX: &str = "flex flex-col gap-4";
 /// A state's wrapper: the box, then what sits under it.
 const FRAME: &str = "flex flex-col gap-6";
 
-/// The row of the state's CTA and the '+' (HC), one thin row: at least a
-/// compact button's height (`h-8`), the skeleton's too, so the layout does
-/// not move when the store has been read.
+/// The row of the state's CTA (HC), one thin row: at least a compact
+/// button's height (`h-8`), the skeleton's too, so the layout does not move
+/// when the store has been read.
 const CTA_ROW: &str = "flex flex-wrap items-center gap-3 min-h-8";
 
 /// How many terms a practice ahead asks at first (user, 2026-10-06:
 /// « pourquoi pas 5 de base »).
 const BATCH: u32 = 5;
 
-/// The stored progress the home lists, with the session's today (the
-/// export's file name).
+/// The stored progress the home lists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Saved {
     /// The stored progress.
     pub state: State,
-    /// The session's today (`session_today`).
-    pub today: Date,
 }
 
 /// What the home shows, computed from the store.
@@ -120,8 +123,6 @@ pub(crate) enum HomeAction {
     StartAgain,
     /// Download the stored text as is.
     DownloadRaw,
-    /// Replace the whole progress by an imported one (confirmed).
-    Replace(State),
 }
 
 /// What the page shows: the home's own content, or a session in its
@@ -216,7 +217,7 @@ impl Page {
                 refresh();
             }
         });
-        on_storage_change(move || {
+        follow_store(move || {
             if at_home() {
                 refresh();
             } else {
@@ -246,6 +247,16 @@ impl Page {
             stage: RwSignal::new(None),
             batch: RwSignal::new(BATCH),
         }
+    }
+}
+
+/// Calls `changed` when the stored progress changed under the page:
+/// another tab wrote it (the `storage` event), or Settings replaced it in
+/// this one ([`StoreWrites`], when the layout provides it).
+fn follow_store(changed: impl Fn() + Copy + Send + Sync + 'static) {
+    on_storage_change(changed);
+    if let Some(StoreWrites(writes)) = use_context::<StoreWrites>() {
+        Effect::watch(move || writes.get(), move |_, _, _| changed(), false);
     }
 }
 
@@ -342,7 +353,6 @@ fn compute(load: &Load, deck: &Deck, browser: Date) -> Model {
             let today = session_today(browser, state);
             let saved = Saved {
                 state: state.clone(),
-                today,
             };
             (today, stage_counts(state, deck), Some(saved))
         }
@@ -365,8 +375,7 @@ fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<S
         HomeAction::Review
         | HomeAction::PracticeAhead { .. }
         | HomeAction::StartAgain
-        | HomeAction::DownloadRaw
-        | HomeAction::Replace(_) => 0,
+        | HomeAction::DownloadRaw => 0,
     };
     (moved > 0).then(|| session.snapshot())
 }
@@ -388,10 +397,6 @@ fn perform(
             refresh();
         }
         HomeAction::DownloadRaw => download_raw(),
-        HomeAction::Replace(state) => {
-            store::save(&state);
-            refresh();
-        }
         HomeAction::AddNew(_) => {
             let state = match store::load() {
                 Load::Ok(state) => state,
@@ -418,8 +423,9 @@ fn download_raw() {
 }
 
 /// What the home shows for `state`: the CTA row (the state's CTA or the
-/// next review's date, and the '+' that opens the 'New terms' dialog), the
-/// progress (the strip, the list, the data block), or the Broken banner.
+/// next review's date), the progress (the strip, the list with the '+' that
+/// opens the 'New terms' dialog at its bottom right, the orphans), or the
+/// Broken banner.
 #[allow(
     clippy::similar_names,
     reason = "`state` and `stage` are the design's names for the two props"
@@ -460,20 +466,21 @@ pub fn HomeView(
             on_action.run(action);
         }
     });
+    let new_terms = NewTerms::new(new_left, act);
     match state {
         HomeState::Loading => view! { <Skeleton /> }.into_any(),
-        HomeState::Empty => view! { <EmptyBlock new_left=new_left act=act /> }.into_any(),
+        HomeState::Empty => view! { <EmptyBlock new_terms=new_terms act=act /> }.into_any(),
         HomeState::Due(due) => view! {
-            <DueBlock due=due new_left=new_left act=act>
-                <HomeProgress counts=counts saved=saved stage=stage act=act />
+            <DueBlock due=due new_terms=new_terms act=act>
+                <HomeProgress counts=counts saved=saved stage=stage new_terms=new_terms />
             </DueBlock>
         }
         .into_any(),
         HomeState::NothingDue => {
             let cta = nothing_due_cta(counts, saved.as_ref(), stage, batch);
             view! {
-                <NothingDueBlock cta=cta new_left=new_left act=act>
-                    <HomeProgress counts=counts saved=saved stage=stage act=act />
+                <NothingDueBlock cta=cta new_terms=new_terms act=act>
+                    <HomeProgress counts=counts saved=saved stage=stage new_terms=new_terms />
                 </NothingDueBlock>
             }
             .into_any()
@@ -523,53 +530,56 @@ fn Skeleton() -> impl IntoView {
     }
 }
 
-/// No progress yet: the teaching sentence, the CTA row under it with the
-/// '+' of 'New terms' alone at the right (the way in), then the data block,
-/// whose import is the way back to a saved progress.
+/// No progress yet: the teaching sentence, then the '+' of 'New terms' at
+/// the right, where the list would be (the way in), then its dialog.
+/// Settings' import is the way back to a saved progress.
 #[component]
-fn EmptyBlock(new_left: usize, act: Callback<HomeAction>) -> impl IntoView {
+fn EmptyBlock(new_terms: NewTerms, act: Callback<HomeAction>) -> impl IntoView {
     let t = strings();
     view! {
         <div data-home-state="empty" class=FRAME>
-            <CtaBox cta=None new_left=new_left act=act>
+            <CtaBox cta=None act=act>
                 <p class="max-w-prose text-body">{move || td_string!(t.locale(), home_teach)}</p>
             </CtaBox>
-            <ImportOnly act=act />
+            {new_terms.plus().map(|add| view! { <AddRow add=add /> })}
+            <NewTermsDialog new_terms=new_terms />
         </div>
     }
 }
 
-/// Cards due: the CTA row ('▶ Practice · N' and the '+'), then `children`
-/// (the progress).
+/// Cards due: the CTA row ('▶ Practice · N'), the 'New terms' dialog, then
+/// `children` (the progress, whose list holds the '+').
 #[component]
 fn DueBlock(
     due: usize,
-    new_left: usize,
+    new_terms: NewTerms,
     act: Callback<HomeAction>,
     children: Children,
 ) -> impl IntoView {
     view! {
         <div data-home-state="due" class=FRAME>
-            <CtaBox cta=Some(CtaSlot::Practice(due)) new_left=new_left act=act />
+            <CtaBox cta=Some(CtaSlot::Practice(due)) act=act />
+            <NewTermsDialog new_terms=new_terms />
             {children()}
         </div>
     }
 }
 
 /// Nothing due: the CTA row ('▶ Practice' ahead with its slider and the
-/// next review's date when a term is started, else the date, else nothing,
-/// and the '+'); no row when it would be empty; then `children` (the
-/// progress).
+/// next review's date when a term is started, else the date); no row when
+/// it would be empty; the 'New terms' dialog; then `children` (the
+/// progress, whose list holds the '+').
 #[component]
 fn NothingDueBlock(
     cta: Option<CtaSlot>,
-    new_left: usize,
+    new_terms: NewTerms,
     act: Callback<HomeAction>,
     children: Children,
 ) -> impl IntoView {
     view! {
         <div data-home-state="nothing-due" class=FRAME>
-            <CtaBox cta=cta new_left=new_left act=act />
+            <CtaBox cta=cta act=act />
+            <NewTermsDialog new_terms=new_terms />
             {children()}
         </div>
     }
@@ -623,52 +633,40 @@ fn cta_action(cta: CtaSlot) -> Option<HomeAction> {
     }
 }
 
-/// The CTA box: `children` (the Empty state's sentence) above the CTA row,
-/// then the dialog the row's '+' opens (outside the box: its title is no
-/// headline of the box). Nothing when it would be empty.
+/// The CTA box: `children` (the Empty state's sentence) above the CTA row.
+/// Nothing when it would be empty.
 #[component]
 fn CtaBox(
-    /// The row's left slot; none: the '+' alone.
+    /// The row's content; none: no row.
     cta: Option<CtaSlot>,
-    /// The deck's terms not started yet; 0: no '+' and no dialog.
-    new_left: usize,
     /// Performs the learner's choice.
     act: Callback<HomeAction>,
     /// What sits above the row.
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
-    let open = RwSignal::new(false);
-    let row = (cta.is_some() || new_left > 0)
-        .then(|| view! { <CtaRow cta=cta new_left=new_left open=open act=act /> });
+    let row = cta.map(|cta| view! { <CtaRow cta=cta act=act /> });
     (children.is_some() || row.is_some()).then(|| {
         view! {
             <div data-cta-box="" class=CTA_BOX>
                 {children.map(|children| children())}
                 {row}
             </div>
-            <NewTermsDialog new_left=new_left act=act open=open />
         }
     })
 }
 
-/// The CTA row (HC), one thin row: the state's [`Cta`] at the left, the
-/// '+' of 'New terms' at the right.
+/// The CTA row (HC), one thin row: the state's [`Cta`].
 #[component]
 fn CtaRow(
-    /// The left slot; none: the '+' alone.
-    cta: Option<CtaSlot>,
-    /// The deck's terms not started yet; 0: no '+'.
-    new_left: usize,
-    /// The dialog's state, shared with [`NewTermsDialog`].
-    open: RwSignal<bool>,
+    /// What it shows.
+    cta: CtaSlot,
     /// Performs the CTA.
     act: Callback<HomeAction>,
 ) -> impl IntoView {
     view! {
         <div data-cta-row="" class=CTA_ROW>
-            {cta.map(|cta| view! { <Cta cta=cta act=act /> })}
-            <AddTermsButton new_left=new_left open=open />
+            <Cta cta=cta act=act />
         </div>
     }
 }
@@ -723,7 +721,11 @@ fn PracticeAhead(
     let button = move || {
         let locale = Locale::from(language.get());
         let count = batch_of(ahead.started, ahead.batch.get());
-        let name = td_string!(locale, cta_practice_ahead_label, count = count).to_string();
+        let name = if singular(locale, count) {
+            td_string!(locale, cta_practice_ahead_label_1, count = count).to_string()
+        } else {
+            td_string!(locale, cta_practice_ahead_label_n, count = count).to_string()
+        };
         let label = td_string!(locale, cta_practice);
         view! { <CompactCta cta=CtaSlot::Ahead(ahead) label=label name=name act=act /> }
     };
@@ -793,9 +795,9 @@ fn CompactCta(
 }
 
 /// The unreadable progress: the banner, 'Download the raw copy', then, for
-/// an Invalid one only, 'Start again' and the data block's import (Q3: a
-/// newer one is never overwritten). The CTAs that need the state are not
-/// offered.
+/// an Invalid one only, 'Start again' and a line pointing to Settings'
+/// import (Q3: a newer one is never overwritten). The CTAs that need the
+/// state are not offered.
 #[component]
 fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
     let t = strings();
@@ -828,15 +830,55 @@ fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
                             }
                         })}
                 </div>
+                {(kind == BrokenKind::Invalid)
+                    .then(|| {
+                        view! {
+                            <p class="max-w-prose text-muted">
+                                {move || td_string!(t.locale(), broken_import_hint)}
+                            </p>
+                        }
+                    })}
             </div>
-            {(kind == BrokenKind::Invalid).then(|| view! { <ImportOnly act=act /> })}
         </div>
     }
 }
 
+/// The '+' of 'New terms' and the dialog it opens, sharing one state: the
+/// '+' sits in the term list (or where it would be), the dialog outside it
+/// (a scroll region would clip it).
+#[derive(Clone, Copy)]
+struct NewTerms {
+    /// The deck's terms not started yet; 0: no '+' and no dialog.
+    new_left: usize,
+    /// The dialog is open.
+    open: RwSignal<bool>,
+    /// Performs the learner's choice.
+    act: Callback<HomeAction>,
+}
+
+impl NewTerms {
+    /// Closed, for `new_left` terms left.
+    fn new(new_left: usize, act: Callback<HomeAction>) -> Self {
+        NewTerms {
+            new_left,
+            open: RwSignal::new(false),
+            act,
+        }
+    }
+
+    /// The '+' ([`AddTermsButton`]) to place; none when the deck has no
+    /// term left to start.
+    fn plus(self) -> Option<ViewFn> {
+        let NewTerms { new_left, open, .. } = self;
+        (new_left > 0)
+            .then(|| ViewFn::from(move || view! { <AddTermsButton new_left=new_left open=open /> }))
+    }
+}
+
 /// The disclosure that opens [`NewTermsDialog`]: a '+', small, Accent, at
-/// the right of the CTA row; its name is 'New terms' in the page's
-/// language. Nothing when the deck has no term left to start.
+/// the bottom right of the term list, over the cards (`shadow-md`; it takes
+/// the clicks its sticky row lets through); its name is 'New terms' in the
+/// page's language. Nothing when the deck has no term left to start.
 #[component]
 fn AddTermsButton(
     /// The deck's terms not started yet; 0 renders nothing.
@@ -854,7 +896,7 @@ fn AddTermsButton(
                 size=Size::Sm
                 label_closed=label
                 label_open=label
-                layout="ml-auto"
+                layout="pointer-events-auto shadow-md"
             >
                 <span class="text-lg leading-none">"+"</span>
             </DisclosureButton>
@@ -871,13 +913,14 @@ const NEW_TERMS_ID: &str = "pc-new-terms";
 /// Nothing when the deck has no term left to start.
 #[component]
 fn NewTermsDialog(
-    /// The deck's terms not started yet; 0 renders nothing.
-    new_left: usize,
-    /// Performs the learner's choice.
-    act: Callback<HomeAction>,
-    /// The dialog's state, shared with [`AddTermsButton`].
-    open: RwSignal<bool>,
+    /// The terms left, the dialog's state, the learner's choice.
+    new_terms: NewTerms,
 ) -> impl IntoView {
+    let NewTerms {
+        new_left,
+        open,
+        act,
+    } = new_terms;
     let t = strings();
     let pick = Pick::new();
     let on_add = Callback::new(move |n| {
@@ -906,47 +949,31 @@ fn NewTermsDialog(
 }
 
 /// The progress under the CTA row: the strip (its cells filter the list
-/// in place), the term list and the orphans when a progress is saved, then
-/// the data block.
+/// in place), the term list with the '+' at its bottom right and the
+/// orphans when a progress is saved (else the '+' alone, where the list
+/// would be).
 #[component]
 fn HomeProgress(
     counts: [usize; 6],
     saved: Option<Saved>,
     stage: RwSignal<Option<Stage>>,
-    act: Callback<HomeAction>,
+    new_terms: NewTerms,
 ) -> impl IntoView {
-    let on_replace = Callback::new(move |state| act.run(HomeAction::Replace(state)));
-    let (today, list) = match &saved {
-        Some(Saved { state, today }) => {
-            let orphans = orphan_rows(state);
-            let list = view! {
-                <StageTerms progress=state.clone() stage=stage />
+    let add = new_terms.plus();
+    let list = match saved {
+        Some(Saved { state }) => {
+            let orphans = orphan_rows(&state);
+            view! {
+                <StageTerms progress=state stage=stage add=add />
                 <Orphans orphans=orphans />
-            };
-            (*today, Some(list))
+            }
+            .into_any()
         }
-        None => (Date::from_days(0), None),
+        None => add.map(|add| view! { <AddRow add=add /> }).into_any(),
     };
-    let export = saved.map(|saved| saved.state);
     view! {
         <StageStrip counts=counts stage=stage />
         {list}
-        <DataBlock export_state=export today=today can_import=true on_replace=on_replace />
-    }
-}
-
-/// The data block with nothing to export: its import replaces a missing or
-/// damaged progress.
-#[component]
-fn ImportOnly(act: Callback<HomeAction>) -> impl IntoView {
-    let on_replace = Callback::new(move |state| act.run(HomeAction::Replace(state)));
-    view! {
-        <DataBlock
-            export_state=None
-            today=Date::from_days(0)
-            can_import=true
-            on_replace=on_replace
-        />
     }
 }
 
@@ -1000,7 +1027,7 @@ mod tests {
     use crate::components::session::tests::run_on;
     use crate::deck::deck;
     use crate::learn::home_state::BrokenKind;
-    use crate::test_support::{button_labelled, progress_fixture, tag_around};
+    use crate::test_support::{progress_fixture, tag_around};
 
     /// [`Home`] as the server renders it at `/`, inside the real Router.
     fn render(language: Language) -> String {
@@ -1167,22 +1194,18 @@ mod tests {
         }
     }
 
-    /// The CTA row holds the state's CTA at the left and the '+' at the
-    /// right (user, 2026-10-06: « passe le bouton + au niveau du resume »).
+    /// The CTA row holds the state's CTA alone: the '+' left it for the
+    /// term list (user, 2026-10-06: « le bouton plus dans la liste en bas à
+    /// droite »).
     #[test]
-    fn the_cta_row_holds_the_cta_at_the_left_and_the_plus_at_the_right() {
+    fn the_cta_row_holds_the_cta_and_no_plus() {
         for state in [HomeState::Due(12), NOTHING_DUE] {
-            let cta = ">Practice<";
             let html = view_of(Language::En, state, 10, STARTED);
             let row = element_at(&html, at(&html, "data-cta-row"));
             assert!(row.contains("flex flex-wrap items-center gap-3"), "{row}");
-            assert_eq!(row.matches("<button").count(), 2, "{row}");
-            assert!(
-                at(row, cta) < at(row, r#"aria-label="New terms""#),
-                "the CTA, then the '+': {row}"
-            );
-            let add = tag_before(row, "button", r#"aria-label="New terms""#);
-            assert!(add.split(['"', ' ']).any(|c| c == "ml-auto"), "{add}");
+            assert_eq!(row.matches("<button").count(), 1, "{row}");
+            assert!(row.contains(">Practice<"), "{row}");
+            assert!(!row.contains("New terms"), "no '+' on the row: {row}");
             assert!(
                 !row.contains("role=\"dialog\""),
                 "the dialog is not in the row: {row}"
@@ -1190,21 +1213,40 @@ mod tests {
         }
     }
 
-    /// The '+' sits on the CTA row, before the strip and the list (no
-    /// longer between them), small, at the right, in Accent.
+    /// The '+' sits inside the term list's scroll region, after the list,
+    /// in a sticky row at its bottom right that lets clicks through to the
+    /// cards; the '+' takes its own and casts a shadow over the cards.
+    /// Small, in Accent; once on the page.
     #[test]
-    fn the_plus_sits_on_the_cta_row_not_between_the_strip_and_the_list() {
+    fn the_plus_sits_inside_the_term_list_at_its_bottom_right() {
         for state in started() {
             let html = with_progress(Language::En, state, None);
-            let row = element_at(&html, at(&html, "data-cta-row"));
-            assert!(row.contains(r#"aria-label="New terms""#), "{row}");
+            let region = element_at(&html, at(&html, "data-term-list"));
+            assert!(region.contains(r#"aria-label="New terms""#), "{region}");
+            assert!(
+                at(region, "</ul>") < at(region, r#"aria-label="New terms""#),
+                "after the list: {region}"
+            );
+            let row = tag_before(region, "div", r#"aria-label="New terms""#);
+            let row_classes: Vec<&str> = row.split(['"', ' ']).collect();
+            for class in [
+                "sticky",
+                "bottom-2",
+                "flex",
+                "justify-end",
+                "pointer-events-none",
+            ] {
+                assert!(row_classes.contains(&class), "{class}: {row}");
+            }
             let order = [
                 at(&html, "data-cta-row"),
-                at(&html, r#"aria-label="New terms""#),
                 at(&html, ">Daily<"),
                 at(&html, "data-term-list"),
+                at(&html, r#"aria-label="New terms""#),
             ];
             assert!(order.is_sorted(), "{order:?}: {html}");
+            let cta_row = element_at(&html, at(&html, "data-cta-row"));
+            assert!(!cta_row.contains("New terms"), "{cta_row}");
             assert_eq!(
                 html.matches(r#"aria-label="New terms""#).count(),
                 1,
@@ -1212,11 +1254,28 @@ mod tests {
             );
             let add = tag_before(&html, "button", r#"aria-label="New terms""#);
             let classes: Vec<&str> = add.split(['"', ' ']).collect();
-            for class in ["h-8", "ml-auto", "border-gold/40"] {
+            for class in ["h-8", "pointer-events-auto", "shadow-md", "border-gold/40"] {
                 assert!(classes.contains(&class), "{class}: {add}");
             }
             assert!(!classes.contains(&"border-line"), "Accent, not Chip: {add}");
+            assert!(
+                !region.contains(r#"role="dialog""#),
+                "the dialog stays out of the region: {region}"
+            );
         }
+    }
+
+    /// A filter with no term: 'No terms here yet', then the '+' at the
+    /// right, where the list would be.
+    #[test]
+    fn a_filter_with_no_term_still_offers_the_plus_at_the_right() {
+        let html = with_progress(Language::En, HomeState::Due(5), Some(Stage::Month));
+        let row = tag_before(&html, "div", r#"aria-label="New terms""#);
+        assert!(row.contains("justify-end"), "{row}");
+        assert!(
+            at(&html, "No terms here yet") < at(&html, r#"aria-label="New terms""#),
+            "{html}"
+        );
     }
 
     /// Just a '+', named 'New terms' in the language of the page; a click
@@ -1342,20 +1401,23 @@ mod tests {
 
     // ---- T3: the states ----
 
-    /// Nothing due, nothing started: no CTA and no
-    /// date, the row holds the '+' alone, small and at the right.
+    /// Nothing due, nothing started: no CTA, no date, no CTA row; the '+'
+    /// sits right-aligned where the list would be, under the strip, small.
     #[test]
-    fn nothing_to_review_and_nothing_started_has_the_plus_alone_on_the_row() {
+    fn nothing_to_review_and_nothing_started_has_the_plus_where_the_list_would_be() {
         let html = en(HomeState::NothingDue, 10);
-        let row = element_at(&html, at(&html, "data-cta-row"));
+        assert!(!html.contains("data-cta-row"), "{html}");
+        assert!(!html.contains("Next review"), "{html}");
+        let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
-        assert!(!row.contains("Next review"), "{row}");
-        assert!(!row.contains("<p"), "{row}");
-        let add = tag_before(row, "button", r#"aria-label="New terms""#);
+        assert!(row.contains("justify-end"), "{row}");
+        assert!(
+            at(&html, ">Daily<") < at(&html, r#"aria-label="New terms""#),
+            "under the strip: {html}"
+        );
+        let add = tag_before(&html, "button", r#"aria-label="New terms""#);
         let classes: Vec<&str> = add.split(['"', ' ']).collect();
-        for class in ["h-8", "ml-auto"] {
-            assert!(classes.contains(&class), "{class}: {add}");
-        }
+        assert!(classes.contains(&"h-8"), "{add}");
         assert!(!classes.contains(&"h-11"), "{add}");
     }
 
@@ -1368,17 +1430,15 @@ mod tests {
         assert!(!html.contains(r#"aria-busy="true""#), "{html}");
         let teach = at(&html, "A term is one word, asked four ways");
         assert!(!html.contains("Start with 5"), "{html}");
-        let row = element_at(&html, at(&html, "data-cta-row"));
+        assert!(!html.contains("data-cta-row"), "no CTA row: {html}");
+        let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "the '+' alone: {row}");
-        assert!(teach < at(&html, "data-cta-row"), "{html}");
+        assert!(row.contains("justify-end"), "at the right: {row}");
         let add = tag_before(&html, "button", r#"aria-label="New terms""#);
         assert!(!has_attr(&add, "disabled"), "{add}");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains(r#"aria-controls="pc-new-terms""#), "{add}");
-        let classes: Vec<&str> = add.split(['"', ' ']).collect();
-        for class in ["h-8", "ml-auto"] {
-            assert!(classes.contains(&class), "{class}: {add}");
-        }
+        assert!(add.split(['"', ' ']).any(|c| c == "h-8"), "{add}");
         assert!(
             teach < at(&html, r#"aria-label="New terms""#)
                 && at(&html, r#"aria-label="New terms""#) < at(&html, r#"id="pc-new-terms""#),
@@ -1429,7 +1489,7 @@ mod tests {
             assert!(!html.contains("/review"), "{html}");
         }
         let html = en(HomeState::Due(12), 40);
-        let add = tag_before(&html, "button", "New terms");
+        let add = tag_before(&html, "button", r#"aria-label="New terms""#);
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains("aria-controls"), "{add}");
     }
@@ -1504,10 +1564,10 @@ mod tests {
             "ui-lib's Slider shows its value: {row}"
         );
         assert!(
-            at(row, ">Practice<") < at(row, r#"type="range""#)
-                && at(row, r#"type="range""#) < at(row, r#"aria-label="New terms""#),
-            "Practice, the slider, then the '+': {row}"
+            at(row, ">Practice<") < at(row, r#"type="range""#),
+            "Practice, then the slider: {row}"
         );
+        assert!(!row.contains("New terms"), "no '+' on the row: {row}");
     }
 
     /// Fewer started terms than the batch: the name counts what will be
@@ -1522,6 +1582,28 @@ mod tests {
         );
         let slider = tag_before(&html, "input", r#"type="range""#);
         assert!(slider.contains(r#"max="3""#), "{slider}");
+    }
+
+    /// One term to practise: 'Practice ahead, 1 term', the singular where
+    /// the language has one.
+    #[test]
+    fn practice_ahead_names_one_term_in_the_singular() {
+        for (language, label, name) in [
+            (Language::En, ">Practice<", "Practice ahead, 1 term"),
+            (
+                Language::Fr,
+                ">S’entraîner<",
+                "S’entraîner en avance, 1 terme",
+            ),
+            (Language::Vi, ">Luyện tập<", "Luyện tập trước, 1 thuật ngữ"),
+        ] {
+            let html = view_of(language, NOTHING_DUE, 10, [1, 0, 0, 0, 0, 0]);
+            let button = button_with(&html, label);
+            assert!(
+                button.contains(&format!(r#"aria-label="{name}""#)),
+                "{button}"
+            );
+        }
     }
 
     #[test]
@@ -1560,9 +1642,9 @@ mod tests {
                 at(row, "bg-primary"),
                 at(row, r#"type="range""#),
                 at(row, text),
-                at(row, r#"aria-controls="pc-new-terms""#),
             ];
-            assert!(order.is_sorted(), "Practice, slider, date, '+': {row}");
+            assert!(order.is_sorted(), "Practice, slider, date: {row}");
+            assert!(!row.contains("pc-new-terms"), "no '+' on the row: {row}");
         }
     }
 
@@ -1648,9 +1730,14 @@ mod tests {
             palicanon_ui_lib::provide_language().set(Language::En);
             let act = Callback::new(|_: HomeAction| {});
             let open = RwSignal::new(true);
+            let new_terms = NewTerms {
+                new_left: 40,
+                open,
+                act,
+            };
             view! {
                 <AddTermsButton new_left=40 open=open />
-                <NewTermsDialog new_left=40 act=act open=open />
+                <NewTermsDialog new_terms=new_terms />
             }
             .to_html()
         });
@@ -1864,9 +1951,9 @@ mod tests {
                     .then(|| (state, tag_around(&html, "data-cta-row").to_owned()))
             })
             .collect();
-        // Every state but the broken ones and the two with nothing to do
-        // (nothing started, nothing left to add).
-        assert_eq!(rows.len(), 5, "{rows:?}");
+        // The first paint and the two with a CTA (cards due): the '+' left
+        // the row, so a state with no CTA has no row.
+        assert_eq!(rows.len(), 3, "{rows:?}");
         for (state, row) in &rows {
             let classes: Vec<&str> = row.split(['"', ' ']).collect();
             assert!(classes.contains(&"min-h-8"), "{state:?}: {row}");
@@ -1884,7 +1971,6 @@ mod tests {
     fn with_progress(language: Language, home: HomeState, stage: Option<Stage>) -> String {
         let saved = Saved {
             state: progress_fixture(),
-            today: today(),
         };
         let counts = stage_counts(&saved.state, deck());
         Owner::new()
@@ -1953,22 +2039,17 @@ mod tests {
     }
 
     #[test]
-    fn under_the_cta_row_come_the_strip_the_list_the_orphans_then_the_data_block() {
+    fn under_the_cta_row_come_the_strip_the_list_then_the_orphans() {
         for state in started() {
             let html = with_progress(Language::En, state, None);
             let order = [
                 at(&html, "data-cta-row"),
-                at(&html, r#"aria-label="New terms""#),
                 at(&html, ">Daily<"),
                 at(&html, "data-term-list"),
+                at(&html, r#"aria-label="New terms""#),
                 at(&html, "Not in this deck"),
-                at(&html, ">Export<"),
             ];
             assert!(order.is_sorted(), "{order:?}: {html}");
-            let export = button_labelled(&html, "Export");
-            assert!(!export.contains("disabled"), "{export}");
-            let import = button_labelled(&html, "Import");
-            assert!(!import.contains("disabled"), "{import}");
         }
     }
 
@@ -2016,31 +2097,45 @@ mod tests {
         assert!(!html.contains("Your progress<"), "no progress link: {html}");
     }
 
+    /// Export and Import moved to Settings (user, 2026-10-06: « import
+    /// export dans les settings »): no state of the home holds them, nor
+    /// the file input, nor the import's confirmation.
     #[test]
-    fn the_empty_home_offers_the_import_and_no_list() {
+    fn the_home_holds_no_export_and_no_import() {
+        let mut pages: Vec<String> = every_state()
+            .into_iter()
+            .map(|(state, left)| en(state, left))
+            .collect();
+        pages.extend(started().map(|state| with_progress(Language::En, state, None)));
+        for html in pages {
+            for gone in [
+                ">Export<",
+                ">Import<",
+                r#"type="file""#,
+                r#"id="pc-import""#,
+            ] {
+                assert!(!html.contains(gone), "{gone}: {html}");
+            }
+        }
         let html = en(HomeState::Empty, 50);
-        assert!(!html.contains("Your progress is on this device"), "{html}");
-        let import = button_labelled(&html, "Import");
-        assert!(
-            !import.contains("disabled"),
-            "import is the way back: {import}"
-        );
-        let export = button_labelled(&html, "Export");
-        assert!(export.contains("disabled"), "nothing to export: {export}");
         assert!(!html.contains("data-term-list"), "{html}");
         assert!(!html.contains(">Daily<"), "no strip: {html}");
     }
 
+    /// A damaged progress: the banner, its two ways out, then a line that
+    /// points to the third, Settings' import.
     #[test]
-    fn a_damaged_progress_can_be_replaced_by_an_import_from_the_home() {
-        let html = en(HomeState::Broken(BrokenKind::Invalid), 0);
-        assert!(
-            at(&html, "Start again") < at(&html, ">Import<"),
-            "the banner first: {html}"
-        );
-        let import = button_labelled(&html, "Import");
-        assert!(!import.contains("disabled"), "{import}");
-        assert!(html.contains(r#"type="file""#), "{html}");
+    fn the_invalid_banner_points_to_an_import_in_settings() {
+        for (language, line) in [
+            (Language::En, "Or import a copy in Settings."),
+            (Language::Fr, "Ou importez une copie dans les Paramètres."),
+            (Language::Vi, "Hoặc nhập một bản sao trong Cài đặt."),
+        ] {
+            let html = view_of(language, HomeState::Broken(BrokenKind::Invalid), 0, [0; 6]);
+            let start_again = td_string!(Locale::from(language), broken_start_again);
+            assert!(at(&html, start_again) < at(&html, line), "{html}");
+            assert!(!html.contains(r#"type="file""#), "{html}");
+        }
     }
 
     #[test]
@@ -2049,6 +2144,10 @@ mod tests {
         assert!(!html.contains(">Import<"), "{html}");
         assert!(!html.contains(">Export<"), "{html}");
         assert!(!html.contains(r#"type="file""#), "{html}");
+        assert!(
+            !html.contains("in Settings"),
+            "no import to point to: {html}"
+        );
     }
 
     #[test]
@@ -2059,8 +2158,6 @@ mod tests {
             for text in [
                 td_string!(locale, progress_terms),
                 td_string!(locale, orphans_heading),
-                td_string!(locale, export),
-                td_string!(locale, import),
             ] {
                 assert!(html.contains(text), "{language:?} {text}: {html}");
             }

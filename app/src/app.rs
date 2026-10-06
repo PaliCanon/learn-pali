@@ -15,6 +15,7 @@ use palicanon_ui_lib::{
 };
 
 use crate::catalogue::strings;
+use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
 use crate::components::site_footer::SiteFooter;
 use crate::pages::home::Home;
 
@@ -99,18 +100,28 @@ fn nav(current: Signal<String>) -> NavList {
     NavList::new(sections, current)
 }
 
-/// The shell around the page: `AppShell`'s rail, theme and languages, and
+/// The shell around the page: `AppShell`'s rail, theme and languages, its
+/// Settings with 'Your progress' after Appearance (export, import), and
 /// the one route (the home at `/`, which holds the progress and runs the
-/// review in place), the footer in the shell's slot.
+/// review in place), the footer in the shell's slot; then the import's
+/// confirmation, outside Settings (opening it closes Settings). The home
+/// follows the imports through the provided `StoreWrites`.
 #[component]
 fn Layout() -> impl IntoView {
     let location = use_location();
+    let progress = ProgressData::new();
+    provide_context(progress.writes());
     view! {
-        <AppShell nav=nav(location.pathname.into()) footer=|| view! { <SiteFooter /> }>
+        <AppShell
+            nav=nav(location.pathname.into())
+            settings_extra=move || view! { <ProgressSection data=progress /> }
+            footer=|| view! { <SiteFooter /> }
+        >
             <Routes fallback=|| "Not found.">
                 <Route path=path!("/") view=Home />
             </Routes>
         </AppShell>
+        <ImportConfirm data=progress />
     }
 }
 
@@ -287,6 +298,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Settings holds 'Your progress' after Appearance, with Export and
+    /// Import; the import's confirmation sits outside Settings, after the
+    /// shell (opening it closes Settings); the home holds neither.
+    #[test]
+    fn settings_holds_your_progress_and_the_confirmation_sits_outside() {
+        let html = render_layout(Language::En, "/");
+        let order = [
+            html.find(r#"id="pc-settings""#).expect(&html),
+            html.find(">Appearance</h3>").expect(&html),
+            html.find(">Your progress</h3>").expect(&html),
+            html.find(">Export<").expect(&html),
+            html.find(">Import<").expect(&html),
+            html.find(r#"data-page="home""#).expect(&html),
+            html.find("</footer>").expect(&html),
+            html.find(r#"id="pc-import""#).expect(&html),
+        ];
+        assert!(order.is_sorted(), "{order:?}: {html}");
+        assert_eq!(html.matches(">Export<").count(), 1, "{html}");
+        assert_eq!(html.matches(r#"type="file""#).count(), 1, "{html}");
     }
 
     #[test]

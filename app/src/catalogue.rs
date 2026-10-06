@@ -265,15 +265,17 @@ mod tests {
         assert_eq!(missing, Vec::<&str>::new());
     }
 
-    /// The keys of the home (with its progress and data block) and the review.
-    const SCREEN_KEYS: [&str; 73] = [
+    /// The keys of the home (with its progress), the review and Settings'
+    /// 'Your progress'.
+    const SCREEN_KEYS: [&str; 77] = [
         "home_title",
         "home_teach",
         "home_loading",
         "cta_practice",
         "cta_practice_label_1",
         "cta_practice_label_n",
-        "cta_practice_ahead_label",
+        "cta_practice_ahead_label_1",
+        "cta_practice_ahead_label_n",
         "practice_batch_label",
         "add_terms",
         "broken_invalid",
@@ -340,6 +342,9 @@ mod tests {
         "import_refused_newer",
         "import_refused_duplicate",
         "import_done",
+        "settings_progress",
+        "import_off_newer",
+        "broken_import_hint",
     ];
 
     /// `build.rs` refuses a catalogue where a `{{ name }}` is missing from

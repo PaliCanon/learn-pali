@@ -33,7 +33,7 @@ state file; the site keeps it in the browser's `localStorage`.
 
 | Route | What |
 | --- | --- |
-| `/` | The home, under the brand (the lotus and PaliLearn name the page): one row with the call to action of its state at the left (Resume, or Review the next stage) and 'New terms' small at the right; with no progress yet, or nothing to review, 'New terms' and its picker are the way in, alone at the left (+5, +10 or a custom number, then Add starts the session). Then the progress: the six stages (Daily to Yearly), compact, each a button that filters the term list in place (pressed again: every term; no URL, the choice is lost on reload), the list (about five rows, scrolling; a term opens its detail), the terms the deck does not know, and the data block: export, import. A progress this build cannot read is shown as a banner, never overwritten. |
+| `/` | The home, under the brand (the lotus and PaliLearn name the page): one row with the call to action of its state, Practice ('▶ Practice · N' while cards are due; else a practice ahead, with its batch slider and the next review's date beside). Then the progress: the six stages (Daily to Yearly), each a button that filters the term list in place (pressed again: every term; no URL, the choice is lost on reload), the list (about five rows, scrolling; a term opens its detail) with 'New terms' (a '+') at its bottom right, sticky while the list scrolls, then the terms the deck does not know. 'New terms' and its picker, in a dialog (+5, +10 or a custom number, then Add starts the session), are the way in; with no term started the '+' sits at the right where the list would be. Export and import live in Settings ('Your progress'). A progress this build cannot read is shown as a banner, never overwritten. |
 
 The review runs in place: a call to action swaps the home's content for a
 session (one card at a time: the facet, reveal, "Knew it" / "Didn't
@@ -50,7 +50,7 @@ counts appear once the browser has loaded the progress.
 
 The progress lives in the browser only, under the `localStorage` key
 `pc_learn` (the learning loop's JSON state, versioned). **Not synced across
-devices yet**: the home's data block exports it to a file
+devices yet**: Settings' 'Your progress' exports it to a file
 (`pc_learn-<YYYY-MM-DD>.json`) and imports one back. An import is validated
 whole and replaces the progress in that browser; a refused file (not a state,
 saved by a newer version, the same term twice) leaves it unchanged. A state
