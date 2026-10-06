@@ -1,6 +1,6 @@
 # 009 Practice: study ahead without moving a stage
 
-status: design · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008]
+status: building · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008, ui-lib 056]
 
 ## Summary
 The orchestrator proposed, the user agreed (2026-10-06): « Oui ça peut être bien, et la practice prend de tous les decks ? »
@@ -15,6 +15,6 @@ Rank 4: difficulty 3 (a core session mode, its rule pair with the normal session
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
-| Define | doing | the proposal and the user's yes; built after 008 (same files) |
+| Define | done | the proposal, the user's yes, then one Practice button and a slider (the user's words); after 008 (merged e1ac116) and ui-lib 056 (the slider) |
 
 ## Retro
