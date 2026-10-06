@@ -9,6 +9,8 @@ Decided:
 - **The strip** in three columns at every width (ui-lib 055 `Columns::Three`), at the default size (Md), not compact.
 - **The + opens a dialog** (ui-lib `Dialog`, title 'New terms'): the picker +5 · +10 · Custom inside, 'Add' in the footer (Primary) with 'Cancel' (Ghost); Add closes the dialog and starts the session in place. No inline panel any more.
 - **The page centred**: on `sm` and up the column sits in the middle of the viewport height when it is shorter (`min-h` of the page area, `justify-center`); a long page scrolls as before; a phone stays top-aligned.
+- **The + on the CTA row** (the user: « passe le bouton + au niveau du resume »), at its right.
+- **A compact Resume** (the user chose it among three layouts: a full-width card, a compact button, a cell in the strip): `[ ▶ Resume · 15 ]` at the '+' height, Primary, Sm, the count of cards due; its accessible name 'Resume, 15 cards'; 'Review the next stage' the same form.
 - **Nothing due**: the CTA row shows 'Next review: <date>' (the earliest due date of the started terms), muted, where Resume would be, so the learner knows when cards come back; studying ahead is asked to the user.
 Rank 3: difficulty 3 (a card with a nested toggle, a dialog, vertical centring), impact 3.
 
