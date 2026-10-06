@@ -68,7 +68,7 @@ const FRAME: &str = "flex flex-col gap-6";
 /// The row of the state's CTA (HC), one thin row: at least a compact
 /// button's height (`h-8`), the skeleton's too, so the layout does not move
 /// when the store has been read.
-const CTA_ROW: &str = "flex flex-wrap items-center gap-3 min-h-8";
+const CTA_ROW: &str = "flex flex-wrap items-center justify-center gap-3 min-h-8";
 
 /// How many terms a practice ahead asks at first (user, 2026-10-06:
 /// « pourquoi pas 5 de base »).
@@ -1202,7 +1202,10 @@ mod tests {
         for state in [HomeState::Due(12), NOTHING_DUE] {
             let html = view_of(Language::En, state, 10, STARTED);
             let row = element_at(&html, at(&html, "data-cta-row"));
-            assert!(row.contains("flex flex-wrap items-center gap-3"), "{row}");
+            assert!(
+                row.contains("flex flex-wrap items-center justify-center gap-3"),
+                "{row}"
+            );
             assert_eq!(row.matches("<button").count(), 1, "{row}");
             assert!(row.contains(">Practice<"), "{row}");
             assert!(!row.contains("New terms"), "no '+' on the row: {row}");
@@ -1210,6 +1213,15 @@ mod tests {
                 !row.contains("role=\"dialog\""),
                 "the dialog is not in the row: {row}"
             );
+        }
+    }
+
+    #[test]
+    fn the_cta_row_is_centred() {
+        for state in [HomeState::Due(12), NOTHING_DUE] {
+            let html = view_of(Language::En, state, 10, STARTED);
+            let row = element_at(&html, at(&html, "data-cta-row"));
+            assert!(row.contains("justify-center"), "{row}");
         }
     }
 
