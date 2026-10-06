@@ -6,7 +6,7 @@ status: review · rank: 9 · level: hard · type: feature · request: learn-pali
 
 ```mermaid
 flowchart LR
-  Define["Define ✓ zoom of the request's v3"]:::done --> Plan["Plan ✓ 7 slices in 4 waves, probes green, 9 questions ruled"]:::done --> Build["Build ✓ slices 0–6, lib 244 + assets 6"]:::done --> Verify["Verify ✓ wave B merged, matrix green, wasm 15.7 MB (dev build)"]:::done --> Review["Review ✓ 2 rounds, 7 findings fixed, round 2 clean"]:::done --> Fix["Fix ✓ F1–F7, 251 + 6 tests"]:::done --> Rebase["Rebase ✓ on main ecc1e30 (ff, no conflict)"]:::done --> Check["Check ✓ user 2026-10-06: « merge et run le serveur »"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ zoom of the request's v3"]:::done --> Plan["Plan ✓ 7 slices in 4 waves, probes green, 9 questions ruled"]:::done --> Build["Build ✓ slices 0–6, lib 244 + assets 6"]:::done --> Verify["Verify ✓ wave B merged, matrix green, wasm 15.7 MB (dev build)"]:::done --> Review["Review ✓ 2 rounds, 7 findings fixed, round 2 clean"]:::done --> Fix["Fix ✓ F1–F7, 251 + 6 tests"]:::done --> Rebase["Rebase ✓ on main ecc1e30 (ff, no conflict)"]:::done --> Check["Check ✓ user 2026-10-06: « merge et run le serveur »"]:::done --> Merge["Merge ✓ dba28f1"]:::done --> Retro:::todo
   classDef done fill:#2e7d32,color:#fff
   classDef doing fill:#f9a825,color:#000
   classDef todo fill:#9e9e9e,color:#fff
@@ -447,4 +447,4 @@ Reviewer closes (#4029): three trivial shell slips, one re-run each, no row. Rul
 
 ## Merge
 
-(not merged)
+dba28f1 on main (squash, 2026-10-06).
