@@ -1,6 +1,6 @@
 # 009 Practice: study ahead without moving a stage
 
-status: review · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008, ui-lib 056]
+status: merged · rank: 4 · level: standard · type: feature · request: learn-pali (user, 2026-10-06) · after: [008, ui-lib 056]
 
 ## Summary
 The orchestrator proposed, the user agreed (2026-10-06): « Oui ça peut être bien, et la practice prend de tous les decks ? »
@@ -19,4 +19,8 @@ Rank 4: difficulty 3 (a core session mode, its rule pair with the normal session
 | Capture | done | orchestrator, :3201 on the branch: nothing due → '▶ Practice', slider 1–5 at 5 ('Practice ahead, 5 terms', 3 after a drag), 'Next review: 10 October 2026', the '+'; a practice of 9 cards with the badge, Knew it and Didn't know mixed, ends 'Practice done'; the progress in localStorage byte-identical before and after; no console error; phone 390 no overflow |
 | Define | done | the proposal, the user's yes, then one Practice button and a slider (the user's words); after 008 (merged e1ac116) and ui-lib 056 (the slider) |
 
+## Merge
+286e009 (squash, 2026-10-06), after ui-lib 056.
+
 ## Retro
+The design moved twice in conversation before the lane (Practice beside Resume → one Practice button; a fixed batch → a slider) and the lane started only after it settled: no rework. The lane found that `cargo test --workspace` fails without `ssr` on main (app.rs test code) — follow-up; and 'Practice, 1 cards due' needs a plural form. Retro validated.
