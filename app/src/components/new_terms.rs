@@ -1,6 +1,9 @@
 //! The new-terms control, on the home and the summary: a Segmented picks
 //! how many (+5 by default, +10, Custom with an inline number field,
-//! 1 ≤ n ≤ the new terms left), then one 'Add' Button acts (Q5).
+//! 1 ≤ n ≤ the new terms left), then one 'Add' Button acts (Q5). The
+//! summary shows [`NewTerms`], picker and 'Add' together; the home's dialog
+//! shows [`NewTermsPicker`] in its body and [`AddButton`] in its footer,
+//! sharing one [`Pick`].
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
@@ -19,6 +22,36 @@ enum Choice {
     Custom,
 }
 
+/// What the picker holds: the choice and the text typed for Custom.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Pick {
+    /// What is picked.
+    choice: RwSignal<Choice>,
+    /// The text typed in the number field.
+    custom: RwSignal<String>,
+}
+
+impl Pick {
+    /// +5 picked, nothing typed.
+    pub(crate) fn new() -> Self {
+        Pick {
+            choice: RwSignal::new(Choice::Five),
+            custom: RwSignal::new(String::new()),
+        }
+    }
+
+    /// 'Add' pressed: calls `on_add` with the amount picked, unless nothing
+    /// is left.
+    fn add(self, new_left: usize, on_add: Callback<usize>) {
+        press_add(
+            self.choice.get_untracked(),
+            &self.custom.get_untracked(),
+            new_left,
+            on_add,
+        );
+    }
+}
+
 /// Picks a number of new terms and adds them: a Segmented (+5 · +10 ·
 /// Custom, +5 by default), the number field when Custom, one 'Add' Button.
 #[component]
@@ -29,9 +62,7 @@ pub fn NewTerms(
     /// The deck's terms not started yet: Custom's upper bound.
     new_left: usize,
 ) -> impl IntoView {
-    let choice = RwSignal::new(Choice::Five);
-    let custom = RwSignal::new(String::new());
-    view! { <NewTermsForm choice=choice custom=custom new_left=new_left on_add=on_add /> }
+    view! { <NewTermsForm pick=Pick::new() new_left=new_left on_add=on_add /> }
 }
 
 /// The number to add: the choice, or the typed text for Custom, kept in
@@ -61,59 +92,94 @@ fn press_add(choice: Choice, text: &str, new_left: usize, on_add: Callback<usize
 #[component]
 fn NewTermsForm(
     /// What is picked.
-    choice: RwSignal<Choice>,
-    /// The text typed in the number field.
-    custom: RwSignal<String>,
+    pick: Pick,
     /// The deck's terms not started yet.
     new_left: usize,
     /// Called with the amount when 'Add' is pressed.
     on_add: Callback<usize>,
 ) -> impl IntoView {
-    let t = strings();
     view! {
         <div data-new-terms="" class="flex flex-wrap items-center gap-3">
-            {move || {
-                let locale = t.locale();
-                view! {
-                    <Segmented
-                        aria_label=td_string!(locale, new_count_label)
-                        options=vec![
-                            SegmentedOption {
-                                label: "+5",
-                                value: Choice::Five,
-                            },
-                            SegmentedOption {
-                                label: "+10",
-                                value: Choice::Ten,
-                            },
-                            SegmentedOption {
-                                label: td_string!(locale, new_custom),
-                                value: Choice::Custom,
-                            },
-                        ]
-                        value=choice
-                        on_change=move |picked| choice.set(picked)
-                    />
-                }
-            }}
-            {move || {
-                (choice.get() == Choice::Custom)
-                    .then(|| view! { <NumberField custom=custom new_left=new_left /> })
-            }}
-            <Button
-                variant=Variant::Primary
-                size=Size::Md
-                disabled=Signal::derive(move || new_left == 0)
-                on_click=move |_| press_add(
-                    choice.get_untracked(),
-                    &custom.get_untracked(),
-                    new_left,
-                    on_add,
-                )
-            >
-                {move || td_string!(t.locale(), new_add)}
-            </Button>
+            <PickerFields pick=pick new_left=new_left />
+            <AddButton pick=pick new_left=new_left on_add=on_add />
         </div>
+    }
+}
+
+/// The picker alone, its 'Add' elsewhere (the home's dialog footer): the
+/// Segmented and the number field when Custom.
+#[component]
+pub(crate) fn NewTermsPicker(
+    /// What is picked, shared with the [`AddButton`].
+    pick: Pick,
+    /// The deck's terms not started yet: Custom's upper bound.
+    new_left: usize,
+) -> impl IntoView {
+    view! {
+        <div data-new-terms="" class="flex flex-wrap items-center gap-3">
+            <PickerFields pick=pick new_left=new_left />
+        </div>
+    }
+}
+
+/// 'Add', Primary: calls `on_add` with the amount `pick` holds; disabled
+/// when nothing is left.
+#[component]
+pub(crate) fn AddButton(
+    /// What is picked.
+    pick: Pick,
+    /// The deck's terms not started yet.
+    new_left: usize,
+    /// Called with the amount when pressed.
+    on_add: Callback<usize>,
+) -> impl IntoView {
+    let t = strings();
+    view! {
+        <Button
+            variant=Variant::Primary
+            size=Size::Md
+            disabled=Signal::derive(move || new_left == 0)
+            on_click=move |_| pick.add(new_left, on_add)
+        >
+            {move || td_string!(t.locale(), new_add)}
+        </Button>
+    }
+}
+
+/// The Segmented (+5 · +10 · Custom) and, when Custom, the number field.
+#[component]
+fn PickerFields(pick: Pick, new_left: usize) -> impl IntoView {
+    let t = strings();
+    let Pick { choice, custom } = pick;
+    view! {
+        {move || {
+            let locale = t.locale();
+            view! {
+                <Segmented
+                    aria_label=td_string!(locale, new_count_label)
+                    options=vec![
+                        SegmentedOption {
+                            label: "+5",
+                            value: Choice::Five,
+                        },
+                        SegmentedOption {
+                            label: "+10",
+                            value: Choice::Ten,
+                        },
+                        SegmentedOption {
+                            label: td_string!(locale, new_custom),
+                            value: Choice::Custom,
+                        },
+                    ]
+                    value=choice
+                    on_change=move |picked| choice.set(picked)
+                />
+            }
+        }}
+        {move || {
+            (choice.get() == Choice::Custom)
+                .then(|| view! { <NumberField custom=custom new_left=new_left /> })
+        }}
     }
 }
 
@@ -146,11 +212,12 @@ mod tests {
     fn form(language: Language, choice: Choice, custom: &str, new_left: usize) -> String {
         Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(language);
-            let choice = RwSignal::new(choice);
-            let custom = RwSignal::new(custom.to_owned());
+            let pick = Pick {
+                choice: RwSignal::new(choice),
+                custom: RwSignal::new(custom.to_owned()),
+            };
             let on_add = Callback::new(|_: usize| {});
-            view! { <NewTermsForm choice=choice custom=custom new_left=new_left on_add=on_add /> }
-                .to_html()
+            view! { <NewTermsForm pick=pick new_left=new_left on_add=on_add /> }.to_html()
         })
     }
 

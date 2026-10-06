@@ -1,6 +1,6 @@
 # 008 The term card holds its detail, the strip three by three, the + opens a dialog, the page centred
 
-status: building · rank: 3 · level: standard · type: feature · path: lane + orchestrator's capture · request: learn-pali (user, 2026-10-06) · after: [ui-lib 055]
+status: review · rank: 3 · level: standard · type: feature · path: lane + orchestrator's capture · request: learn-pali (user, 2026-10-06) · after: [ui-lib 055]
 
 ## Summary
 The user, 2026-10-06 (with a capture of an open row whose detail sits outside the card): « les informations d'une carte devraient être dans la carte, avec un peu plus de design. Les 6 times deck mets-les 3 par 3, un peu plus gros. Et centre toute la page un peu plus en middle. Je vois pas de bouton resume, comment apprendre les cartes là ? Enfin le + devrait ouvrir une pop-up pour ajouter des termes. »
@@ -17,6 +17,8 @@ Rank 3: difficulty 3 (a card with a nested toggle, a dialog, vertical centring),
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
-| Define | done | the user's words and capture |
+| Define | done | the user's words and capture; the Resume design chosen by the user among three |
+| Capture | done | orchestrator, :3201 on the branch (dark, desktop 1280, phone 390): compact Resume + '+' on one row, strip 3x3 Md, the open card holds pills + Stage / Next review / Lapses inside its gold border, the + dialog (+5 +10 Custom, Cancel, Add) adds and starts the session, stop and back home, no console error, scrollWidth 390 |
+| Build | done | lane Opus: 5553c2a the card holds its detail, 163f86d the + on the CTA row opens a dialog + compact Resume, 495f4f1 next review date, 7100512 strip 3x3 + page centred (after ui-lib 055), 1800bdd drop detail_facets; 284 + 9 tests; checks EXIT 0. Accepted departures: local card classes (TILE_SURFACE is crate-private), Nav Lg as the toggle, interpolate_display in build.rs, sm:flex-1 sm:justify-center |
 
 ## Retro

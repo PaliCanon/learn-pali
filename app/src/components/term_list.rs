@@ -1,23 +1,23 @@
 //! The term list and what filters it, as the home shows them: the strip of
-//! the six stages, compact, whose cells filter the list in place (each a
-//! `<button aria-pressed>`; the pressed one pressed again shows every term;
-//! the filter is the page's state, no URL, lost on reload),
-//! the known terms in a region capped in height (a row opens its detail
-//! inline, a disclosure, no route), and the terms the deck does not know,
-//! listed apart and never counted.
+//! the six stages, three by three, whose cells filter the list in place
+//! (each a `<button aria-pressed>`; the pressed one pressed again shows
+//! every term; the filter is the page's state, no URL, lost on reload),
+//! the known terms in a region capped in height (each a card that opens
+//! its detail inside itself, a disclosure, no route), and the terms the
+//! deck does not know, listed apart and never counted.
 
 use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use learn_core::date::Date;
 use learn_core::deck::Term;
-use learn_core::facet::{Facet, FacetSet};
+use learn_core::facet::{Facet, FacetSet, facets_of};
 use learn_core::progress::State;
 use learn_core::stage::Stage;
 use leptos::prelude::*;
 use leptos_i18n::td_string;
 use palicanon_ui_lib::{
-    Bucket, BucketStrip, Disclosed, Disclosure, DisclosureButton, PaliTerm, Size, Variant,
+    Bucket, BucketStrip, Columns, Disclosed, Disclosure, DisclosureButton, PaliTerm, Size, Variant,
     language_signal,
 };
 
@@ -26,9 +26,10 @@ use crate::deck::deck;
 use crate::learn::stages::stage_label;
 use crate::learn::words::date_words;
 
-/// The six stages as a compact strip of counts that filters the list in
-/// place: a cell sets `stage` to its stage, the pressed one clears it (the
-/// pressed cell is the only sign of the filter).
+/// The six stages as a strip of counts, three by three at the default
+/// size, that filters the list in place: a cell sets `stage` to its stage,
+/// the pressed one clears it (the pressed cell is the only sign of the
+/// filter).
 #[component]
 pub(crate) fn StageStrip(
     /// The known terms per stage, Day to Year.
@@ -52,7 +53,12 @@ pub(crate) fn StageStrip(
                 })
                 .collect();
             view! {
-                <BucketStrip cells=cells size=Size::Sm on_select=on_select selected=selected />
+                <BucketStrip
+                    cells=cells
+                    columns=Columns::Three
+                    on_select=on_select
+                    selected=selected
+                />
             }
         }}
     }
@@ -100,6 +106,8 @@ pub(crate) struct Row {
     lapses: u32,
     /// The facets passed that the deck still has.
     passed: FacetSet,
+    /// The facets the term can be asked.
+    facets: FacetSet,
 }
 
 /// The known terms of `state` (those the deck has), only those of stage
@@ -116,11 +124,18 @@ pub(crate) fn known_rows(state: &State, only: Option<Stage>) -> Vec<Row> {
                 due: progress.due,
                 lapses: progress.lapses,
                 passed: State::effective_passed(progress, term),
+                facets: facets_of(term),
             })
         })
         .collect();
     rows.sort_by_key(|row| (row.due, row.term.rank));
     rows
+}
+
+/// The first day a known term of `state` is asked again: the earliest due
+/// of the terms the deck has; none when no term is started.
+pub(crate) fn next_review(state: &State) -> Option<Date> {
+    known_rows(state, None).first().map(|row| row.due)
 }
 
 /// The terms of `state` the deck does not know, in file order, with their
@@ -144,13 +159,19 @@ fn facet_label(t: Strings, facet: Facet) -> &'static str {
     }
 }
 
-/// The facets passed, by name; a dash for none.
-fn facets_text(t: Strings, passed: FacetSet) -> String {
-    let names: Vec<&str> = passed.iter().map(|facet| facet_label(t, facet)).collect();
-    if names.is_empty() {
-        "—".to_owned()
+/// A closed card: the tile's resting surface, a hairline border.
+const CARD_CLOSED: &str = "rounded-xl border border-line bg-chip hover:border-gold/60";
+
+/// An open card: the same surface, the gold border (one border colour or
+/// the other, never both on the element).
+const CARD_OPEN: &str = "rounded-xl border border-gold bg-chip";
+
+/// A facet's pill: gold with a check when passed, muted otherwise.
+fn pill_classes(passed: bool) -> &'static str {
+    if passed {
+        "rounded-full border border-gold px-2 py-0.5 text-xs text-heading"
     } else {
-        names.join(", ")
+        "rounded-full border border-line px-2 py-0.5 text-xs text-muted"
     }
 }
 
@@ -193,44 +214,79 @@ pub(crate) fn TermRows(
     .into_any()
 }
 
-/// One term as ui-lib's `PaliTerm` in a `Tile` button that opens its
-/// detail inline: the lemma in bold with its stage glued in parentheses and
-/// the due date on line 1, the sense and the lapses on line 2. The stage,
-/// the date and the lapses follow the language.
+/// One term in the list: a [`TermCard`] with its own disclosure, closed.
 #[component]
 fn TermRow(
     /// The term and where it stands.
     row: Row,
 ) -> impl IntoView {
-    let t = strings();
-    let language = language_signal();
     let detail = Disclosed::new(detail_id(row.term.rank), RwSignal::new(false));
-    let (stage, due, lapses) = (row.stage, row.due, row.lapses);
     view! {
-        <li class="flex flex-col gap-2">
-            <DisclosureButton
-                controls=detail
-                variant=Variant::Tile
-                layout="w-full text-left px-4 py-3"
-            >
-                <PaliTerm
-                    lemma=row.term.lemma.clone()
-                    gloss=row.term.meaning.en.clone()
-                    tag=Signal::derive(move || stage_label(t, stage).to_owned())
-                    top_end=move || view! { {move || date_words(language.get(), due)} }
-                    bottom_end=move || {
-                        view! {
-                            {move || format!("{} {lapses}", td_string!(t.locale(), detail_lapses))}
-                        }
-                    }
-                />
-            </DisclosureButton>
-            <TermDetail row=row open=detail />
+        <li>
+            <TermCard row=row open=detail />
         </li>
     }
 }
 
-/// The detail a row opens: stage, facets passed, lapses, due.
+/// One term as a card that holds its detail: the toggle ([`TermToggle`])
+/// and, while open, the detail under a divider ([`TermDetail`]); the
+/// border is gold while open.
+#[component]
+fn TermCard(
+    /// The term and where it stands.
+    row: Row,
+    /// What shows and hides the detail.
+    open: Disclosed,
+) -> impl IntoView {
+    let surface = move || {
+        if open.is_open() {
+            CARD_OPEN
+        } else {
+            CARD_CLOSED
+        }
+    };
+    view! {
+        <div data-term-card="" class=surface>
+            <TermToggle row=row.clone() open=open />
+            <TermDetail row=row open=open />
+        </div>
+    }
+}
+
+/// The card's toggle: ui-lib's `PaliTerm` in a full-width disclosure with
+/// no surface of its own (the card has it): the lemma in bold with its
+/// stage glued in parentheses and the due date on line 1, the sense and
+/// the lapses on line 2. The stage, the date and the lapses follow the
+/// language.
+#[component]
+fn TermToggle(
+    /// The term and where it stands.
+    row: Row,
+    /// What it opens.
+    open: Disclosed,
+) -> impl IntoView {
+    let t = strings();
+    let language = language_signal();
+    let (stage, due, lapses) = (row.stage, row.due, row.lapses);
+    view! {
+        <DisclosureButton controls=open variant=Variant::Nav size=Size::Lg layout="text-left">
+            <PaliTerm
+                lemma=row.term.lemma.clone()
+                gloss=row.term.meaning.en.clone()
+                tag=Signal::derive(move || stage_label(t, stage).to_owned())
+                top_end=move || view! { {move || date_words(language.get(), due)} }
+                bottom_end=move || {
+                    view! {
+                        {move || format!("{} {lapses}", td_string!(t.locale(), detail_lapses))}
+                    }
+                }
+            />
+        </DisclosureButton>
+    }
+}
+
+/// The detail a card opens, under a hairline divider: a pill per facet of
+/// the term ([`FacetPills`]), then stage, next review and lapses.
 #[component]
 fn TermDetail(
     /// The term and where it stands.
@@ -238,22 +294,63 @@ fn TermDetail(
     /// What shows and hides it.
     open: Disclosed,
 ) -> impl IntoView {
+    view! {
+        <div id=open.id() hidden=move || !open.is_open() class="pb-3 text-sm">
+            <div class="mx-4 border-t border-line"></div>
+            <div class="flex flex-col gap-3 px-4 pt-3">
+                <FacetPills facets=row.facets passed=row.passed />
+                <DetailPairs row=row />
+            </div>
+        </div>
+    }
+}
+
+/// One small pill per facet the term has, in the facets' order: passed ones
+/// gold with a check, the others muted.
+#[component]
+fn FacetPills(
+    /// The facets the term can be asked.
+    facets: FacetSet,
+    /// Those passed.
+    passed: FacetSet,
+) -> impl IntoView {
+    let t = strings();
+    view! {
+        <ul data-facets="" class="flex flex-wrap gap-2">
+            {Facet::ALL
+                .into_iter()
+                .filter(|facet| facets.contains(*facet))
+                .map(|facet| {
+                    let done = passed.contains(facet);
+                    view! {
+                        <li class=pill_classes(
+                            done,
+                        )>{done.then_some("✓ ")} {move || facet_label(t, facet)}</li>
+                    }
+                })
+                .collect_view()}
+        </ul>
+    }
+}
+
+/// Stage, next review and lapses, label and value in two columns.
+#[component]
+fn DetailPairs(
+    /// The term and where it stands.
+    row: Row,
+) -> impl IntoView {
     let t = strings();
     let language = language_signal();
-    let (stage, due, lapses, passed) = (row.stage, row.due, row.lapses, row.passed);
+    let (stage, due, lapses) = (row.stage, row.due, row.lapses);
     view! {
-        <div id=open.id() hidden=move || !open.is_open() class="px-4 pb-2 text-sm">
-            <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-                <dt class="text-muted">{move || td_string!(t.locale(), detail_stage)}</dt>
-                <dd>{move || stage_label(t, stage)}</dd>
-                <dt class="text-muted">{move || td_string!(t.locale(), detail_facets)}</dt>
-                <dd>{move || facets_text(t, passed)}</dd>
-                <dt class="text-muted">{move || td_string!(t.locale(), detail_lapses)}</dt>
-                <dd>{lapses}</dd>
-                <dt class="text-muted">{move || td_string!(t.locale(), detail_due)}</dt>
-                <dd>{move || date_words(language.get(), due)}</dd>
-            </dl>
-        </div>
+        <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
+            <dt class="text-muted">{move || td_string!(t.locale(), detail_stage)}</dt>
+            <dd>{move || stage_label(t, stage)}</dd>
+            <dt class="text-muted">{move || td_string!(t.locale(), detail_due)}</dt>
+            <dd>{move || date_words(language.get(), due)}</dd>
+            <dt class="text-muted">{move || td_string!(t.locale(), detail_lapses)}</dt>
+            <dd>{lapses}</dd>
+        </dl>
     }
 }
 
@@ -342,8 +439,16 @@ mod tests {
     }
 
     #[test]
-    fn the_strip_has_six_compact_cells_that_filter_in_place() {
+    fn the_strip_has_six_cells_three_by_three_that_filter_in_place() {
         let html = strip(None);
+        let list = tag_around(&html, "<ul");
+        let classes: Vec<&str> = list.split(['"', ' ']).collect();
+        assert!(classes.contains(&"grid-cols-3"), "{list}");
+        assert!(
+            !classes.contains(&"sm:flex"),
+            "three columns at every width: {list}"
+        );
+        assert!(!html.contains("sm:flex-1"), "{html}");
         assert!(!html.contains("Time until the next review"), "{html}");
         assert!(!html.contains("<h2"), "no heading, HC: {html}");
         assert!(!html.contains("href="), "no link, no URL: {html}");
@@ -360,10 +465,14 @@ mod tests {
             assert!(button.contains(r#"type="button""#), "{button}");
             assert!(button.contains(r#"aria-pressed="false""#), "{button}");
             let counted = format!(
-                r#">{label}</span><span class="order-first text-base font-semibold text-heading">{count}</span>"#
+                r#">{label}</span><span class="order-first text-2xl font-semibold text-heading">{count}</span>"#
             );
-            assert!(html.contains(&counted), "compact: {counted}: {html}");
+            assert!(
+                html.contains(&counted),
+                "the default size: {counted}: {html}"
+            );
         }
+        assert!(!html.contains("text-base"), "not compact: {html}");
         assert!(!html.contains("All terms"), "no filter line: {html}");
     }
 
@@ -456,26 +565,181 @@ mod tests {
         &row[..position(row, "</button>")]
     }
 
+    /// The whole `<div>` element whose open tag holds byte `inside`.
+    fn div_at(html: &str, inside: usize) -> &str {
+        let start = html[..inside].rfind("<div").expect(html);
+        let mut depth = 0;
+        let mut i = start;
+        loop {
+            let open = html[i..].find("<div").map(|o| i + o);
+            let close = html[i..].find("</div>").map(|c| i + c).expect(html);
+            match open {
+                Some(open) if open < close => {
+                    depth += 1;
+                    i = open + 4;
+                }
+                _ => {
+                    depth -= 1;
+                    i = close + 6;
+                    if depth == 0 {
+                        return &html[start..i];
+                    }
+                }
+            }
+        }
+    }
+
+    /// The card of the row whose lemma is `lemma`, whole.
+    fn card<'a>(html: &'a str, lemma: &str) -> &'a str {
+        let at = position(html, &format!(">{lemma}</span>"));
+        let card = html[..at].rfind("data-term-card").expect(html);
+        div_at(html, card)
+    }
+
+    /// The class tokens of the open tag holding `needle`.
+    fn classes_of<'a>(html: &'a str, needle: &str) -> Vec<&'a str> {
+        tag_around(html, needle).split(['"', ' ']).collect()
+    }
+
+    /// One card, its disclosure `open` or not.
+    fn one_card(open: bool) -> String {
+        let row = known_rows(&progress_fixture(), Some(Stage::Week)).remove(0);
+        render(Language::En, move || {
+            let detail = Disclosed::new(detail_id(row.term.rank), RwSignal::new(open));
+            view! { <TermCard row=row open=detail /> }
+        })
+    }
+
     #[test]
-    fn a_row_is_ui_libs_pali_term_inside_a_tile_button() {
+    fn a_row_is_one_card_holding_the_toggle_and_its_detail() {
         let html = list(None, Language::En);
-        let row = row_button(&html, "kho");
-        let button = &row[..position(row, ">")];
-        for class in [
-            "rounded-xl",
-            "border-line",
-            "bg-chip",
-            "hover:border-gold/60",
-            "w-full",
-            "text-left",
-            "px-4",
-            "py-3",
-        ] {
+        let card = card(&html, "kho");
+        let surface = classes_of(card, "data-term-card");
+        for class in ["rounded-xl", "border", "border-line", "bg-chip"] {
+            assert!(surface.contains(&class), "{class}: {surface:?}");
+        }
+        assert!(!surface.contains(&"border-gold"), "closed: {surface:?}");
+        assert!(card.contains("<button"), "the toggle is inside: {card}");
+        assert!(card.contains("<dl"), "the detail is inside: {card}");
+        assert!(card.contains(r#"id="pc-detail-1""#), "{card}");
+        let toggle = classes_of(card, r#"aria-controls="pc-detail-1""#);
+        for class in ["w-full", "text-left"] {
+            assert!(toggle.contains(&class), "{class}: {toggle:?}");
+        }
+        for surface in ["bg-chip", "border-line", "rounded-full", "underline"] {
             assert!(
-                button.split(['"', ' ']).any(|c| c == class),
-                "{class}: {button}"
+                !toggle.contains(&surface),
+                "transparent: {surface} in {toggle:?}"
             );
         }
+    }
+
+    #[test]
+    fn an_open_card_has_a_gold_border_and_shows_its_detail_under_a_divider() {
+        let html = one_card(true);
+        let surface = classes_of(&html, "data-term-card");
+        assert!(surface.contains(&"border-gold"), "{surface:?}");
+        assert!(
+            !surface.contains(&"border-line"),
+            "one border colour: {surface:?}"
+        );
+        let detail = tag_around(&html, r#"id="pc-detail-1""#);
+        assert!(!detail.split(['"', ' ']).any(|t| t == "hidden"), "{detail}");
+        let divider = classes_of(&html, "border-t");
+        for class in ["mx-4", "border-t", "border-line"] {
+            assert!(divider.contains(&class), "{class}: {divider:?}");
+        }
+        assert!(
+            position(&html, "</button>") < position(&html, "border-t")
+                && position(&html, "border-t") < position(&html, "<dl"),
+            "the toggle, the divider, the detail: {html}"
+        );
+        let closed = one_card(false);
+        assert!(
+            tag_around(&closed, r#"id="pc-detail-1""#).contains("hidden"),
+            "{closed}"
+        );
+    }
+
+    #[test]
+    fn the_detail_has_a_pill_per_facet_of_the_term_the_passed_ones_gold_with_a_check() {
+        let html = one_card(true);
+        let kho = deck()
+            .term(&learn_core::deck::TermId("kho".into()))
+            .expect("kho");
+        let facets = learn_core::facet::facets_of(kho);
+        let pills = &html[position(&html, "data-facets")..];
+        let pills = &pills[..position(pills, "</ul>")];
+        assert_eq!(pills.matches("<li").count(), facets.len(), "{pills}");
+        for facet in Facet::ALL {
+            let name = match facet {
+                Facet::Meaning => "Meaning",
+                Facet::Recall => "Recall",
+                Facet::Forms => "Forms",
+                Facet::Context => "Context",
+            };
+            if !facets.contains(facet) {
+                assert!(!pills.contains(name), "{name}: {pills}");
+                continue;
+            }
+            let pill = tag_around(pills, &format!("{name}<"));
+            let classes: Vec<&str> = pill.split(['"', ' ']).collect();
+            for class in ["rounded-full", "px-2", "py-0.5", "text-xs", "border"] {
+                assert!(classes.contains(&class), "{class}: {pill}");
+            }
+            let text = &pills[pills.find(pill).expect(pills)..];
+            let text = &text[..position(text, "</li>")];
+            if matches!(facet, Facet::Meaning | Facet::Recall) {
+                assert!(classes.contains(&"border-gold"), "passed: {pill}");
+                assert!(text.contains('✓'), "passed: {text}");
+            } else {
+                assert!(classes.contains(&"border-line"), "not passed: {pill}");
+                assert!(!text.contains('✓'), "not passed: {text}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_detail_reads_stage_next_review_and_lapses() {
+        let html = one_card(true);
+        let dl = &html[position(&html, "<dl")..];
+        let dl = &dl[..position(dl, "</dl>")];
+        let order = [
+            "Stage",
+            "Weekly",
+            "Next review",
+            "12 October 2026",
+            "Lapses",
+            ">2<",
+        ]
+        .map(|text| position(dl, text));
+        assert!(order.is_sorted(), "{order:?}: {dl}");
+        assert!(dl.contains("grid-cols-[auto_1fr]"), "two columns: {dl}");
+        for gone in ["Facets passed", ">Due<"] {
+            assert!(!html.contains(gone), "{gone}: {html}");
+        }
+    }
+
+    #[test]
+    fn the_next_review_is_the_earliest_due_of_the_known_terms() {
+        let state = progress_fixture();
+        assert_eq!(next_review(&state), Some(crate::test_support::today()));
+        let mut later = progress_fixture();
+        later
+            .progress
+            .retain(|p| p.term.0 == "kho" || p.term.0 == "ghost 1");
+        assert_eq!(
+            next_review(&later),
+            Some(Date::from_days(crate::test_support::today().days() + 7)),
+            "an orphan's date does not count"
+        );
+        assert_eq!(next_review(&State::empty()), None);
+    }
+
+    #[test]
+    fn a_row_is_ui_libs_pali_term_in_its_card() {
+        let html = list(None, Language::En);
+        let row = row_button(&html, "kho");
         let grid = tag_around(row, "grid-cols-[minmax(0,1fr)_auto]");
         assert!(grid.starts_with("<div"), "PaliTerm's grid: {grid}");
         let strong = position(row, r#"<strong class="font-semibold">"#);
@@ -536,13 +800,12 @@ mod tests {
         assert!(button.contains(r#"aria-expanded="false""#), "{button}");
         let detail_tag = tag_around(&html, r#"id="pc-detail-1""#);
         assert!(detail_tag.contains("hidden"), "closed: {detail_tag}");
-        let detail = &html[position(&html, r#"id="pc-detail-1""#)..];
-        let detail = &detail[..position(detail, "</div>")];
+        let detail = div_at(&html, position(&html, r#"id="pc-detail-1""#));
         for text in [
-            "Facets passed",
-            "Meaning, Recall",
+            "✓ Meaning",
+            "✓ Recall",
             "Lapses",
-            "Due",
+            "Next review",
             "12 October 2026",
             "Stage",
         ] {

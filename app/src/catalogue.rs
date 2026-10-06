@@ -266,7 +266,7 @@ mod tests {
     }
 
     /// The keys of the home (with its progress and data block) and the review.
-    const SCREEN_KEYS: [&str; 69] = [
+    const SCREEN_KEYS: [&str; 70] = [
         "home_title",
         "home_teach",
         "home_loading",
@@ -318,9 +318,10 @@ mod tests {
         "progress_empty",
         "progress_terms",
         "detail_stage",
-        "detail_facets",
         "detail_lapses",
         "detail_due",
+        "next_review",
+        "cta_resume_label",
         "facet_meaning",
         "facet_recall",
         "facet_forms",
