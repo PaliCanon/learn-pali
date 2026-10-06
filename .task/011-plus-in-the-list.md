@@ -1,6 +1,6 @@
 # 011 The + inside the term list, bottom right; export and import in Settings
 
-status: review · rank: 3 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-06: « j'aimerais que le bouton plus soit dans la liste en bas à droite ») · after: [010, ui-lib 057]
+status: merged · rank: 3 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-06: « j'aimerais que le bouton plus soit dans la liste en bas à droite ») · after: [010, ui-lib 057]
 
 ## Summary
 The '+' (Accent, opens the New terms dialog) leaves the CTA row and sits inside the term list's scroll region, at its bottom right, sticky (`sticky bottom-2` in a right-aligned row after the `<ul>`, `ml-auto`, a small shadow so it reads above the cards), so it stays in reach while the list scrolls; the CTA row keeps Practice, the slider and 'Next review'. When no term is started (no list), the '+' sits where the list would be, right-aligned. Mobile: the same, the list's region is full width.
@@ -16,4 +16,8 @@ Rank 2 → 3 (a cross-repo dependency, the broken-state wording).
 | Build | done | lane Opus: 5bb1e78 the + inside the list (sticky bottom right), fba857c export/import in Settings via ui-lib settings_extra (StoreWrites signal re-reads the home after Replace; Replace refuses over a newer-version store), ab2d6c0 'Practice ahead, 1 term', 5b97433 README; 398 workspace + 304 ssr tests; all checks EXIT 0 |
 | Capture | done | orchestrator on :3201 (branch): the + inside the list at its bottom right, staying while the list scrolls (it overlaps the last card's lapses at the very bottom — told to the user); Settings: Appearance then 'Your progress' with Export and Import; no console error; phone 390 no overflow |
 
+## Merge
+1d1b049 (squash, 2026-10-06), after ui-lib 057.
+
 ## Retro
+One line: a cross-repo need found and served additively (057) before the lane; the lane added a guard beyond the brief (Replace never overwrites a newer version) — kept.
