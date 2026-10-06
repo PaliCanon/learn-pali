@@ -266,12 +266,13 @@ mod tests {
     }
 
     /// The keys of the home (with its progress and data block) and the review.
-    const SCREEN_KEYS: [&str; 72] = [
+    const SCREEN_KEYS: [&str; 73] = [
         "home_title",
         "home_teach",
         "home_loading",
         "cta_practice",
-        "cta_practice_label",
+        "cta_practice_label_1",
+        "cta_practice_label_n",
         "cta_practice_ahead_label",
         "practice_batch_label",
         "add_terms",

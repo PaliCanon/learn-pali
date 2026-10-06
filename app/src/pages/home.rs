@@ -44,7 +44,7 @@ use palicanon_ui_lib::{
 use crate::catalogue::{Locale, strings};
 use crate::components::data_block::DataBlock;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
-use crate::components::session::{Phase, SessionView, practice_phase, start_phase};
+use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
 use crate::components::term_list::{Orphans, StageStrip, StageTerms, next_review, orphan_rows};
 use crate::deck::deck;
 use crate::learn::home_state::{BrokenKind, HomeState, home_state, new_left};
@@ -469,7 +469,7 @@ pub fn HomeView(
             </DueBlock>
         }
         .into_any(),
-        HomeState::NothingDue { .. } => {
+        HomeState::NothingDue => {
             let cta = nothing_due_cta(counts, saved.as_ref(), stage, batch);
             view! {
                 <NothingDueBlock cta=cta new_left=new_left act=act>
@@ -688,7 +688,11 @@ fn Cta(
         let locale = Locale::from(language);
         match cta {
             CtaSlot::Practice(due) => {
-                let name = td_string!(locale, cta_practice_label, count = due).to_string();
+                let name = if singular(locale, due) {
+                    td_string!(locale, cta_practice_label_1, count = due).to_string()
+                } else {
+                    td_string!(locale, cta_practice_label_n, count = due).to_string()
+                };
                 let label = td_string!(locale, cta_practice);
                 view! { <CompactCta cta=cta label=label count=due name=name act=act /> }.into_any()
             }
@@ -981,7 +985,8 @@ fn plain_click(ev: &MouseEvent) -> bool {
     ev.button() == 0 && !(ev.ctrl_key() || ev.meta_key() || ev.shift_key() || ev.alt_key())
 }
 
-#[cfg(test)]
+/// These tests render markup on the server: they need `ssr`.
+#[cfg(all(test, feature = "ssr"))]
 mod tests {
     use learn_core::deck::TermId;
     use learn_core::facet::FacetSet;
@@ -1034,11 +1039,8 @@ mod tests {
     /// Started terms per stage: 21 in all.
     const STARTED: [usize; 6] = [6, 5, 4, 3, 2, 1];
 
-    /// Nothing due (whether `Session::advance` could move a term no longer
-    /// matters to the home).
-    const NOTHING_DUE: HomeState = HomeState::NothingDue {
-        advance_possible: false,
-    };
+    /// Nothing due today.
+    const NOTHING_DUE: HomeState = HomeState::NothingDue;
 
     /// The `<tag …>` open tag just before the first `text`.
     fn tag_before(html: &str, tag: &str, text: &str) -> String {
@@ -1153,16 +1155,7 @@ mod tests {
     /// HC: no state has a headline; one button is enough.
     #[test]
     fn no_state_has_a_headline() {
-        for state in [
-            HomeState::Due(1),
-            HomeState::Due(12),
-            HomeState::NothingDue {
-                advance_possible: true,
-            },
-            HomeState::NothingDue {
-                advance_possible: false,
-            },
-        ] {
+        for state in [HomeState::Due(1), HomeState::Due(12), HomeState::NothingDue] {
             let html = en(state, 10);
             for absent in ["to review", "Nothing due today"] {
                 assert!(!html.contains(absent), "{state:?} {absent}: {html}");
@@ -1349,16 +1342,11 @@ mod tests {
 
     // ---- T3: the states ----
 
-    /// Nothing due, nothing to advance, nothing started: no CTA and no
+    /// Nothing due, nothing started: no CTA and no
     /// date, the row holds the '+' alone, small and at the right.
     #[test]
     fn nothing_to_review_and_nothing_started_has_the_plus_alone_on_the_row() {
-        let html = en(
-            HomeState::NothingDue {
-                advance_possible: false,
-            },
-            10,
-        );
+        let html = en(HomeState::NothingDue, 10);
         let row = element_at(&html, at(&html, "data-cta-row"));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
         assert!(!row.contains("Next review"), "{row}");
@@ -1425,7 +1413,10 @@ mod tests {
             }
             assert!(!classes.contains(&"h-13"), "compact: {tag}");
             assert!(
-                tag.contains(&format!(r#"aria-label="Practice, {n} cards due""#)),
+                tag.contains(&format!(
+                    r#"aria-label="Practice, {n} {}""#,
+                    if n == 1 { "card due" } else { "cards due" }
+                )),
                 "{tag}"
             );
             let order = [
@@ -1441,6 +1432,24 @@ mod tests {
         let add = tag_before(&html, "button", "New terms");
         assert!(add.contains(r#"aria-expanded="false""#), "{add}");
         assert!(add.contains("aria-controls"), "{add}");
+    }
+
+    /// One card due reads in the singular in English and French; Vietnamese
+    /// has one form.
+    #[test]
+    fn one_card_due_reads_in_the_singular() {
+        for (language, resume, name) in [
+            (Language::En, "Practice", "Practice, 1 card due"),
+            (Language::Fr, "S’entraîner", "S’entraîner, 1 carte à revoir"),
+            (Language::Vi, "Luyện tập", "Luyện tập, 1 thẻ cần ôn"),
+        ] {
+            let html = view_of(language, HomeState::Due(1), 10, [0; 6]);
+            let button = button_with(&html, &format!(">{resume}<"));
+            assert!(
+                button.contains(&format!(r#"aria-label="{name}""#)),
+                "{button}"
+            );
+        }
     }
 
     #[test]
@@ -1720,12 +1729,7 @@ mod tests {
     #[test]
     fn the_strip_has_six_cells_three_by_three_filtering_the_home_in_place() {
         let counts = [6, 5, 4, 3, 2, 1];
-        for state in [
-            HomeState::Due(2),
-            HomeState::NothingDue {
-                advance_possible: false,
-            },
-        ] {
+        for state in [HomeState::Due(2), HomeState::NothingDue] {
             let html = view_of(Language::En, state, 10, counts);
             assert_eq!(html.matches("<li").count(), 6, "{html}");
             let mut last = 0;
@@ -1815,30 +1819,14 @@ mod tests {
     }
 
     /// Every state, with its terms left to start.
-    fn every_state() -> [(HomeState, usize); 9] {
+    fn every_state() -> [(HomeState, usize); 8] {
         [
             (HomeState::Loading, 0),
             (HomeState::Empty, 50),
             (HomeState::Due(1), 10),
             (HomeState::Due(12), 10),
-            (
-                HomeState::NothingDue {
-                    advance_possible: true,
-                },
-                0,
-            ),
-            (
-                HomeState::NothingDue {
-                    advance_possible: false,
-                },
-                5,
-            ),
-            (
-                HomeState::NothingDue {
-                    advance_possible: false,
-                },
-                0,
-            ),
+            (HomeState::NothingDue, 0),
+            (HomeState::NothingDue, 5),
             (HomeState::Broken(BrokenKind::Invalid), 0),
             (HomeState::Broken(BrokenKind::NewerVersion), 0),
         ]
@@ -1911,12 +1899,7 @@ mod tests {
 
     /// The two states with started terms.
     fn started() -> [HomeState; 2] {
-        [
-            HomeState::Due(5),
-            HomeState::NothingDue {
-                advance_possible: true,
-            },
-        ]
+        [HomeState::Due(5), HomeState::NothingDue]
     }
 
     #[test]

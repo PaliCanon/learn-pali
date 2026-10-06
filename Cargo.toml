@@ -41,6 +41,9 @@ reload-port = 4201
 bin-features = ["ssr"]
 lib-features = ["hydrate"]
 lib-profile-release = "wasm-release"
+# Hashed file names (`learn-pali.<hash>.css`, `.js`, `.wasm`): the shell reads
+# the hash file `cargo-leptos` writes next to the server binary.
+hash-files = true
 
 # Built from ../ui-lib (a worktree reaches it through the wt/ui-lib
 # symlink), not from GitHub: a change to both repositories is seen at once.

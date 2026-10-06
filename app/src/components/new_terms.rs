@@ -201,7 +201,8 @@ fn NumberField(custom: RwSignal<String>, new_left: usize) -> impl IntoView {
     }
 }
 
-#[cfg(test)]
+/// These tests render markup on the server: they need `ssr`.
+#[cfg(all(test, feature = "ssr"))]
 mod tests {
     use std::sync::{Arc, Mutex};
 

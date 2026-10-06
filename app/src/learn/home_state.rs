@@ -1,13 +1,11 @@
 //! Which state the home shows ([`home_state`]), from what the store read,
 //! the deck and `today`.
 
+use crate::store::Load;
 use learn_core::date::Date;
 use learn_core::deck::Deck;
 use learn_core::facet::facets_of;
 use learn_core::progress::State;
-use learn_core::stage::Stage;
-
-use crate::store::Load;
 
 /// Why the saved progress could not be used (the Broken banner's two
 /// sentences; Q3: only an Invalid state may be started again).
@@ -30,12 +28,8 @@ pub(crate) enum HomeState {
     Empty,
     /// This many cards due today (A1: the queue's length).
     Due(usize),
-    /// Nothing due today; `advance_possible` when `advance` would move a
-    /// long-stage term forward.
-    NothingDue {
-        /// `Session::advance` would bring something forward.
-        advance_possible: bool,
-    },
+    /// Nothing due today.
+    NothingDue,
     /// The saved progress could not be used.
     Broken(BrokenKind),
 }
@@ -43,10 +37,8 @@ pub(crate) enum HomeState {
 /// The home's state for `load` (what the store read), the deck and `today`
 /// (already `session_today`): [`HomeState::Empty`] when nothing is started,
 /// [`HomeState::Due`] when [`due_cards`] is above 0, otherwise
-/// [`HomeState::NothingDue`] — `advance_possible` only when every deck term
-/// is started and one the deck knows sits in Month or later, the conditions
-/// `Session::advance` itself requires (A1). A load the store could not use
-/// is [`HomeState::Broken`]; `Loading` is the page's own, before the read.
+/// [`HomeState::NothingDue`]. A load the store could not use is
+/// [`HomeState::Broken`]; `Loading` is the page's own, before the read.
 pub(crate) fn home_state(load: &Load, deck: &Deck, today: Date) -> HomeState {
     match load {
         Load::Empty => HomeState::Empty,
@@ -54,9 +46,7 @@ pub(crate) fn home_state(load: &Load, deck: &Deck, today: Date) -> HomeState {
         Load::NewerVersion { .. } => HomeState::Broken(BrokenKind::NewerVersion),
         Load::Ok(state) if state.progress.is_empty() => HomeState::Empty,
         Load::Ok(state) => match due_cards(deck, state, today) {
-            0 => HomeState::NothingDue {
-                advance_possible: advance_possible(deck, state),
-            },
+            0 => HomeState::NothingDue,
             due => HomeState::Due(due),
         },
     }
@@ -79,17 +69,6 @@ pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
                 .len()
         })
         .sum()
-}
-
-/// `Session::advance` would bring something forward: every deck term is
-/// started and a term the deck knows is in Month or later.
-fn advance_possible(deck: &Deck, state: &State) -> bool {
-    let all_started = deck.terms.iter().all(|term| state.get(&term.id).is_some());
-    let long_term = state
-        .progress
-        .iter()
-        .any(|progress| progress.stage >= Stage::Month && deck.term(&progress.term).is_some());
-    all_started && long_term
 }
 
 /// The deck's terms not started yet in `load` (all of them when it holds
@@ -211,9 +190,7 @@ mod tests {
         let only_orphan = state_of(vec![entry("not-in-the-deck", Stage::Day, today())]);
         assert_eq!(
             home_state(&Load::Ok(only_orphan), deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: false
-            }
+            HomeState::NothingDue
         );
     }
 
@@ -225,65 +202,11 @@ mod tests {
             .into_iter()
             .collect();
         let load = Load::Ok(state_of(vec![kho]));
-        assert_eq!(
-            home_state(&load, deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: false
-            }
-        );
+        assert_eq!(home_state(&load, deck(), today()), HomeState::NothingDue);
     }
 
     #[test]
-    fn nothing_due_with_a_long_stage_term_and_the_deck_started_can_advance() {
-        let mut entries = everything_started(Stage::Week, 3);
-        entries[0].stage = Stage::Month;
-        let load = Load::Ok(state_of(entries));
-        assert_eq!(
-            home_state(&load, deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: true
-            }
-        );
-    }
-
-    #[test]
-    fn nothing_due_and_no_long_stage_term_cannot_advance() {
-        let load = Load::Ok(state_of(everything_started(Stage::Week, 3)));
-        assert_eq!(
-            home_state(&load, deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: false
-            }
-        );
-    }
-
-    #[test]
-    fn advance_is_not_possible_while_the_deck_has_terms_to_start() {
-        // Session::advance refuses until every deck term is started.
-        let load = Load::Ok(state_of(vec![entry("kho", Stage::Month, today() + 20)]));
-        assert_eq!(
-            home_state(&load, deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: false
-            }
-        );
-    }
-
-    #[test]
-    fn a_long_stage_orphan_does_not_make_advance_possible() {
-        let mut entries = everything_started(Stage::Week, 3);
-        entries.push(entry("not-in-the-deck", Stage::Year, today() + 300));
-        let load = Load::Ok(state_of(entries));
-        assert_eq!(
-            home_state(&load, deck(), today()),
-            HomeState::NothingDue {
-                advance_possible: false
-            }
-        );
-    }
-
-    #[test]
-    fn something_due_wins_over_advance() {
+    fn something_due_wins_over_long_stage_terms() {
         let mut entries = everything_started(Stage::Month, 20);
         entries[1].due = today();
         entries[1].stage = Stage::Day;

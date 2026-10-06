@@ -38,12 +38,14 @@ pub(crate) fn progress_fixture() -> State {
 }
 
 /// The byte where `needle` starts; a panic showing the HTML otherwise.
+#[cfg(feature = "ssr")]
 pub(crate) fn position(html: &str, needle: &str) -> usize {
     html.find(needle)
         .unwrap_or_else(|| panic!("{needle}: {html}"))
 }
 
 /// The opening tag that contains `needle`.
+#[cfg(feature = "ssr")]
 pub(crate) fn tag_around<'a>(html: &'a str, needle: &str) -> &'a str {
     let at = position(html, needle);
     let start = html[..at].rfind('<').expect(html);
@@ -52,6 +54,7 @@ pub(crate) fn tag_around<'a>(html: &'a str, needle: &str) -> &'a str {
 
 /// The `<button>` that ends with the label `label`, its class removed (the
 /// variant's classes hold `disabled:` states of their own).
+#[cfg(feature = "ssr")]
 pub(crate) fn button_labelled(html: &str, label: &str) -> String {
     let end = position(html, &format!(">{label}<"));
     let tag = &html[html[..end].rfind("<button").expect(html)..end];

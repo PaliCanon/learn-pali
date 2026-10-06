@@ -51,7 +51,8 @@ fn links(t: Strings) -> Vec<FooterLink> {
     ]
 }
 
-#[cfg(test)]
+/// These tests render markup on the server: they need `ssr`.
+#[cfg(all(test, feature = "ssr"))]
 mod tests {
     use palicanon_ui_lib::{AppShell, Language};
 

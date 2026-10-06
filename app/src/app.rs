@@ -5,7 +5,7 @@
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
-use leptos_meta::{MetaTags, Stylesheet, Title, provide_meta_context};
+use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
 use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::path;
@@ -36,7 +36,9 @@ pub(crate) const BADGE: EnvBadgeInfo = EnvBadgeInfo {
 /// The HTML document around the app, rendered on the server. `data-theme`
 /// and `lang` follow the request's cookies ([`theme_attribute`],
 /// [`language_attribute`]), so the first paint never flashes the wrong
-/// one.
+/// one. The stylesheet and the scripts are linked by their hashed names
+/// (`hash-files` in `Cargo.toml`), so a new build is never served from
+/// the browser's cache.
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -46,6 +48,7 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <link rel="icon" href="/favicon.ico" />
                 <AutoReload options=options.clone() />
+                <HashedStylesheet id="leptos" options=options.clone() />
                 <HydrationScripts options />
                 <MetaTags />
             </head>
@@ -64,7 +67,6 @@ pub fn App() -> impl IntoView {
     provide_language();
     provide_meta_context();
     view! {
-        <Stylesheet id="leptos" href="/pkg/learn-pali.css" />
         <Title text="PaliCanon — Learn" />
         <Router>
             <Layout />
@@ -112,7 +114,9 @@ fn Layout() -> impl IntoView {
     }
 }
 
-#[cfg(test)]
+/// The document and layout tests render on the server: they need `ssr`
+/// (axum, tokio), which a plain `--workspace` build does not enable.
+#[cfg(all(test, feature = "ssr"))]
 mod tests {
     use futures::StreamExt;
     use leptos_meta::{ServerMetaContext, provide_meta_context};
@@ -142,6 +146,11 @@ mod tests {
     /// the way `leptos_axum` does.
     fn render_document(path: &str, cookie: Option<&str>) -> String {
         let options = LeptosOptions::builder().output_name("learn-pali").build();
+        render_document_with(options, path, cookie)
+    }
+
+    /// [`render_document`] with the given options.
+    fn render_document_with(options: LeptosOptions, path: &str, cookie: Option<&str>) -> String {
         let (server, output) = ServerMetaContext::new();
         let body = Owner::new().with(|| {
             let mut request = axum::http::Request::builder().uri(path);
@@ -334,6 +343,28 @@ mod tests {
         let html = render_document("/", None);
         assert!(html.contains("<title>PaliCanon — Learn</title>"), "{html}");
         assert!(html.contains(r#"href="/pkg/learn-pali.css""#), "{html}");
+    }
+
+    /// With `hash-files` on, the shell links the stylesheet by its hashed
+    /// name (read from the hash file `cargo-leptos` writes), so a new build
+    /// is never served from the browser's cache. The hash file here is a
+    /// temporary one, named by an absolute path.
+    #[test]
+    fn the_stylesheet_is_linked_by_its_hashed_name() {
+        let hash_file = std::env::temp_dir().join("learn-pali-test-hash.txt");
+        std::fs::write(&hash_file, "js: aaa111\nwasm: bbb222\ncss: ccc333\n").expect("hash file");
+        let options = LeptosOptions::builder()
+            .output_name("learn-pali")
+            .hash_files(true)
+            .hash_file(hash_file.to_string_lossy().as_ref().into())
+            .build();
+        let html = render_document_with(options, "/", None);
+        assert!(
+            html.contains(r#"href="/pkg/learn-pali.ccc333.css""#),
+            "{html}"
+        );
+        assert!(!html.contains(r#"href="/pkg/learn-pali.css""#), "{html}");
+        assert_eq!(html.matches("learn-pali.ccc333.css").count(), 1, "{html}");
     }
 
     /// `<html …>` open tag of a rendered document.

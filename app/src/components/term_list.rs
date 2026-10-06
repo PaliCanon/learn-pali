@@ -387,7 +387,8 @@ pub(crate) fn Orphans(
     })
 }
 
-#[cfg(test)]
+/// These tests render markup on the server: they need `ssr`.
+#[cfg(all(test, feature = "ssr"))]
 mod tests {
     use leptos_i18n::td_string;
     use palicanon_ui_lib::Language;

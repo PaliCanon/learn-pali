@@ -342,7 +342,7 @@ fn RunHeader(
 /// Whether `count` takes the singular sentence in `locale`: French counts
 /// 0 and 1 as singular, English only 1 (Vietnamese has one form, so either
 /// key says the same).
-fn singular(locale: Locale, count: usize) -> bool {
+pub(crate) fn singular(locale: Locale, count: usize) -> bool {
     if matches!(locale, Locale::fr) {
         count <= 1
     } else {
@@ -788,7 +788,8 @@ fn summary_view(summary: Summary, language: Language) -> impl IntoView {
     }
 }
 
-#[cfg(test)]
+/// These tests render markup on the server: they need `ssr`.
+#[cfg(all(test, feature = "ssr"))]
 pub(crate) mod tests {
     use learn_core::date::Date;
     use learn_core::deck::TermId;
