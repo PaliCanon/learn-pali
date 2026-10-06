@@ -89,7 +89,7 @@ mod tests {
 
     #[test]
     fn the_nav_and_home_strings_have_their_three_values() {
-        let rows: [(&str, Vec<&str>, [&str; 3]); 4] = [
+        let rows: [(&str, Vec<&str>, [&str; 3]); 3] = [
             (
                 "nav_search",
                 values!(nav_search),
@@ -105,19 +105,66 @@ mod tests {
                 values!(home_title),
                 ["Learn Pāli", "Apprendre le pāli", "Học tiếng Pāli"],
             ),
+        ];
+        for (key, got, want) in rows {
+            assert_eq!(got, want, "{key}");
+        }
+    }
+
+    /// The six stages, Day to Year, named by their rhythm in every language
+    /// (the strip, the list, the detail; user, 2026-10-06: "day → daily").
+    #[test]
+    fn the_stage_names_have_their_three_values() {
+        let rows: [(&str, Vec<&str>, [&str; 3]); 6] = [
             (
-                "home_hint",
-                values!(home_hint),
-                [
-                    "The lessons are coming next.",
-                    "Les leçons arrivent bientôt.",
-                    "Các bài học sẽ đến sau.",
-                ],
+                "stage_day",
+                values!(stage_day),
+                ["Daily", "Quotidien", "Hằng ngày"],
+            ),
+            (
+                "stage_week",
+                values!(stage_week),
+                ["Weekly", "Hebdomadaire", "Hằng tuần"],
+            ),
+            (
+                "stage_month",
+                values!(stage_month),
+                ["Monthly", "Mensuel", "Hằng tháng"],
+            ),
+            (
+                "stage_quarter",
+                values!(stage_quarter),
+                ["Quarterly", "Trimestriel", "Hằng quý"],
+            ),
+            (
+                "stage_half_year",
+                values!(stage_half_year),
+                ["Half-yearly", "Semestriel", "Nửa năm"],
+            ),
+            (
+                "stage_year",
+                values!(stage_year),
+                ["Yearly", "Annuel", "Hằng năm"],
             ),
         ];
         for (key, got, want) in rows {
             assert_eq!(got, want, "{key}");
         }
+    }
+
+    /// The two grades: what the learner knew, never a verdict.
+    #[test]
+    fn the_grades_have_their_three_values() {
+        assert_eq!(
+            values!(grade_knew),
+            ["Knew it", "Je savais", "Đã biết"],
+            "grade_knew"
+        );
+        assert_eq!(
+            values!(grade_didnt),
+            ["Didn't know", "Je ne savais pas", "Chưa biết"],
+            "grade_didnt"
+        );
     }
 
     #[test]
@@ -171,6 +218,128 @@ mod tests {
             assert_eq!(other.len(), en.len(), "{code}.json has extra keys");
         }
     }
+
+    /// The locale files, English first.
+    const LOCALES: [(&str, &str); 3] = [
+        ("en", include_str!("../locales/en.json")),
+        ("fr", include_str!("../locales/fr.json")),
+        ("vi", include_str!("../locales/vi.json")),
+    ];
+
+    /// Words, never verdicts: no string says "failed" in any language.
+    #[test]
+    fn no_string_says_failed_in_any_language() {
+        for (code, json) in LOCALES {
+            for (key, value) in catalogue(json) {
+                let text = value.as_str().expect("a string").to_lowercase();
+                for word in ["fail", "échou", "thất bại"] {
+                    assert!(!text.contains(word), "{code}.json {key}: {text}");
+                }
+            }
+        }
+    }
+
+    /// Copy runs on full stops, colons and commas: no em dash in any
+    /// language (memory: no em dash in copy).
+    #[test]
+    fn no_string_holds_an_em_dash_in_any_language() {
+        for (code, json) in LOCALES {
+            for (key, value) in catalogue(json) {
+                let text = value.as_str().expect("a string");
+                assert!(!text.contains('\u{2014}'), "{code}.json {key}: {text}");
+            }
+        }
+    }
+
+    /// Every key the screens read (task 003's Plan notes) is in the
+    /// catalogue; `every_key_is_translated_in_every_language` carries it
+    /// to French and Vietnamese.
+    #[test]
+    fn the_screens_keys_are_all_in_the_catalogue() {
+        let en = catalogue(LOCALES[0].1);
+        let missing: Vec<&str> = SCREEN_KEYS
+            .iter()
+            .copied()
+            .filter(|key| !en.contains_key(*key))
+            .collect();
+        assert_eq!(missing, Vec::<&str>::new());
+    }
+
+    /// The keys of the home (with its progress and data block) and the review.
+    const SCREEN_KEYS: [&str; 72] = [
+        "home_title",
+        "home_teach",
+        "home_loading",
+        "cta_next_stage",
+        "cta_resume",
+        "add_terms",
+        "broken_invalid",
+        "broken_newer",
+        "broken_download",
+        "broken_start_again",
+        "new_custom",
+        "new_count_label",
+        "new_add",
+        "unit_cards",
+        "stop_label",
+        "review_show",
+        "grade_knew",
+        "grade_didnt",
+        "practice_badge",
+        "practice_note",
+        "forms_before",
+        "forms_between",
+        "forms_after",
+        "reveal_literal",
+        "reveal_construction",
+        "reveal_root",
+        "reveal_example",
+        "stop_title",
+        "stop_body_1",
+        "stop_body_n",
+        "keep_going",
+        "stop",
+        "summary_title",
+        "summary_moved_up_1",
+        "summary_moved_up_n",
+        "summary_again_1",
+        "summary_again_n",
+        "summary_next_due",
+        "summary_nothing_due",
+        "back_home",
+        "pause_banner",
+        "reload_session",
+        "stage_day",
+        "stage_week",
+        "stage_month",
+        "stage_quarter",
+        "stage_half_year",
+        "stage_year",
+        "progress_empty",
+        "progress_terms",
+        "detail_stage",
+        "detail_facets",
+        "detail_lapses",
+        "detail_due",
+        "facet_meaning",
+        "facet_recall",
+        "facet_forms",
+        "facet_context",
+        "orphans_heading",
+        "data_notice",
+        "data_sentence",
+        "not_synced",
+        "export",
+        "import",
+        "import_title",
+        "import_body",
+        "replace",
+        "cancel",
+        "import_refused_json",
+        "import_refused_newer",
+        "import_refused_duplicate",
+        "import_done",
+    ];
 
     /// `build.rs` refuses a catalogue where a `{{ name }}` is missing from
     /// one locale; its check ([`placeholder_mismatches`], the very file the

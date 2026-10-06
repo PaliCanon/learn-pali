@@ -1140,6 +1140,8 @@ dependencies = [
  "axum",
  "console_error_panic_hook",
  "futures",
+ "js-sys",
+ "learn_core",
  "leptos",
  "leptos_axum",
  "leptos_i18n",
@@ -1151,6 +1153,7 @@ dependencies = [
  "serde_json",
  "tokio",
  "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

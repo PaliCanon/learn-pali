@@ -1,4 +1,4 @@
-//! The service's shell around the home: the HTML document ([`shell`],
+//! The service's shell around the pages: the HTML document ([`shell`],
 //! server-rendered) and the app root ([`App`], what hydration mounts),
 //! `AppShell`'s rail with the services (Search, Learn), the theme and
 //! languages.
@@ -15,8 +15,8 @@ use palicanon_ui_lib::{
 };
 
 use crate::catalogue::strings;
-use crate::components::home::Home;
 use crate::components::site_footer::SiteFooter;
+use crate::pages::home::Home;
 
 /// The branch this build came from (`build.rs`, `LEARN_PALI_GIT_BRANCH`):
 /// `main`, `feat/…` — this service's own `env` for [`EnvBadgeInfo`]
@@ -97,8 +97,9 @@ fn nav(current: Signal<String>) -> NavList {
     NavList::new(sections, current)
 }
 
-/// The shell around the pages: `AppShell`'s rail, theme and languages, and
-/// the routes (the home at `/`), the footer in the shell's slot.
+/// The shell around the page: `AppShell`'s rail, theme and languages, and
+/// the one route (the home at `/`, which holds the progress and runs the
+/// review in place), the footer in the shell's slot.
 #[component]
 fn Layout() -> impl IntoView {
     let location = use_location();
@@ -283,7 +284,42 @@ mod tests {
     fn the_home_route_renders_the_home() {
         let html = render_layout(Language::En, "/");
         assert!(html.contains(">Learn Pāli</h1>"), "{html}");
+        assert!(html.contains(r#"data-page="home""#), "{html}");
         assert!(!html.contains("Not found."), "{html}");
+    }
+
+    /// The review runs in place on the home: `/review` is no route any
+    /// more.
+    #[test]
+    fn the_review_path_is_not_found() {
+        let html = render_layout(Language::En, "/review");
+        assert!(html.contains("Not found."), "{html}");
+        assert!(!html.contains("data-page"), "{html}");
+    }
+
+    /// The progress lives on the home: `/progress` is no route any more.
+    #[test]
+    fn the_progress_path_is_not_found() {
+        let html = render_layout(Language::En, "/progress");
+        assert!(html.contains("Not found."), "{html}");
+        assert!(!html.contains("data-page"), "{html}");
+    }
+
+    /// The one page leads to neither `/progress` nor `/review`.
+    #[test]
+    fn the_page_links_to_no_removed_path() {
+        let html = render_layout(Language::En, "/");
+        assert!(!html.contains("/progress"), "{html}");
+        assert!(!html.contains("/review"), "{html}");
+    }
+
+    /// The one route renders in every language, its marker present.
+    #[test]
+    fn the_home_renders_in_every_language() {
+        for language in Language::ALL {
+            let html = render_layout(language, "/");
+            assert!(html.contains(r#"data-page="home""#), "{language:?}: {html}");
+        }
     }
 
     #[test]

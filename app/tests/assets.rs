@@ -79,3 +79,60 @@ fn the_readme_shows_the_loop_the_deck_command_and_the_deck_licence() {
         assert!(readme.contains(needle), "README lacks: {needle}");
     }
 }
+
+#[test]
+fn the_readme_names_the_screens_the_store_key_and_the_embedded_deck() {
+    let readme = root("README.md");
+    for needle in [
+        "| `/` |",
+        "filters the term list in place",
+        "lost on reload",
+        "'Add new terms' and its picker",
+        "`pc_learn`",
+        "pc_learn-<YYYY-MM-DD>.json",
+        "export",
+        "import",
+        "`include_str!`",
+        "core/fixtures/deck.json",
+    ] {
+        assert!(readme.contains(needle), "README lacks: {needle}");
+    }
+}
+
+/// The progress lives on the home: the README names no `/progress` route.
+#[test]
+fn the_readme_has_no_progress_route() {
+    let readme = root("README.md");
+    assert!(
+        !readme.contains("/progress"),
+        "README still names /progress"
+    );
+    assert!(!readme.contains("three screens"), "two screens now");
+}
+
+/// The strip filters in place and the picker is the way in: the README
+/// names no `?stage=` URL and no 'Start with 5 terms'.
+#[test]
+fn the_readme_has_no_stage_url_and_no_start_with_5() {
+    let readme = root("README.md");
+    for gone in ["?stage=", "Start with 5"] {
+        assert!(!readme.contains(gone), "README still names {gone}");
+    }
+}
+
+/// One page: the review runs in place on the home, `/review` is gone; the
+/// legal pages are the main site's.
+#[test]
+fn the_readme_names_one_page_with_the_review_in_place() {
+    let readme = root("README.md");
+    assert!(!readme.contains("`/review`"), "README still names /review");
+    assert!(!readme.contains("two screens"), "one page now");
+    for needle in [
+        "one page",
+        "in place",
+        "https://palicanon.app/terms",
+        "https://palicanon.app/privacy",
+    ] {
+        assert!(readme.contains(needle), "README lacks: {needle}");
+    }
+}

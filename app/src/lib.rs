@@ -1,6 +1,9 @@
 //! learn-pali: learning Pāli, a PaliCanon service — Leptos SSR + hydrate on
-//! `palicanon-ui-lib`. Today the frame only (shell, rail, footer); the
-//! learning scope is defined in a later task.
+//! `palicanon-ui-lib`. The frame (shell, rail, footer) around two pages:
+//! the home (`/`, which holds the progress) and a review session
+//! (`/review`), on the learning loop of `learn_core` and the deck
+//! embedded in `deck`. The learner's progress stays in the browser
+//! (`store`); the server only renders the first paint.
 
 // `AppShell`'s nested `Option<ViewFn>` / `hidden=move || …` markup builds a
 // type deep enough that rustc's default query-depth limit can overflow
@@ -12,6 +15,13 @@
 pub mod app;
 mod catalogue;
 mod components;
+mod deck;
+mod learn;
+mod pages;
+mod store;
+#[cfg(test)]
+mod test_support;
+mod today;
 
 // `build.rs` includes this same file (`#[path]`) for the env badge's pure
 // decisions; declared here too so `cargo test -p learn_pali` covers it.
