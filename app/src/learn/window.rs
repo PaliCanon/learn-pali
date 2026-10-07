@@ -1,6 +1,6 @@
 //! The Context facet's front: the example's line windowed around its blank
 //! ([`context_window`]), so a long line never hides the blank and is never
-//! clamped by CSS.
+//! clamped by CSS, and its source as a reference reads ([`source_ref`]).
 
 use learn_core::deck::Blank;
 
@@ -69,6 +69,45 @@ pub(crate) fn context_window(blank: &Blank, max_chars: usize) -> Vec<Segment> {
         )
     };
     segments(&items[start..end], start > 0, end < items.len())
+}
+
+/// The four nikāyas, whose two-letter codes a citation keeps in capitals.
+const NIKAYAS: [&str; 4] = ["DN", "MN", "SN", "AN"];
+
+/// A source as a citation reads it (SuttaCentral's usage): the four
+/// nikāyas' codes in capitals (`MN10` reads `MN 10`), every other code in
+/// title case (`DHP127` reads `Dhp 127`), and a space before the number; a
+/// source with no number is only cased, and one already spaced gets no
+/// second space.
+pub(crate) fn source_ref(source: &str) -> String {
+    let at = source
+        .find(|c: char| c.is_ascii_digit())
+        .unwrap_or(source.len());
+    let (letters, number) = source.split_at(at);
+    let mut out = code_case(letters.trim_end());
+    if !number.is_empty() {
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(number);
+    }
+    out
+}
+
+/// A source's code: in capitals for a nikāya, else in title case.
+fn code_case(code: &str) -> String {
+    let upper = code.to_uppercase();
+    if NIKAYAS.contains(&upper.as_str()) {
+        return upper;
+    }
+    let mut chars = code.chars();
+    let mut out: String = chars
+        .next()
+        .into_iter()
+        .flat_map(char::to_uppercase)
+        .collect();
+    out.extend(chars.flat_map(char::to_lowercase));
+    out
 }
 
 /// The line as items: the answer's own place is a blank whatever the
@@ -504,5 +543,51 @@ mod tests {
             checked += 1;
         }
         assert!(checked >= 40, "{checked} examples with a blank");
+    }
+
+    // ---- the source reference ----
+
+    #[test]
+    fn the_four_nikayas_keep_their_codes_in_capitals() {
+        for (source, shown) in [
+            ("DN22", "DN 22"),
+            ("MN10", "MN 10"),
+            ("SN56.11", "SN 56.11"),
+            ("AN6.61", "AN 6.61"),
+            ("mn10", "MN 10"),
+        ] {
+            assert_eq!(source_ref(source), shown, "{source}");
+        }
+    }
+
+    #[test]
+    fn every_other_code_is_title_cased_with_a_space_before_its_number() {
+        for (source, shown) in [
+            ("DHP127", "Dhp 127"),
+            ("SNP1.8", "Snp 1.8"),
+            ("SNP99", "Snp 99"),
+            ("THAG1.1", "Thag 1.1"),
+            ("THIG5.1", "Thig 5.1"),
+            ("UD1.10", "Ud 1.10"),
+            ("ITI1", "Iti 1"),
+            ("KP9", "Kp 9"),
+            ("JA360", "Ja 360"),
+        ] {
+            assert_eq!(source_ref(source), shown, "{source}");
+        }
+    }
+
+    #[test]
+    fn a_source_with_no_number_is_only_cased() {
+        for (source, shown) in [("VV", "Vv"), ("PV", "Pv"), ("THAG", "Thag"), ("DN", "DN")] {
+            assert_eq!(source_ref(source), shown, "{source}");
+        }
+        assert_eq!(source_ref(""), "");
+    }
+
+    #[test]
+    fn a_source_already_spaced_gets_no_second_space() {
+        assert_eq!(source_ref("MN 1"), "MN 1");
+        assert_eq!(source_ref("DHP 1"), "Dhp 1");
     }
 }

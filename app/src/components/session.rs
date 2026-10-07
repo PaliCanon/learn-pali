@@ -47,7 +47,7 @@ use crate::learn::home_state::BrokenKind;
 use crate::learn::key::{GradeGate, grade_key};
 use crate::learn::run::{Card, ReviewRun};
 use crate::learn::summary::Summary;
-use crate::learn::window::{MAX_CHARS, Segment, context_window};
+use crate::learn::window::{MAX_CHARS, Segment, context_window, source_ref};
 use crate::learn::words::{date_words, label_words, pos_words};
 use crate::store::{Load, load, save};
 use crate::today::{browser_today, session_today};
@@ -58,6 +58,8 @@ pub(crate) const CARD_BOX: &str =
     "h-[calc(100dvh-14rem)] min-h-72 w-full rounded-xl border border-line bg-card sm:h-[34rem]";
 /// The small caption above a front (the facet's name).
 const CAPTION: &str = "text-xs font-medium uppercase tracking-wide text-muted";
+/// The answer of a revealed Context blank: the gold mark.
+const MARK: &str = "rounded-sm bg-gold/20 px-0.5 text-ink";
 /// The practice badge.
 const BADGE: &str = "w-fit rounded-full border border-gold px-3 py-1 text-xs text-gold-text";
 
@@ -416,15 +418,22 @@ fn FacetCard(
 ) -> impl IntoView {
     let language = language_signal();
     let key = Signal::derive(move || run.with(ReviewRun::key));
+    // The card's `revealed`, handed out by `RevealCard` to `actions` (its
+    // only channel): a signal, so the front reads it whatever the order
+    // the slots are built in, and each new card (a language change) hands
+    // its own.
+    let handed = RwSignal::new(None::<Signal<bool>>);
+    let shown = Signal::derive(move || handed.get().is_some_and(|signal| signal.get()));
     move || {
         let locale = Locale::from(language.get());
         view! {
             <div class=CARD_BOX inert=move || paused.get().then_some("")>
                 <RevealCard
-                    front=move || view! { <CardFront run=run /> }
+                    front=move || view! { <CardFront run=run revealed=shown /> }
                     reveal=move || view! { <CardReveal run=run /> }
                     actions=move |is_revealed| {
                         revealed.set_value(Some(is_revealed));
+                        handed.set(Some(is_revealed));
                         grade_buttons(run, paused, is_revealed, locale)
                     }
                     key=key
@@ -483,36 +492,40 @@ fn facet_name(locale: Locale, facet: Facet) -> &'static str {
 fn CardFront(
     /// The session.
     run: RwSignal<ReviewRun>,
+    /// Whether the card is revealed: the Context front fills its blanks.
+    #[prop(into)]
+    revealed: Signal<bool>,
 ) -> impl IntoView {
     let language = language_signal();
     move || {
         let language = language.get();
         run.with(ReviewRun::card)
-            .map(|card| front_view(card, language))
+            .map(|card| front_view(card, language, revealed))
     }
 }
 
 /// The practice badge (when it is one), the facet's name, then the body of
 /// the facet.
-fn front_view(card: Card, language: Language) -> impl IntoView {
+fn front_view(card: Card, language: Language, revealed: Signal<bool>) -> impl IntoView {
     let locale = Locale::from(language);
     view! {
         <div class="flex flex-col gap-2 p-4">
             {card
                 .practice
                 .then(|| view! { <p class=BADGE>{td_string!(locale, practice_badge)}</p> })}
-            <p class=CAPTION>{facet_name(locale, card.facet)}</p> {front_body(card, language)}
+            <p class=CAPTION>{facet_name(locale, card.facet)}</p>
+            {front_body(card, language, revealed)}
         </div>
     }
 }
 
 /// What each facet asks.
-fn front_body(card: Card, language: Language) -> AnyView {
+fn front_body(card: Card, language: Language, revealed: Signal<bool>) -> AnyView {
     match card.facet {
         Facet::Meaning => meaning_front(card, language).into_any(),
         Facet::Recall => recall_front(card, language).into_any(),
         Facet::Forms => forms_front(card, language).into_any(),
-        Facet::Context => context_front(card).into_any(),
+        Facet::Context => context_front(card, revealed).into_any(),
     }
 }
 
@@ -556,22 +569,27 @@ fn forms_front(card: Card, language: Language) -> impl IntoView {
     }
 }
 
-/// Context: the windowed line with a blank, then where it comes from.
-fn context_front(card: Card) -> impl IntoView {
+/// Context: the windowed line, its blanks filled in place once
+/// `revealed` (the reveal does not repeat the line), then where it comes
+/// from (`Dhp 127 · <sutta>`).
+fn context_front(card: Card, revealed: Signal<bool>) -> impl IntoView {
     let example = card.term.example.as_ref();
     let line = example
         .and_then(|example| example.blank.as_ref())
         .map(|blank| {
             view! {
                 <p class="text-lg leading-8 text-ink">
-                    <Pali layout="whitespace-pre-line">{context_line(blank, false)}</Pali>
+                    <Pali layout="whitespace-pre-line">{context_line(blank, revealed)}</Pali>
                 </p>
             }
         });
+    // The line's translation goes here, under the filled line: in italics,
+    // muted, with its translator, once the deck's `Example` carries one
+    // (task 004). Nothing until then.
     let origin = example.map(|example| {
         view! {
             <p class="text-sm text-muted">
-                {example.source.clone()} " · " <Pali>{example.sutta.clone()}</Pali>
+                {source_ref(&example.source)} " · " <Pali>{example.sutta.clone()}</Pali>
             </p>
         }
     });
@@ -581,22 +599,30 @@ fn context_front(card: Card) -> impl IntoView {
     }
 }
 
-/// The example's line as runs of text and its blank(s): `___` on the front,
-/// the answer in a `<mark>` when `marked` (the whole line on the reveal).
-fn context_line(blank: &Blank, marked: bool) -> impl IntoView + use<> {
-    let limit = if marked { usize::MAX } else { MAX_CHARS };
+/// The example's line, windowed ([`context_window`]), as runs of text and
+/// its blank(s): `___` until `revealed`, then the answer in a gold `<mark>`
+/// in the same place.
+fn context_line(blank: &Blank, revealed: Signal<bool>) -> impl IntoView + use<> {
     let answer = blank.answer.clone();
-    context_window(blank, limit)
+    context_window(blank, MAX_CHARS)
         .into_iter()
         .map(|segment| match segment {
             Segment::Text(text) => text.into_any(),
-            Segment::Blank if marked => {
-                view! { <mark class="rounded-sm bg-gold/20 px-0.5 text-ink">{answer.clone()}</mark> }
-                    .into_any()
+            Segment::Blank => {
+                let answer = answer.clone();
+                (move || blank_view(revealed.get(), answer.clone())).into_any()
             }
-            Segment::Blank => view! { <span aria-label="blank">"___"</span> }.into_any(),
         })
         .collect_view()
+}
+
+/// One blank: `___`, or the answer marked once revealed.
+fn blank_view(revealed: bool, answer: String) -> AnyView {
+    if revealed {
+        view! { <mark class=MARK>{answer}</mark> }.into_any()
+    } else {
+        view! { <span aria-label="blank">"___"</span> }.into_any()
+    }
 }
 
 /// The answer side of the current question, in the current language.
@@ -614,16 +640,54 @@ fn CardReveal(
 }
 
 /// The practice note, the answer, then what the term says about itself.
+/// Context gives its answer block ([`context_answer`]) in place of the
+/// bare sense.
 fn reveal_view(card: Card, language: Language) -> impl IntoView {
     let locale = Locale::from(language);
+    let answer = if card.facet == Facet::Context {
+        context_answer(card, language).into_any()
+    } else {
+        view! {
+            {answer_view(card)}
+            <p>{card.term.meaning.en.clone()}</p>
+        }
+        .into_any()
+    };
     view! {
         <div class="flex flex-col gap-4 p-4 text-ink">
             {card
                 .practice
                 .then(|| {
                     view! { <p class="text-sm text-muted">{td_string!(locale, practice_note)}</p> }
-                })} {answer_view(card)} <p>{card.term.meaning.en.clone()}</p>
-            {details_view(card, locale)}
+                })} {answer} {details_view(card, locale)}
+        </div>
+    }
+}
+
+/// Context's answer, under a hairline: the lemma in bold Pāli with its
+/// part of speech in words, then the sense labelled 'Meaning', larger and
+/// in the heading colour, and the literal sense under it, muted, when the
+/// term has one.
+fn context_answer(card: Card, language: Language) -> impl IntoView {
+    let locale = Locale::from(language);
+    let term = card.term;
+    let literal = term
+        .meaning
+        .literal
+        .as_ref()
+        .map(|literal| view! { <p class="text-sm text-muted">{format!("[{literal}]")}</p> });
+    view! {
+        <div class="flex flex-col gap-1 border-t border-line pt-4 mt-4">
+            <p>
+                <strong class="font-semibold">
+                    <Pali>{term.lemma.clone()}</Pali>
+                </strong>
+                " · "
+                {pos_words(language, &term.pos.0)}
+            </p>
+            <p class=CAPTION>{td_string!(locale, reveal_meaning)}</p>
+            <p class="text-lg text-heading">{term.meaning.en.clone()}</p>
+            {literal}
         </div>
     }
 }
@@ -653,15 +717,22 @@ fn captioned(caption: &'static str, body: impl IntoView + 'static) -> impl IntoV
 }
 
 /// The literal meaning, the construction, the root, the example: each only
-/// when the term has it.
+/// when the term has it. Context shows neither the literal (its answer
+/// block has it) nor the example (its front's line is filled in place).
 fn details_view(card: Card, locale: Locale) -> impl IntoView {
     let term = card.term;
-    let literal = term.meaning.literal.as_ref().map(|literal| {
-        captioned(
-            td_string!(locale, reveal_literal),
-            view! { <p>{literal.clone()}</p> },
-        )
-    });
+    let context = card.facet == Facet::Context;
+    let literal = term
+        .meaning
+        .literal
+        .as_ref()
+        .filter(|_| !context)
+        .map(|literal| {
+            captioned(
+                td_string!(locale, reveal_literal),
+                view! { <p>{literal.clone()}</p> },
+            )
+        });
     let construction = term.construction.as_ref().map(|construction| {
         let body = view! { <Pali>{construction.clone()}</Pali> };
         captioned(td_string!(locale, reveal_construction), body)
@@ -675,18 +746,10 @@ fn details_view(card: Card, locale: Locale) -> impl IntoView {
         };
         captioned(td_string!(locale, reveal_root), body)
     });
-    let example = term.example.as_ref().map(|example| {
-        let blank = example
-            .blank
-            .as_ref()
-            .filter(|_| card.facet == Facet::Context);
-        let line = match blank {
-            Some(blank) => context_line(blank, true).into_any(),
-            None => example.text.clone().into_any(),
-        };
+    let example = term.example.as_ref().filter(|_| !context).map(|example| {
         let body = view! {
             <p>
-                <Pali layout="whitespace-pre-line">{line}</Pali>
+                <Pali layout="whitespace-pre-line">{example.text.clone()}</Pali>
             </p>
         };
         captioned(td_string!(locale, reveal_example), body)
@@ -856,6 +919,22 @@ pub(crate) mod tests {
         render_with(Language::En, run, false)
     }
 
+    /// The card's front alone, told whether the card is revealed.
+    fn front_with(language: Language, run: ReviewRun, revealed: bool) -> String {
+        Owner::new().with(|| {
+            palicanon_ui_lib::provide_language().set(language);
+            let run = RwSignal::new(run);
+            view! { <CardFront run=run revealed=Signal::stored(revealed) /> }.to_html()
+        })
+    }
+
+    /// The opening tag of the element right before `needle`.
+    fn tag_before<'a>(html: &'a str, needle: &str) -> &'a str {
+        let at = html.find(needle).expect(html);
+        let start = html[..at].rfind('<').expect(html);
+        &html[start..at]
+    }
+
     /// The text of `html`: tags dropped, the few entities Leptos writes
     /// decoded.
     fn text_of(html: &str) -> String {
@@ -987,7 +1066,7 @@ pub(crate) mod tests {
         );
         let text = text_of(front);
         assert!(text.contains("aññataro bhikkhu there"), "{text}");
-        assert!(text.contains("AN6.61 · majjhesuttaṃ"), "{text}");
+        assert!(text.contains("AN 6.61 · majjhesuttaṃ"), "{text}");
         assert!(text.contains("Context"), "{text}");
         assert!(!front.contains("<mark"), "the answer is not shown: {front}");
         assert!(front.contains(r#"lang="pi""#), "{front}");
@@ -1032,14 +1111,83 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_context_reveal_shows_the_full_line_with_the_answer_marked() {
-        let html = render(kho(Facet::Context));
-        let (front, reveal) = split(&html);
+    fn the_context_front_before_the_reveal_holds_its_blanks_and_not_the_answer() {
+        let front = front_with(Language::En, kho(Facet::Context), false);
+        assert!(
+            front.contains(r#"<span aria-label="blank">___</span>"#),
+            "{front}"
+        );
         assert!(!front.contains("<mark"), "{front}");
-        assert!(reveal.contains(">kho</mark>"), "{reveal}");
+        assert!(!text_of(&front).contains("kho"), "{front}");
+    }
+
+    #[test]
+    fn the_context_front_fills_its_blanks_in_place_once_revealed() {
+        let front = front_with(Language::En, kho(Facet::Context), true);
+        assert!(
+            front.contains(r#"<mark class="rounded-sm bg-gold/20 px-0.5 text-ink">kho</mark>"#),
+            "{front}"
+        );
+        assert!(!front.contains("___"), "{front}");
+        let text = text_of(&front);
+        assert!(text.contains("phasso kho, āvuso"), "{text}");
+        assert!(text.contains("AN 6.61 · majjhesuttaṃ"), "{text}");
+    }
+
+    #[test]
+    fn the_context_reveal_gives_the_answer_block_and_does_not_repeat_the_line() {
+        let html = render(kho(Facet::Context));
+        let (_, reveal) = split(&html);
         let text = text_of(reveal);
-        assert!(text.contains("phasso kho, āvuso"), "the full line: {text}");
-        assert!(!reveal.contains("___"), "{reveal}");
+        assert!(!text.contains("Example"), "{text}");
+        assert!(!reveal.contains("<mark"), "{reveal}");
+        assert!(!text.contains("phasso"), "the line is not repeated: {text}");
+        assert!(
+            reveal.contains("border-t border-line pt-4 mt-4"),
+            "{reveal}"
+        );
+        assert!(
+            reveal.contains(r#"<strong class="font-semibold"><span lang="pi""#),
+            "the lemma in bold Pāli: {reveal}"
+        );
+        assert!(text.contains("kho · indeclinable"), "{text}");
+        assert!(text.contains("Meaning"), "{text}");
+        let sense = tag_before(reveal, "indeed; surely; certainly; truly");
+        assert!(sense.contains("text-lg text-heading"), "{sense}");
+    }
+
+    #[test]
+    fn the_context_reveal_shows_the_literal_once_muted_under_the_sense() {
+        let html = render(rupa(Facet::Context, Stage::Day));
+        let (_, reveal) = split(&html);
+        let literal = tag_before(reveal, "[form]");
+        assert!(literal.contains("text-muted"), "{literal}");
+        let text = text_of(reveal);
+        assert!(!text.contains("Literally"), "{text}");
+        assert!(!text.contains("Example"), "{text}");
+        assert!(text.contains("Construction"), "{text}");
+        assert!(
+            text.find("matter; material thing").unwrap() < text.find("[form]").unwrap(),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_context_reveal_labels_the_meaning_in_every_language() {
+        for (language, label, pos) in [
+            (Language::En, "Meaning", "indeclinable"),
+            (Language::Fr, "Sens", "indéclinable"),
+            (Language::Vi, "Nghĩa", "bất biến từ"),
+        ] {
+            let html = render_with(language, kho(Facet::Context), false);
+            let (_, reveal) = split(&html);
+            let text = text_of(reveal);
+            assert!(text.contains(label), "{language:?}: {text}");
+            assert!(
+                text.contains(&format!("kho · {pos}")),
+                "{language:?}: {text}"
+            );
+        }
     }
 
     #[test]

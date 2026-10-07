@@ -1,6 +1,6 @@
 # 015 The Context card's reveal, designed
 
-status: building · rank: 3 · level: simple · type: feature · path: lane + orchestrator's capture · request: learn-pali (user, 2026-10-07: « design un peu mieux la traduction », with a capture of a revealed Context card: the sense floats unlabelled between the source and an 'EXAMPLE' that repeats the whole line)
+status: review · rank: 3 · level: simple · type: feature · path: lane + orchestrator's capture · request: learn-pali (user, 2026-10-07: « design un peu mieux la traduction », with a capture of a revealed Context card: the sense floats unlabelled between the source and an 'EXAMPLE' that repeats the whole line)
 
 ## Summary
 The revealed Context card today: the front (the line with blanks, the source), then the sense alone ('no; not; neither; nor'), then 'EXAMPLE' and the same line again with the answers marked. Decided:
@@ -14,6 +14,8 @@ Mobile: the same column; the line wraps as today. Rank 3: difficulty 2 (the fron
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
+| Build | done | lane Opus: a84cb19 blanks fill in place (the front reads the reveal through RevealCard's actions signal), 6b1622c the answer block + source_ref, eee5d0e nikāya codes in capitals (ruling); 304 ssr tests, workspace, clippy ssr + wasm, fmt, doc, leptosfmt EXIT 0. Open: the deck's TH/THI codes show 'Th'/'Thi', not Thag/Thig — mapped by 004's source normalisation |
+| Capture | done | orchestrator, :3201 on the branch (dark, 1280): the Context front with '___', on reveal 'kho' filled in gold in place, 'AN 6.61 · majjhesuttaṃ', a divider, 'kho · indeclinable', MEANING, the sense; no console error |
 | Define | done | the user's words and capture; the design decided by the orchestrator (the capture shows the duplication and the floating sense) |
 
 ## Retro

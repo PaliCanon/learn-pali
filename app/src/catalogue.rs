@@ -267,7 +267,7 @@ mod tests {
 
     /// The keys of the home (with its progress), the review and Settings'
     /// 'Your progress'.
-    const SCREEN_KEYS: [&str; 77] = [
+    const SCREEN_KEYS: [&str; 78] = [
         "home_title",
         "home_teach",
         "home_loading",
@@ -299,6 +299,7 @@ mod tests {
         "reveal_construction",
         "reveal_root",
         "reveal_example",
+        "reveal_meaning",
         "stop_title",
         "stop_body_1",
         "stop_body_n",
