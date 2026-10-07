@@ -1,6 +1,6 @@
 # 014 The + just below the list
 
-status: review · rank: 1 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-07: « le bouton ajouter un peu plus bas », with a capture of the + covering the last card's bottom edge)
+status: merged · rank: 1 · level: simple · type: feature · path: light · request: learn-pali (user, 2026-10-07: « le bouton ajouter un peu plus bas », with a capture of the + covering the last card's bottom edge)
 
 ## Summary
 The '+' leaves the list's scroll region (`AddRow sticky`, `sticky bottom-2` over the cards) and sits just below the region, centred, a small gap above it (`mt-3`): it never covers a card. The `sticky` variant of `AddRow` goes. Rank 1.
@@ -11,4 +11,8 @@ The '+' leaves the list's scroll region (`AddRow sticky`, `sticky bottom-2` over
 | Define | done | the user's words and capture |
 | Build | done | lane Sonnet: 8495224 the + below the region (AddRow mt-3 justify-center, no sticky); 296 + 9 tests; clippy ssr + wasm, fmt, leptosfmt EXIT 0 |
 
+## Merge
+74a8545 (squash, 2026-10-07).
+
 ## Retro
+One line: clean; the lane briefly wrote a log into palicanon/wt/ and removed it.
