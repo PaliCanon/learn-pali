@@ -162,8 +162,8 @@ fn facet_label(t: Strings, facet: Facet) -> &'static str {
     }
 }
 
-/// A closed card: the tile's resting surface, a hairline border.
-const CARD_CLOSED: &str = "rounded-xl border border-line bg-chip hover:border-gold/60";
+/// A closed card: the tile's resting surface, a soft gold border.
+const CARD_CLOSED: &str = "rounded-xl border border-gold/25 bg-chip hover:border-gold/60";
 
 /// An open card: the same surface, the gold border (one border colour or
 /// the other, never both on the element).
@@ -174,7 +174,7 @@ fn pill_classes(passed: bool) -> &'static str {
     if passed {
         "rounded-full border border-gold px-2 py-0.5 text-xs text-heading"
     } else {
-        "rounded-full border border-line px-2 py-0.5 text-xs text-muted"
+        "rounded-full border border-gold/25 px-2 py-0.5 text-xs text-muted"
     }
 }
 
@@ -642,9 +642,10 @@ mod tests {
         let html = list(None, Language::En);
         let card = card(&html, "kho");
         let surface = classes_of(card, "data-term-card");
-        for class in ["rounded-xl", "border", "border-line", "bg-chip"] {
+        for class in ["rounded-xl", "border", "border-gold/25", "bg-chip"] {
             assert!(surface.contains(&class), "{class}: {surface:?}");
         }
+        assert!(!surface.contains(&"border-line"), "soft gold: {surface:?}");
         assert!(!surface.contains(&"border-gold"), "closed: {surface:?}");
         assert!(card.contains("<button"), "the toggle is inside: {card}");
         assert!(card.contains("<dl"), "the detail is inside: {card}");
@@ -720,7 +721,8 @@ mod tests {
                 assert!(classes.contains(&"border-gold"), "passed: {pill}");
                 assert!(text.contains('✓'), "passed: {text}");
             } else {
-                assert!(classes.contains(&"border-line"), "not passed: {pill}");
+                assert!(classes.contains(&"border-gold/25"), "not passed: {pill}");
+                assert!(!classes.contains(&"border-line"), "not passed: {pill}");
                 assert!(!text.contains('✓'), "not passed: {text}");
             }
         }
