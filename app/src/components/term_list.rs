@@ -89,8 +89,7 @@ pub(crate) fn StageTerms(
     /// The filter in force.
     #[prop(into)]
     stage: Signal<Option<Stage>>,
-    /// What sits at the list's bottom right (the home's '+'); none by
-    /// default.
+    /// What sits just below the list (the home's '+'); none by default.
     #[prop(default = None)]
     add: Option<ViewFn>,
 ) -> impl IntoView {
@@ -191,14 +190,13 @@ fn detail_id(rank: u32) -> &'static str {
 
 /// The term list: a row per known term, in a region capped at about five
 /// rows at every width that scrolls (keyboard too, `tabindex="0"`), `add`
-/// after the list at the region's bottom right ([`AddRow`], sticky); or 'No
-/// terms here yet', `add` under it at the right.
+/// just below the region ([`AddRow`], centred, outside it: it covers no card);
+/// or 'No terms here yet', `add` under it.
 #[component]
 pub(crate) fn TermRows(
     /// The rows, already filtered and sorted.
     rows: Vec<Row>,
-    /// What sits at the list's bottom right (the home's '+'); none by
-    /// default.
+    /// What sits just below the list (the home's '+'); none by default.
     #[prop(default = None)]
     add: Option<ViewFn>,
 ) -> impl IntoView {
@@ -221,32 +219,22 @@ pub(crate) fn TermRows(
             <ul class="flex flex-col gap-2">
                 {rows.into_iter().map(|row| view! { <TermRow row=row /> }).collect_view()}
             </ul>
-            {add.map(|add| view! { <AddRow add=add sticky=true /> })}
         </div>
+        {add.map(|add| view! { <AddRow add=add /> })}
     }
     .into_any()
 }
 
-/// The row that holds `add` (the home's '+') at the right. `sticky`: after
-/// the list, inside its scroll region, it stays at the region's bottom
-/// while the list scrolls, and lets clicks through to the cards under it
-/// (what it holds takes its own, `pointer-events-auto`). Otherwise a plain
-/// row, where the list would be.
+/// The row that holds `add` (the home's '+'), centred, a small gap above
+/// it (`mt-3`): just below the list's scroll region, or where the list would
+/// be.
 #[component]
 pub(crate) fn AddRow(
     /// What it holds.
     add: ViewFn,
-    /// Inside the list's scroll region.
-    #[prop(optional)]
-    sticky: bool,
 ) -> impl IntoView {
-    let class = if sticky {
-        "sticky bottom-2 flex justify-center pointer-events-none"
-    } else {
-        "flex justify-center"
-    };
     view! {
-        <div data-add-row="" class=class>
+        <div data-add-row="" class="mt-3 flex justify-center">
             {add.run()}
         </div>
     }

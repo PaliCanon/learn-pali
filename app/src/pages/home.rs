@@ -7,9 +7,8 @@
 //! home's states (empty, due, nothing due, broken) in the same box.
 //!
 //! The CTA row holds the state's CTA. The '+' of 'New terms', which opens a
-//! dialog with the picker, sits inside the term list's scroll region, at its
-//! bottom right, sticky while the list scrolls (with no list, right-aligned
-//! where the list would be). The CTA is one button, Practice: '▶ Practice
+//! dialog with the picker, sits just below the term list's scroll region,
+//! centred (with no list, where the list would be). The CTA is one button, Practice: '▶ Practice
 //! · N' while cards are due (the review: stages move), else '▶ Practice'
 //! with the batch slider and the next review's date beside (a practice
 //! ahead of the nearest terms, of the strip's selected stage when one is:
@@ -875,9 +874,8 @@ impl NewTerms {
     }
 }
 
-/// The disclosure that opens [`NewTermsDialog`]: a '+', small, Accent, at
-/// the bottom right of the term list, over the cards (`shadow-md`; it takes
-/// the clicks its sticky row lets through); its name is 'New terms' in the
+/// The disclosure that opens [`NewTermsDialog`]: a '+', small, Accent,
+/// just below the term list (`shadow-md`, subtle); its name is 'New terms' in the
 /// page's language. Nothing when the deck has no term left to start.
 #[component]
 fn AddTermsButton(
@@ -896,7 +894,7 @@ fn AddTermsButton(
                 size=Size::Sm
                 label_closed=label
                 label_open=label
-                layout="pointer-events-auto shadow-md"
+                layout="shadow-md"
             >
                 <span class="text-lg leading-none">"+"</span>
             </DisclosureButton>
@@ -1225,30 +1223,32 @@ mod tests {
         }
     }
 
-    /// The '+' sits inside the term list's scroll region, after the list,
-    /// in a sticky row at its bottom right that lets clicks through to the
-    /// cards; the '+' takes its own and casts a shadow over the cards.
-    /// Small, in Accent; once on the page.
+    /// The '+' sits just below the term list's scroll region (outside it,
+    /// right after it), centred in a row with a gap above (`mt-3`), never
+    /// sticky: it covers no card. Small, in Accent; once on the page.
     #[test]
-    fn the_plus_sits_inside_the_term_list_at_its_bottom_right() {
+    fn the_plus_sits_just_below_the_term_list() {
         for state in started() {
             let html = with_progress(Language::En, state, None);
             let region = element_at(&html, at(&html, "data-term-list"));
-            assert!(region.contains(r#"aria-label="New terms""#), "{region}");
             assert!(
-                at(region, "</ul>") < at(region, r#"aria-label="New terms""#),
-                "after the list: {region}"
+                !region.contains(r#"aria-label="New terms""#),
+                "the '+' is outside the region: {region}"
             );
-            let row = tag_before(region, "div", r#"aria-label="New terms""#);
+            let region_end =
+                html[..at(&html, "data-term-list")].rfind("<div").unwrap() + region.len();
+            let row = tag_before(&html, "div", r#"aria-label="New terms""#);
+            assert!(
+                html[region_end..].starts_with(&row),
+                "right after the region: {}",
+                &html[region_end..]
+            );
             let row_classes: Vec<&str> = row.split(['"', ' ']).collect();
-            for class in [
-                "sticky",
-                "bottom-2",
-                "flex",
-                "justify-center",
-                "pointer-events-none",
-            ] {
+            for class in ["mt-3", "flex", "justify-center"] {
                 assert!(row_classes.contains(&class), "{class}: {row}");
+            }
+            for class in ["sticky", "bottom-2", "pointer-events-none"] {
+                assert!(!row_classes.contains(&class), "{class}: {row}");
             }
             let order = [
                 at(&html, "data-cta-row"),
@@ -1266,9 +1266,10 @@ mod tests {
             );
             let add = tag_before(&html, "button", r#"aria-label="New terms""#);
             let classes: Vec<&str> = add.split(['"', ' ']).collect();
-            for class in ["h-8", "pointer-events-auto", "shadow-md", "border-gold/40"] {
+            for class in ["h-8", "shadow-md", "border-gold/40"] {
                 assert!(classes.contains(&class), "{class}: {add}");
             }
+            assert!(!classes.contains(&"pointer-events-auto"), "{add}");
             assert!(!classes.contains(&"border-line"), "Accent, not Chip: {add}");
             assert!(
                 !region.contains(r#"role="dialog""#),
@@ -1284,6 +1285,7 @@ mod tests {
         let html = with_progress(Language::En, HomeState::Due(5), Some(Stage::Month));
         let row = tag_before(&html, "div", r#"aria-label="New terms""#);
         assert!(row.contains("justify-center"), "{row}");
+        assert!(row.contains("mt-3"), "{row}");
         assert!(
             at(&html, "No terms here yet") < at(&html, r#"aria-label="New terms""#),
             "{html}"
