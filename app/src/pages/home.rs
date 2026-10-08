@@ -333,7 +333,7 @@ fn HomeScreen(
         }
     };
     view! {
-        <BrandLink in_session=in_session on_home=on_home />
+        <BrandLink in_session=in_session stage=stage on_home=on_home />
         {body}
     }
 }
@@ -976,20 +976,27 @@ fn HomeProgress(
 }
 
 /// The lotus and "PaliLearn", the service's name, a link home (HL). Hidden
-/// on a phone, where the shell's top bar already shows the lotus. In a
-/// session a plain click goes back to the home's content (`on_home`, no
-/// navigation); `href="/"` stays for a middle or modified click.
+/// on a phone, where the shell's top bar already shows the lotus. A
+/// plain click brings the home back to its first view ([`reset_home`]: the
+/// filter cleared, the term list at its top) and, in a session, goes back
+/// to the home's content (`on_home`); there is no navigation. `href="/"`
+/// stays for a middle or modified click.
 #[component]
 fn BrandLink(
     /// A session is shown.
     in_session: bool,
+    /// The strip's filter, cleared by the click.
+    stage: RwSignal<Option<Stage>>,
     /// Back to the home's content.
     on_home: Callback<()>,
 ) -> impl IntoView {
     let on_click = move |ev: MouseEvent| {
-        if in_session && plain_click(&ev) {
+        if plain_click(&ev) {
             ev.prevent_default();
-            on_home.run(());
+            reset_home(stage);
+            if in_session {
+                on_home.run(());
+            }
         }
     };
     view! {
@@ -1001,6 +1008,27 @@ fn BrandLink(
             <img src="/lotus.png" alt="" width="30" height="30" />
             "PaliLearn"
         </a>
+    }
+}
+
+/// Brings the home back to its first view: the stage filter cleared (every
+/// term listed, no cell pressed) and the term list scrolled to its top.
+fn reset_home(stage: RwSignal<Option<Stage>>) {
+    stage.set(None);
+    scroll_terms_to_top();
+}
+
+/// Scrolls the term list's region (`[data-term-list]`) to its top; nothing
+/// when it is not on the page, and on the server.
+fn scroll_terms_to_top() {
+    #[cfg(feature = "hydrate")]
+    {
+        let region = web_sys::window()
+            .and_then(|window| window.document())
+            .and_then(|document| document.query_selector("[data-term-list]").ok().flatten());
+        if let Some(region) = region {
+            region.set_scroll_top(0);
+        }
     }
 }
 
@@ -2251,6 +2279,20 @@ mod tests {
             "a middle click opens /: {brand}"
         );
         assert!(at(&html, "PaliLearn") < at(&html, "data-review"), "{html}");
+    }
+
+    #[test]
+    fn the_brand_resets_the_filter_and_keeps_its_href_at_home() {
+        let html = screen(false);
+        let brand = tag_before(&html, "a", "PaliLearn");
+        assert!(brand.contains(r#"href="/""#), "{brand}");
+        Owner::new().with(|| {
+            let stage = RwSignal::new(Some(Stage::HalfYear));
+            reset_home(stage);
+            assert_eq!(stage.get_untracked(), None);
+            reset_home(stage);
+            assert_eq!(stage.get_untracked(), None, "idempotent");
+        });
     }
 
     #[test]
