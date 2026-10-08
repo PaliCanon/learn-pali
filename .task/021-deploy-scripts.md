@@ -1,6 +1,6 @@
 # 021 The deploy scripts, written but not run
 
-status: review · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-08: « sans deploy, tu peux faire les scripts de deployment ») · model: the api's deploy (api/.github/workflows/deploy.yml, api/api/Dockerfile, api/infra/) and docs/conventions/deploy.md
+status: merged · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-08: « sans deploy, tu peux faire les scripts de deployment ») · model: the api's deploy (api/.github/workflows/deploy.yml, api/api/Dockerfile, api/infra/) and docs/conventions/deploy.md
 
 ## Summary
 Write what deploys learn-pali — image, infra, workflow — on the PaliCanon pattern, **without applying, building in CI or pushing anything** (no `tofu apply`, no `gcloud`, no push; the workflow file lands but only runs once the user pushes and sets the repository variables).
@@ -20,4 +20,8 @@ Rank 5: difficulty 4 (three artefacts, a two-repo build context, no way to run t
 | Fix | done | 08662d6 + fbcd7a0 badge from build args, no .git in the image; ee70376 --project, first rollout URL; 75bb9af dev only at first, the Worker rewrites Location, compatibility_date; 33473e9 README (deploy order, deployer roles not found in the checkouts, the public-origin gap shared with the api); 308 + 9 tests, clippy, fmt, tofu validate EXIT 0 |
 | Check | done | not deployable here by design (the user: « sans deploy »); the first real run is the user's |
 
+## Merge
+4a3bb39 (squash, 2026-10-08).
+
 ## Retro
+The voices found what no local check could (a tag that ignored the Dockerfile, a first apply publishing prod, a Location escaping Cloudflare, a token in a cached layer — the last caught by the lane itself). Nothing here has run: the first deploy is the real test. Follow-up: the public run.app origin, shared with the api.
