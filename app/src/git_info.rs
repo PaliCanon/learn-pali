@@ -38,6 +38,25 @@ pub(crate) fn is_dirty_output(raw: &[u8]) -> bool {
     !raw.is_empty()
 }
 
+/// The badge's `env` and `sha` when the build is *told* where it comes from
+/// (`LEARN_PALI_GIT_BRANCH`, `LEARN_PALI_GIT_COMMIT`: the image build has no
+/// `.git`): the commit is cut to git's short length, the branch kept as
+/// given (a tag build passes the tag). `None` unless both are present and
+/// not blank, so the caller falls back to asking git — half a pair is not
+/// trusted, as in [`branch_and_sha`].
+pub(crate) fn badge_from_env(
+    branch: Option<String>,
+    commit: Option<String>,
+) -> Option<(String, String)> {
+    let branch = branch
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty())?;
+    let commit = commit
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())?;
+    Some((branch, commit.chars().take(7).collect()))
+}
+
 /// `sha`, with a trailing `*` when `dirty`.
 pub(crate) fn sha_with_dirty_marker(sha: &str, dirty: bool) -> String {
     if dirty {
@@ -164,5 +183,39 @@ mod tests {
     fn a_relative_commondir_resolves_against_the_worktree_s_git_dir() {
         let resolved = parse_commondir("../..\n", Path::new("/repo/.git/worktrees/mine"));
         assert_eq!(resolved, PathBuf::from("/repo/.git/worktrees/mine/../.."));
+    }
+
+    #[test]
+    fn a_build_given_branch_and_commit_win_and_the_commit_is_shortened() {
+        assert_eq!(
+            badge_from_env(
+                Some("main".to_string()),
+                Some("0123456789abcdef0123456789abcdef01234567".to_string())
+            ),
+            Some(("main".to_string(), "0123456".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_tag_build_shows_the_tag_as_its_branch() {
+        assert_eq!(
+            badge_from_env(Some("v0.1.0".to_string()), Some("abc1234".to_string())),
+            Some(("v0.1.0".to_string(), "abc1234".to_string()))
+        );
+    }
+
+    #[test]
+    fn one_missing_or_blank_value_falls_back_to_git() {
+        assert_eq!(badge_from_env(None, None), None);
+        assert_eq!(badge_from_env(Some("main".to_string()), None), None);
+        assert_eq!(badge_from_env(None, Some("abc1234".to_string())), None);
+        assert_eq!(
+            badge_from_env(Some("  ".to_string()), Some("abc1234".to_string())),
+            None
+        );
+        assert_eq!(
+            badge_from_env(Some("main".to_string()), Some(String::new())),
+            None
+        );
     }
 }

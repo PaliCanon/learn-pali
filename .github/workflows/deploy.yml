@@ -1,0 +1,167 @@
+name: deploy
+
+# Push to main → dev (learn-pali-dev); tag v* → prod (learn-pali-prod).
+# The image is content-addressed: built only when its inputs changed, rolled
+# out with no traffic first, checked, then served. The model is the API's
+# deploy.yml; this file only runs once the repository variables below are set
+# (README.md, "Deploy"): until then a push to main fails at the first step
+# that needs them, touching nothing.
+#
+# Repository variables (not secrets, no value here):
+#   WIF_PROVIDER, DEPLOYER_SA, GCP_PROJECT — the workload identity of the
+#   `github-deployer` service account (platform / the site's infra).
+# Repository secret: UI_LIB_DEPLOY_KEY — the read-only deploy key on
+#   PaliCanon/ui-lib that ci.yml already uses.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+concurrency:
+  group: deploy-${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  ENV: ${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  REGION: europe-west1
+
+# Two checkouts side by side, as in ci.yml: the build reaches `../ui-lib`
+# (the workspace's [patch], main.css, build.rs). Commands run in learn-pali/;
+# the Docker build context is the folder holding both.
+defaults:
+  run:
+    working-directory: learn-pali
+
+jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      # persist-credentials: false — the Dockerfile copies learn-pali/.git
+      # (the footer badge asks git), and a persisted token would sit in
+      # .git/config, in a layer that the build cache exports.
+      - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          repository: PaliCanon/ui-lib
+          path: ui-lib
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+      # The same key, in an ssh agent, for the build: Cargo fetches the
+      # private ui-lib git dependency inside Docker (`--ssh default`).
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+      - uses: google-github-actions/setup-gcloud@v2
+      - run: gcloud auth configure-docker ${{ env.REGION }}-docker.pkg.dev --quiet
+
+      # The tag is a hash of the tracked inputs' blob ids plus the ui-lib
+      # commit built against: the same sources and the same ui-lib always
+      # give the same tag, and an existing one is reused. `app` holds
+      # everything that shapes the image besides the lock and the manifest:
+      # the Dockerfile (and the smoke test written in it) and build.rs, so
+      # a fix to either changes the tag. (cli/ and tools/ are not in the
+      # image, so they are not in the hash.)
+      - name: Compute the input hash and image refs
+        id: vars
+        run: |
+          set -euo pipefail
+          UI_LIB=$(git -C ../ui-lib rev-parse HEAD)
+          HASH=$( { git ls-files -s app core Cargo.toml Cargo.lock; echo "ui-lib $UI_LIB"; } | sha256sum | cut -c1-16)
+          IMAGE="${{ env.REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT }}/palicanon/learn-pali"
+          echo "tag=h-$HASH" >> "$GITHUB_OUTPUT"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "image_hash=$IMAGE:h-$HASH" >> "$GITHUB_OUTPUT"
+          echo "learn-pali: input hash h-$HASH (ui-lib $UI_LIB)"
+
+      - name: Check whether that image already exists
+        id: check-image
+        run: |
+          set -euo pipefail
+          if gcloud artifacts docker images describe "${{ steps.vars.outputs.image_hash }}" \
+            --project "${{ vars.GCP_PROJECT }}" --quiet >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "learn-pali: ${{ steps.vars.outputs.image_hash }} already built, skipped"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.check-image.outputs.exists != 'true'
+      - uses: docker/build-push-action@v6
+        if: steps.check-image.outputs.exists != 'true'
+        with:
+          context: .
+          file: learn-pali/app/Dockerfile
+          # `working-directory` does not apply to `uses:` steps: the context
+          # is the workspace root, the folder holding learn-pali/ and ui-lib/.
+          ssh: default=${{ env.SSH_AUTH_SOCK }}
+          push: true
+          # The badge's branch and commit: the image has no .git. A tag
+          # build passes the tag name as the branch.
+          build-args: |
+            LEARN_PALI_GIT_BRANCH=${{ github.ref_name }}
+            LEARN_PALI_GIT_COMMIT=${{ github.sha }}
+          tags: |
+            ${{ steps.vars.outputs.image_hash }}
+            ${{ steps.vars.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Roll out without traffic, check, then serve
+        run: |
+          set -euo pipefail
+          SERVICE=learn-pali-${{ env.ENV }}
+          PROJECT="${{ vars.GCP_PROJECT }}"
+          IMAGE="${{ steps.vars.outputs.image_hash }}"
+          CURRENT=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
+            --format='value(spec.template.spec.containers[0].image)')
+          if [ "$CURRENT" = "$IMAGE" ]; then
+            echo "learn-pali: $SERVICE already runs $IMAGE, nothing to deploy"
+            exit 0
+          fi
+          TAG="sha-${GITHUB_SHA::7}"
+          gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE" \
+            --no-traffic --tag "$TAG" --quiet
+          URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json \
+            | jq -r --arg t "$TAG" '[.status.traffic[] | select(.tag == $t) | .url] | .[0] // empty')
+          test -n "$URL" || { echo "no URL for the revision tag $TAG on $SERVICE"; exit 1; }
+
+          # 1. `/` answers 200 and is the page. The body goes to a file, not a
+          #    pipe: `curl | grep -q` fails under pipefail when grep quits early.
+          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 \
+            "$URL/" --output "$RUNNER_TEMP/home.html"
+          grep -q PaliLearn "$RUNNER_TEMP/home.html" \
+            || { echo "/ does not name PaliLearn"; exit 1; }
+
+          # 2. The hashed .wasm that `/` references is served: a missing
+          #    hash file or site root would leave the page up and the
+          #    hydration dead (the page renders, nothing is interactive).
+          WASM=$(grep -o '/pkg/[A-Za-z0-9_.-]*\.wasm' "$RUNNER_TEMP/home.html" | head -n 1)
+          test -n "$WASM" || { echo "/ references no .wasm"; exit 1; }
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            "$URL$WASM" --output /dev/null
+
+          # 3. /review is gone (the review runs in place on the home).
+          CODE=$(curl --silent --output /dev/null --write-out '%{http_code}' "$URL/review")
+          test "$CODE" = "404" || { echo "expected 404 on /review, got $CODE"; exit 1; }
+
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --to-latest --quiet
+          echo "learn-pali: $SERVICE now serves $IMAGE"
+
+          # The service's own URL, now that it carries the traffic.
+          SERVICE_URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
+            --format='value(status.url)')
+          curl --fail --silent --show-error --retry 3 --retry-all-errors \
+            "$SERVICE_URL/" --output /dev/null

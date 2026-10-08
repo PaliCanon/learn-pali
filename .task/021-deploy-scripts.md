@@ -1,6 +1,6 @@
 # 021 The deploy scripts, written but not run
 
-status: building · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-08: « sans deploy, tu peux faire les scripts de deployment ») · model: the api's deploy (api/.github/workflows/deploy.yml, api/api/Dockerfile, api/infra/) and docs/conventions/deploy.md
+status: review · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-08: « sans deploy, tu peux faire les scripts de deployment ») · model: the api's deploy (api/.github/workflows/deploy.yml, api/api/Dockerfile, api/infra/) and docs/conventions/deploy.md
 
 ## Summary
 Write what deploys learn-pali — image, infra, workflow — on the PaliCanon pattern, **without applying, building in CI or pushing anything** (no `tofu apply`, no `gcloud`, no push; the workflow file lands but only runs once the user pushes and sets the repository variables).
@@ -15,5 +15,9 @@ Rank 5: difficulty 4 (three artefacts, a two-repo build context, no way to run t
 | Step | Result | Output |
 | --- | --- | --- |
 | Define | done | the user's words; the api's deploy read as the model |
+| Build | done | lane Sonnet: a136326 Dockerfile, 91dba84 infra, 1c522f2 workflow, ee3edf3 README; tofu validate, bash -n, smoke against a local server; no docker, no actionlint (not installed) |
+| Review | done | thread d3a2c47351c3b45: Gemini #4607, Deep #4610; rulings #4615 |
+| Fix | done | 08662d6 + fbcd7a0 badge from build args, no .git in the image; ee70376 --project, first rollout URL; 75bb9af dev only at first, the Worker rewrites Location, compatibility_date; 33473e9 README (deploy order, deployer roles not found in the checkouts, the public-origin gap shared with the api); 308 + 9 tests, clippy, fmt, tofu validate EXIT 0 |
+| Check | done | not deployable here by design (the user: « sans deploy »); the first real run is the user's |
 
 ## Retro

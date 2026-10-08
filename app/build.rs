@@ -26,7 +26,10 @@
 //! crate itself, so `cargo test -p app` covers them.
 //!
 //! `git` missing, or this not being a git checkout at all: falls back to
-//! `"unknown"` for both, with a build warning.
+//! `"unknown"` for both, with a build warning. The image build has no
+//! `.git`: it passes `LEARN_PALI_GIT_BRANCH` and `LEARN_PALI_GIT_COMMIT`
+//! (build args → env), which win when both are set
+//! ([`git_info::badge_from_env`]); a local build sets none and asks git.
 
 #[path = "src/git_info.rs"]
 mod git_info;
@@ -106,6 +109,18 @@ fn assert_placeholder_parity() {
 /// Sets `LEARN_PALI_GIT_BRANCH` / `LEARN_PALI_GIT_SHA` for the env
 /// badge, and watches the refs they come from.
 fn capture_git_info() {
+    println!("cargo:rerun-if-env-changed=LEARN_PALI_GIT_BRANCH");
+    println!("cargo:rerun-if-env-changed=LEARN_PALI_GIT_COMMIT");
+    // The image build is told (build args → env) and has no `.git`.
+    let told = git_info::badge_from_env(
+        std::env::var("LEARN_PALI_GIT_BRANCH").ok(),
+        std::env::var("LEARN_PALI_GIT_COMMIT").ok(),
+    );
+    if let Some((branch, sha)) = told {
+        println!("cargo:rustc-env=LEARN_PALI_GIT_BRANCH={branch}");
+        println!("cargo:rustc-env=LEARN_PALI_GIT_SHA={sha}");
+        return;
+    }
     let branch_raw = git(&["rev-parse", "--abbrev-ref", "HEAD"]);
     let sha_raw = git(&["rev-parse", "--short", "HEAD"]);
     if branch_raw.is_none() || sha_raw.is_none() {

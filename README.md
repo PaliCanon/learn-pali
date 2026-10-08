@@ -145,3 +145,46 @@ The same run in CI (`.github/workflows/ci.yml`), plus MSRV (`--locked`, on
 Codecov). The app has `ssr` and `hydrate` features that do not build
 together, so there is no `--workspace`; the three other crates have none.
 Functions stay under 50 lines (`clippy.toml`).
+
+## Deploy
+
+Written, **not run yet** (task 021): nothing below has been applied, built in
+CI or pushed.
+
+| Where | What | Host |
+| --- | --- | --- |
+| dev | a push to `main` | `learn-dev.palicanon.app` (Cloud Run `learn-pali-dev`) |
+| prod | a tag `v*` | `learn.palicanon.app` (Cloud Run `learn-pali-prod`, once added) |
+
+- `app/Dockerfile` builds the server and the site in one image (`cargo leptos
+  build --release`, then `debian:bookworm-slim`, a non-root user, port 8080).
+  Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, with
+  an ssh agent for the private ui-lib: the command is in the file's header. It
+  ends with a smoke test: the server starts and answers.
+- `infra/` is the Cloud Run service, its service account and the Cloudflare
+  Worker and route per environment, in their own tofu state; see
+  `infra/README.md`.
+- `.github/workflows/deploy.yml` computes the image tag `h-<hash>` (the tracked
+  `app`, `core`, `Cargo.toml`, `Cargo.lock` and the ui-lib commit), builds it
+  only when the registry lacks it, deploys it with no traffic under a tag,
+  checks it, then moves the traffic. The checks: `/` answers 200 and names
+  PaliLearn; the hashed `.wasm` that `/` references answers 200; the retired
+  review route answers 404.
+
+Before the first deploy, the user:
+
+1. Runs the first `tofu apply` from `infra/` (`infra/README.md`: gcloud
+   application-default login, `CLOUDFLARE_API_TOKEN` from the keychain). It
+   creates **dev only**: the service on a placeholder image, its Worker and
+   route. Prod comes later (step 4).
+2. Sets the repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
+   `GCP_PROJECT` (the same values as the API's repository). The secret
+   `UI_LIB_DEPLOY_KEY` is already there for CI; the deploy uses it too. The
+   deployer (shared with the API) must hold `roles/run.developer` and Artifact
+   Registry writer on the project; those grants live in the site's infra /
+   `platform`, not here (`infra/README.md`).
+3. Decides the open points: the host names, Cloudflare Access on dev (it is
+   not set up by `infra/`), the maximum instances. Also known: the Cloud Run
+   origin is reachable directly, as the API's is (a follow-up for both).
+4. Pushes `main` (dev), checks `https://learn-dev.palicanon.app`, then adds
+   prod (`prod.tfvars.example`, a second `tofu apply`) and tags `v0.x.y`.

@@ -1,0 +1,13 @@
+# The second apply, once dev has deployed from CI and been checked:
+#   tofu apply -var-file=prod.tfvars   (copy this file to prod.tfvars)
+# `envs` is replaced as a whole, so dev is listed again.
+envs = {
+  dev = {
+    host          = "learn-dev.palicanon.app"
+    max_instances = 2
+  }
+  prod = {
+    host          = "learn.palicanon.app"
+    max_instances = 3
+  }
+}
