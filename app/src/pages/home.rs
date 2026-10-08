@@ -996,9 +996,9 @@ fn BrandLink(
         <a
             href="/"
             on:click=on_click
-            class="hidden shrink-0 items-center gap-3 font-serif text-4xl font-semibold text-heading select-none sm:flex"
+            class="hidden shrink-0 items-center justify-center gap-3 font-serif text-[1.75rem] font-semibold text-heading select-none sm:flex"
         >
-            <img src="/lotus.png" alt="" width="44" height="44" />
+            <img src="/lotus.png" alt="" width="30" height="30" />
             "PaliLearn"
         </a>
     }
@@ -1153,9 +1153,13 @@ mod tests {
         assert!(tag.contains(r#"href="/""#), "{tag}");
         assert!(tag.contains("hidden"), "{tag}");
         assert!(tag.contains("sm:flex"), "{tag}");
-        assert!(tag.contains("text-4xl"), "{tag}");
+        assert!(tag.contains("text-[1.75rem]"), "{tag}");
         assert!(html.contains(r#"<img src="/lotus.png""#), "{html}");
-        assert!(html.contains(r#"width="44""#), "{html}");
+        assert!(html.contains(r#"width="30""#), "{html}");
+        assert!(
+            tag.contains("justify-center") || tag.contains("self-center"),
+            "brand should be centered: {tag}"
+        );
         assert!(!html.contains("PaliCanon"), "{html}");
     }
 
