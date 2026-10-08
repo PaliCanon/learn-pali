@@ -1,6 +1,6 @@
-//! `/`: the home. The brand (lotus and name, hidden on a phone where the
-//! shell's top bar already shows them), the title for a screen reader only
-//! (the brand names the page), then [`HomeView`]:
+//! `/`: the home. The brand (lotus and name, at every width: the shell's top
+//! bar says "PaliCanon", the page names the service), the title for a
+//! screen reader only (the brand names the page), then [`HomeView`]:
 //! the first paint is a skeleton (`aria-busy`, a CTA row of the loaded
 //! row's height);
 //! after hydration the page reads the store ([`Home`]) and shows one of the
@@ -145,7 +145,7 @@ pub fn Home() -> impl IntoView {
     view! {
         <div
             data-page="home"
-            class="flex flex-col gap-8 px-6 pt-6 pb-12 sm:mx-auto sm:w-full sm:max-w-[40rem] sm:flex-1 sm:justify-center"
+            class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] sm:flex-1 sm:justify-center"
         >
             {move || {
                 let mode = page.mode.get();
@@ -975,8 +975,9 @@ fn HomeProgress(
     }
 }
 
-/// The lotus and "PaliLearn", the service's name, a link home (HL). Hidden
-/// on a phone, where the shell's top bar already shows the lotus. A
+/// The lotus and "PaliLearn", the service's name, a link home (HL). Shown
+/// at every width, a little smaller on a phone: the shell's top bar says
+/// "PaliCanon", so the page is what names the service. A
 /// plain click brings the home back to its first view ([`reset_home`]: the
 /// filter cleared, the term list at its top) and, in a session, goes back
 /// to the home's content (`on_home`); there is no navigation. `href="/"`
@@ -1003,9 +1004,15 @@ fn BrandLink(
         <a
             href="/"
             on:click=on_click
-            class="hidden shrink-0 items-center justify-center gap-3 font-serif text-[1.75rem] font-semibold text-heading select-none sm:flex"
+            class="flex shrink-0 items-center justify-center gap-3 font-serif text-2xl font-semibold text-heading select-none sm:text-[1.75rem]"
         >
-            <img src="/lotus.png" alt="" width="30" height="30" />
+            <img
+                src="/lotus.png"
+                alt=""
+                width="30"
+                height="30"
+                class="size-[26px] sm:size-[30px]"
+            />
             "PaliLearn"
         </a>
     }
@@ -1175,13 +1182,17 @@ mod tests {
     }
 
     #[test]
-    fn the_brand_is_palilearn_hidden_on_a_phone_with_the_lotus() {
+    fn the_brand_is_palilearn_shown_at_every_width_with_the_lotus() {
         let html = render(Language::En);
         let tag = tag_before(&html, "a", "PaliLearn");
+        let classes: Vec<&str> = tag.split(['"', ' ']).collect();
         assert!(tag.contains(r#"href="/""#), "{tag}");
-        assert!(tag.contains("hidden"), "{tag}");
-        assert!(tag.contains("sm:flex"), "{tag}");
-        assert!(tag.contains("text-[1.75rem]"), "{tag}");
+        assert!(classes.contains(&"flex"), "{tag}");
+        assert!(!classes.contains(&"hidden"), "{tag}");
+        assert!(!classes.contains(&"sm:flex"), "{tag}");
+        assert!(classes.contains(&"text-2xl"), "{tag}");
+        assert!(classes.contains(&"sm:text-[1.75rem]"), "{tag}");
+        assert!(html.contains("size-[26px] sm:size-[30px]"), "{html}");
         assert!(html.contains(r#"<img src="/lotus.png""#), "{html}");
         assert!(html.contains(r#"width="30""#), "{html}");
         assert!(
@@ -1200,6 +1211,8 @@ mod tests {
         let tag = tag_before(&html, "div", r#"data-page="home""#);
         for class in [
             "px-6",
+            "pt-4",
+            "sm:pt-6",
             "gap-8",
             "sm:mx-auto",
             "sm:w-full",
