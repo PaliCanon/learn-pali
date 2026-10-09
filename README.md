@@ -177,12 +177,14 @@ Before the first deploy, the user:
    application-default login, `CLOUDFLARE_API_TOKEN` from the keychain). It
    creates **dev only**: the service on a placeholder image, its Worker and
    route. Prod comes later (step 4).
-2. Sets the repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
-   `GCP_PROJECT` (the same values as the API's repository). The secret
-   `UI_LIB_DEPLOY_KEY` is already there for CI; the deploy uses it too. The
-   deployer (shared with the API) must hold `roles/run.developer` and Artifact
-   Registry writer on the project; those grants live in the site's infra /
-   `platform`, not here (`infra/README.md`).
+2. The repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
+   `GCP_PROJECT` are set (2026-10-09, the API's values, read from
+   `PaliCanon/api`); the secret `UI_LIB_DEPLOY_KEY` is already there for CI.
+   The deployer holds `roles/run.developer` and Artifact Registry writer
+   (checked). **Still missing:** `PaliCanon/learn-pali` in the site's
+   `infra/variables.tf` `github_repos` (`Lsh0x/palicanon`), applied — it opens
+   the workload identity provider and the deployer to this repository
+   (`infra/README.md`).
 3. Decides the open points: the host names, Cloudflare Access on dev (it is
    not set up by `infra/`), the maximum instances. Also known: the Cloud Run
    origin is reachable directly, as the API's is (a follow-up for both).
