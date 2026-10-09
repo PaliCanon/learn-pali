@@ -71,15 +71,10 @@ Checked on 2026-10-09 (read-only, `gcloud projects get-iam-policy palicanon-app`
 `github-deployer` holds `roles/artifactregistry.writer`, `roles/run.developer`
 and `roles/storage.objectViewer` on the project — the two grants are in place.
 
-**Missing: this repository is not yet allowed to become the deployer.** The
-workload identity provider `github-oidc` accepts only
-`Lsh0x/palicanon`, `anatta-rs/yuga-server` and `PaliCanon/api`
-(its `attribute_condition`), and `roles/iam.workloadIdentityUser` on
-`github-deployer` is granted to those three repositories only. Both come from
-one list in the site's infra: `Lsh0x/palicanon` `infra/variables.tf`,
-`github_repos`. Add `"PaliCanon/learn-pali"` there and apply that infra before
-the first push to `main` — until then the deploy's `google-github-actions/auth`
-step is refused.
+**This repository may become the deployer** (2026-10-09): `PaliCanon/learn-pali`
+was added to the site's `infra/variables.tf` `github_repos` (`Lsh0x/palicanon`
+3091ab1) and applied — the provider `github-oidc` accepts it and
+`roles/iam.workloadIdentityUser` on `github-deployer` is granted to it.
 
 Every `gcloud` call of the workflow passes `--project "$GCP_PROJECT"`, so the
 project never depends on the runner's default.

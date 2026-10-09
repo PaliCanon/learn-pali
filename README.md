@@ -181,10 +181,8 @@ Before the first deploy, the user:
    `GCP_PROJECT` are set (2026-10-09, the API's values, read from
    `PaliCanon/api`); the secret `UI_LIB_DEPLOY_KEY` is already there for CI.
    The deployer holds `roles/run.developer` and Artifact Registry writer
-   (checked). **Still missing:** `PaliCanon/learn-pali` in the site's
-   `infra/variables.tf` `github_repos` (`Lsh0x/palicanon`), applied — it opens
-   the workload identity provider and the deployer to this repository
-   (`infra/README.md`).
+   (checked). The repository is allowed to use the deploy identity (the site's
+   `github_repos`, applied 2026-10-09; `infra/README.md`).
 3. Decides the open points: the host names, Cloudflare Access on dev (it is
    not set up by `infra/`), the maximum instances. Also known: the Cloud Run
    origin is reachable directly, as the API's is (a follow-up for both).
