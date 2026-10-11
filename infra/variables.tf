@@ -20,10 +20,11 @@ variable "cloudflare_account_id" {
   default = "c0690c72f1b7c85737052c3a9ebac154"
 }
 
-# One entry per environment. Hosts are one level under the zone
-# (learn-dev, not learn.dev): a plain proxied record only covers one level,
-# which is why the API is api-dev and not dev.api. The hosts are a proposal
-# (task 021): changing one is an edit here and a tofu apply.
+# One entry per environment. The dev host is learn.dev.palicanon.app (the
+# user's choice, 2026-10-11), two levels under the zone: Universal SSL covers
+# `*.palicanon.app` only, so every host is served by a Workers Custom Domain
+# (cloudflare.tf), for which Cloudflare issues the certificate of the exact
+# name, whatever its depth. Changing a host is an edit here and a tofu apply.
 #
 # The default holds `dev` ONLY: the first apply must not stand up a public
 # prod host before dev has deployed and been checked from CI. Prod is added
@@ -36,7 +37,7 @@ variable "envs" {
   }))
   default = {
     dev = {
-      host          = "learn-dev.palicanon.app"
+      host          = "learn.dev.palicanon.app"
       max_instances = 2
     }
     # prod = {

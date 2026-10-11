@@ -12,7 +12,7 @@ project it shares with the site and the API (`palicanon-app`,
 | The deployer's right to act as it | `gcp.tf` | `github-deployer` is read as a data source (the site's infra owns it), never managed here. |
 | Cloud Run service `learn-pali-<env>` | `gcp.tf` | min 0, max 2 (dev) / 3 (prod), 1 CPU, 256Mi, CPU only while a request is served, startup probe on `/`, public. |
 | A Worker relaying to Cloud Run | `cloudflare.tf`, `worker/proxy.js` | The API's pattern: the Worker's `ORIGIN` is the Cloud Run URL. |
-| A proxied `AAAA 100::` record and the Worker route | `cloudflare.tf` | `learn.palicanon.app` (prod), `learn-dev.palicanon.app` (dev). |
+| A Workers Custom Domain per host | `cloudflare.tf` | `learn.palicanon.app` (prod), `learn.dev.palicanon.app` (dev). Cloudflare creates the DNS record and issues the certificate for the exact host, whatever its depth: `learn.dev.palicanon.app` is outside Universal SSL (`*.palicanon.app`), a route on a plain record would not serve it over TLS. |
 
 CI owns the image: tofu ignores `image`, `scaling`, `client` and
 `client_version` of the service (`lifecycle.ignore_changes`, the API's rule),
@@ -27,12 +27,12 @@ The Artifact Registry repository `palicanon`, the GitHub deploy identity
 ## Order: dev first, prod later
 
 `var.envs` holds **dev only** by default. The first apply therefore stands up
-`learn-pali-dev` and `learn-dev.palicanon.app` and nothing public in prod.
+`learn-pali-dev` and `learn.dev.palicanon.app` and nothing public in prod.
 
 1. **Apply dev** (below). Both the service and the host serve the placeholder
    image.
 2. **Deploy dev from CI** (set the repository variables, push `main`), and
-   check `https://learn-dev.palicanon.app`.
+   check `https://learn.dev.palicanon.app`.
 3. **Then add prod**: copy `prod.tfvars.example` to `prod.tfvars` (git-ignored)
    and `tofu apply -var-file=prod.tfvars`, or uncomment the `prod` block in
    `variables.tf`. This creates `learn-pali-prod` and `learn.palicanon.app`
@@ -44,12 +44,16 @@ Nothing here has been applied yet (task 021 wrote it, did not run it).
 
 ```sh
 gcloud auth application-default login
-# The Cloudflare token (zone DNS, Workers routes, account Workers scripts)
+# The Cloudflare token (zone DNS, account Workers scripts, which also covers the Custom Domains)
 # comes from the keychain, never typed or printed (conventions/security.md):
 export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a palicanon -s cloudflare-api-token -w)
 cd infra
 tofu init && tofu plan && tofu apply
 ```
+
+The first apply may take a few minutes after the Custom Domain is created:
+Cloudflare issues the host's certificate then, and the host answers over TLS
+only once it is active.
 
 The services start with the **bootstrap image**
 (`us-docker.pkg.dev/cloudrun/container/hello`, `var.bootstrap_image`), which
@@ -85,7 +89,7 @@ project never depends on the runner's default.
   (Zero Trust team `lucky-cake-cc7c`, allow-list of one address;
   `claude-memory/palicanon-deployment.md`). That application is declared in the
   site's infra, not in the API's, and not here: the policy is per host, so
-  `learn-dev.palicanon.app` is public until an Access application is added for
+  `learn.dev.palicanon.app` is public until an Access application is added for
   it (dashboard, or tofu once the token has the Access scope). Decide before
   the first dev deploy.
 - **Direct access to the origin (a known gap shared with the API).** The Cloud
@@ -94,4 +98,4 @@ project never depends on the runner's default.
   WAF, the rate limits and, on dev, Access. The API has the same gap today and
   this service copies it on purpose. A follow-up for both: a secret header the
   Worker adds and the server checks, or restricting ingress. Not fixed here.
-- The hosts (`learn.palicanon.app`, `learn-dev.palicanon.app`) are a proposal.
+- The hosts (`learn.palicanon.app`, `learn.dev.palicanon.app`) are a proposal; the dev one is the user's choice (2026-10-11).

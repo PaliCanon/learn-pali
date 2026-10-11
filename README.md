@@ -153,7 +153,7 @@ CI or pushed.
 
 | Where | What | Host |
 | --- | --- | --- |
-| dev | a push to `main` | `learn-dev.palicanon.app` (Cloud Run `learn-pali-dev`) |
+| dev | a push to `main` | `learn.dev.palicanon.app` (Cloud Run `learn-pali-dev`) |
 | prod | a tag `v*` | `learn.palicanon.app` (Cloud Run `learn-pali-prod`, once added) |
 
 - `app/Dockerfile` builds the server and the site in one image (`cargo leptos
@@ -186,5 +186,5 @@ Before the first deploy, the user:
 3. Decides the open points: the host names, Cloudflare Access on dev (it is
    not set up by `infra/`), the maximum instances. Also known: the Cloud Run
    origin is reachable directly, as the API's is (a follow-up for both).
-4. Pushes `main` (dev), checks `https://learn-dev.palicanon.app`, then adds
+4. Pushes `main` (dev), checks `https://learn.dev.palicanon.app`, then adds
    prod (`prod.tfvars.example`, a second `tofu apply`) and tags `v0.x.y`.

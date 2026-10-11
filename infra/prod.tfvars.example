@@ -3,7 +3,7 @@
 # `envs` is replaced as a whole, so dev is listed again.
 envs = {
   dev = {
-    host          = "learn-dev.palicanon.app"
+    host          = "learn.dev.palicanon.app"
     max_instances = 2
   }
   prod = {

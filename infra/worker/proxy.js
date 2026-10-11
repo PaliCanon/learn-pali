@@ -1,4 +1,4 @@
-// learn.palicanon.app / learn-dev.palicanon.app → learn-pali on Cloud Run.
+// learn.palicanon.app / learn.dev.palicanon.app → learn-pali on Cloud Run.
 //
 // Cloudflare is the front door (WAF, bot fight, rate limits per IP); this
 // relays the request as is — method, headers, body — to ORIGIN, the Cloud
