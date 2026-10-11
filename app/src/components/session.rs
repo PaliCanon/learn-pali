@@ -564,9 +564,9 @@ fn forms_front(card: Card, language: Language) -> impl IntoView {
     view! {
         <p class="text-lg leading-8 text-ink">
             {td_string!(locale, forms_before)}<strong class="font-semibold">{label}</strong>
-            {td_string!(locale, forms_between)}
-            <Pali size=PaliSize::Body>{card.term.lemma.clone()}</Pali>
-            {td_string!(locale, forms_after)}
+            {td_string!(locale, forms_between)} <strong class="font-semibold">
+                <Pali size=PaliSize::Body>{card.term.lemma.clone()}</Pali>
+            </strong> {td_string!(locale, forms_after)}
         </p>
     }
 }
@@ -1046,6 +1046,16 @@ pub(crate) mod tests {
             assert!(text_of(front).contains(sentence), "{language:?}: {front}");
             assert!(front.contains(r#"lang="pi""#), "the lemma is Pāli: {front}");
         }
+    }
+
+    #[test]
+    fn the_lemma_is_bold_on_the_forms_front() {
+        let html = render(rupa(Facet::Forms, Stage::Quarter));
+        let (front, _) = split(&html);
+        assert!(
+            front.contains(r#"<strong class="font-semibold"><span lang="pi"#),
+            "the lemma must be wrapped in <strong class=\"font-semibold\">: {front}"
+        );
     }
 
     #[test]
