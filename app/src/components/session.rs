@@ -25,19 +25,23 @@
 //! no-ops on the server, covered by the orchestrator's browser probe, not
 //! by a native test.
 
+use std::collections::HashMap;
+use std::sync::LazyLock;
+
 use learn_core::date::Date;
 use learn_core::deck::{Blank, Example};
 use learn_core::facet::Facet;
 use learn_core::progress::State;
 use learn_core::session::{Answer, Session, nearest};
 use learn_core::stage::Stage;
+use learn_core::words::word_key;
 use leptos::ev::KeyboardEvent;
 use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::Language;
 use palicanon_ui_lib::{
-    Button, Dialog, Disclosed, Disclosure, Pali, PaliSize, RevealCard, SessionHeader, Size,
-    Variant, language_signal,
+    Button, Dialog, Disclosed, Disclosure, Pali, PaliSize, PaliText, RevealCard, SessionHeader,
+    Size, Token, Variant, WordEntry, language_signal,
 };
 
 use crate::catalogue::Locale;
@@ -62,6 +66,21 @@ pub(crate) const CARD_BOX: &str =
 const CAPTION: &str = "text-xs font-medium uppercase tracking-wide text-muted";
 /// The answer of a revealed Context blank: the gold mark.
 const MARK: &str = "rounded-sm bg-gold/20 px-0.5 text-ink";
+/// The panel id of the reveal's example words (one card on the page).
+const EXAMPLE_WORDS: &str = "pc-example-words";
+/// The panel ids of the Context line's runs of text, one per run (a
+/// `PaliText` needs a `'static` id; a window of [`MAX_CHARS`] holds far
+/// fewer runs).
+const LINE_WORDS: [&str; 8] = [
+    "pc-line-words-0",
+    "pc-line-words-1",
+    "pc-line-words-2",
+    "pc-line-words-3",
+    "pc-line-words-4",
+    "pc-line-words-5",
+    "pc-line-words-6",
+    "pc-line-words-7",
+];
 /// The practice badge.
 const BADGE: &str = "w-fit rounded-full border border-gold px-3 py-1 text-xs text-gold-text";
 
@@ -583,7 +602,9 @@ fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl
         .map(|blank| {
             view! {
                 <p class="text-lg leading-8 text-ink">
-                    <Pali layout="whitespace-pre-line">{context_line(blank, revealed)}</Pali>
+                    <Pali layout="whitespace-pre-line">
+                        {context_line(blank, revealed, Locale::from(language))}
+                    </Pali>
                 </p>
             }
         });
@@ -619,19 +640,43 @@ fn translation_view(example: &Example, language: Language) -> Option<impl IntoVi
 
 /// The example's line, windowed ([`context_window`]), as runs of text and
 /// its blank(s): `___` until `revealed`, then the answer in a gold `<mark>`
-/// in the same place.
-fn context_line(blank: &Blank, revealed: Signal<bool>) -> impl IntoView + use<> {
+/// in the same place, and the words of the runs open their meaning
+/// ([`line_text`]); the marked answer is never a button.
+fn context_line(blank: &Blank, revealed: Signal<bool>, locale: Locale) -> impl IntoView + use<> {
     let answer = blank.answer.clone();
+    let mut ids = LINE_WORDS.into_iter();
     context_window(blank, MAX_CHARS)
         .into_iter()
         .map(|segment| match segment {
-            Segment::Text(text) => text.into_any(),
+            Segment::Text(text) => line_text(ids.next(), text, revealed, locale),
             Segment::Blank => {
                 let answer = answer.clone();
                 (move || blank_view(revealed.get(), answer.clone())).into_any()
             }
         })
         .collect_view()
+}
+
+/// A run of the Context line: plain text until `revealed`, then a
+/// [`PaliText`] under its own panel id; a run past [`LINE_WORDS`] stays
+/// plain.
+fn line_text(
+    id: Option<&'static str>,
+    text: String,
+    revealed: Signal<bool>,
+    locale: Locale,
+) -> AnyView {
+    let Some(id) = id else {
+        return text.into_any();
+    };
+    (move || {
+        if revealed.get() {
+            example_words(id, text.clone(), locale).into_any()
+        } else {
+            text.clone().into_any()
+        }
+    })
+    .into_any()
 }
 
 /// One blank: `___`, or the answer marked once revealed.
@@ -768,9 +813,7 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
     });
     let example = term.example.as_ref().filter(|_| !context).map(|example| {
         let body = view! {
-            <p>
-                <Pali layout="whitespace-pre-line">{example.text.clone()}</Pali>
-            </p>
+            <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale)}</p>
             {translation_view(example, language)}
         };
         captioned(td_string!(locale, reveal_example), body)
@@ -781,6 +824,67 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
         {root}
         {example}
     }
+}
+
+/// An example passage whose words open their meaning: a [`PaliText`]
+/// over the deck's words ([`passage_entries`]), its "+ n more" line in the
+/// page's language. `id` names the panel, unique on the page.
+fn example_words(id: &'static str, text: String, locale: Locale) -> impl IntoView + use<> {
+    let entries = passage_entries(&text);
+    let more_label = Callback::new(move |count: usize| more_words(locale, count));
+    view! {
+        <PaliText
+            id=id
+            text=text
+            entries=entries
+            more_label=more_label
+            layout="whitespace-pre-line"
+        />
+    }
+}
+
+/// The deck's words as [`PaliText`] entries, by [`word_key`]: built once,
+/// on first use.
+static DICTIONARY: LazyLock<HashMap<String, Vec<WordEntry>>> = LazyLock::new(|| {
+    deck()
+        .words
+        .iter()
+        .map(|(key, entries)| (key.clone(), entries.iter().map(ui_entry).collect()))
+        .collect()
+});
+
+/// A passage's entries keyed as [`PaliText`] looks a word up (as written,
+/// lower-cased), each found in the deck by its [`word_key`] (ṁ, curly
+/// apostrophes and quotes normalised); a word the deck lacks is absent.
+fn passage_entries(text: &str) -> HashMap<String, Vec<WordEntry>> {
+    palicanon_ui_lib::words(text)
+        .into_iter()
+        .filter_map(|token| match token {
+            Token::Word(word) => DICTIONARY
+                .get(&word_key(&word))
+                .map(|entries| (word.to_lowercase(), entries.clone())),
+            Token::Other(_) => None,
+        })
+        .collect()
+}
+
+/// A deck entry as `PaliText` shows it: its tag is the part of speech,
+/// then the form's grammar when the DPD gives it (`aor · aor 3rd sg`).
+fn ui_entry(entry: &learn_core::words::WordEntry) -> WordEntry {
+    let tag = match &entry.grammar {
+        Some(grammar) => format!("{} · {grammar}", entry.pos),
+        None => entry.pos.clone(),
+    };
+    WordEntry {
+        headword: entry.headword.clone(),
+        tag: Some(tag),
+        meaning: entry.meaning.clone(),
+    }
+}
+
+/// The line under a capped entry list: '+ 2 more'.
+fn more_words(locale: Locale, count: usize) -> String {
+    td_string!(locale, words_more, count = count).to_string()
 }
 
 /// The end: the summary of a session, or 'Nothing due today' when none
@@ -1714,6 +1818,113 @@ pub(crate) mod tests {
             }
             assert!(!html.contains("<li"), "no summary lines: {html}");
             assert!(!html.contains("data-new-terms"), "{html}");
+        }
+    }
+
+    // ---- 026: tap a word of the example ----
+
+    /// The opening tags of the word buttons whose panel id starts with `id`.
+    fn word_buttons<'a>(html: &'a str, id: &str) -> Vec<&'a str> {
+        let controls = format!(r#"aria-controls="{id}"#);
+        html.match_indices("<button")
+            .map(|(at, _)| &html[at..=at + html[at..].find('>').expect(html)])
+            .filter(|tag| tag.contains(&controls))
+            .collect()
+    }
+
+    #[test]
+    fn the_meaning_reveal_makes_each_example_word_a_closed_disclosure() {
+        let html = render(yo(Facet::Meaning));
+        let (front, reveal) = split(&html);
+        let tags = word_buttons(reveal, EXAMPLE_WORDS);
+        // alaṃ vakkali kiṃ te iminā pūtikāyena diṭṭhena yo kho vakkali
+        // dhammaṃ passati so maṃ passati yo maṃ passati so dhammaṃ passati
+        assert_eq!(tags.len(), 21, "{reveal}");
+        for tag in &tags {
+            assert!(tag.contains(r#"aria-expanded="false""#), "{tag}");
+        }
+        for word in ["alaṃ", "vakkali", "pūtikāyena", "passati"] {
+            assert!(
+                reveal.contains(&format!(">{word}</button>")),
+                "{word}: {reveal}"
+            );
+        }
+        for mark in [",</button>", "?</button>", ", </button>"] {
+            assert!(!reveal.contains(mark), "punctuation stays plain: {reveal}");
+        }
+        assert!(
+            text_of(reveal).contains("alaṃ, vakkali, kiṃ te"),
+            "{reveal}"
+        );
+        assert_eq!(word_buttons(front, "pc-").len(), 0, "{front}");
+    }
+
+    #[test]
+    fn the_recall_reveal_makes_the_example_words_buttons_too() {
+        let html = render(kho(Facet::Recall));
+        let (_, reveal) = split(&html);
+        assert!(reveal.contains(">phasso</button>"), "{reveal}");
+    }
+
+    #[test]
+    fn the_context_front_has_no_word_button_until_revealed_and_never_on_the_answer() {
+        let hidden = front_with(Language::En, kho(Facet::Context), false);
+        assert_eq!(word_buttons(&hidden, "pc-").len(), 0, "{hidden}");
+        let shown = front_with(Language::En, kho(Facet::Context), true);
+        assert!(shown.contains(">phasso</button>"), "{shown}");
+        assert!(shown.contains(">āvuso</button>"), "{shown}");
+        assert!(
+            shown.contains(r#"<mark class="rounded-sm bg-gold/20 px-0.5 text-ink">kho</mark>"#),
+            "{shown}"
+        );
+        assert!(!shown.contains(">kho</button>"), "{shown}");
+        let before = word_buttons(&shown, "pc-line-words-0").len();
+        let after = word_buttons(&shown, "pc-line-words-1").len();
+        assert!(before > 0 && after > 0, "{shown}");
+    }
+
+    #[test]
+    fn a_word_the_deck_does_not_know_stays_plain_and_a_variant_spelling_is_found() {
+        let html = Owner::new().with(|| {
+            palicanon_ui_lib::provide_language().set(Language::En);
+            let text = "Alaṁ, zzzq sampādethā’ti.".to_string();
+            view! { {example_words("pc-test", text, Locale::from(Language::En))} }.to_html()
+        });
+        assert!(html.contains(">Alaṁ</button>"), "{html}");
+        assert!(html.contains(">sampādethā’ti</button>"), "{html}");
+        assert!(!html.contains(">zzzq</button>"), "{html}");
+        assert!(html.contains("zzzq"), "{html}");
+    }
+
+    #[test]
+    fn an_entry_is_tagged_with_its_part_of_speech_then_its_grammar() {
+        let with = learn_core::words::WordEntry {
+            headword: "mākāsi".to_string(),
+            pos: "aor".to_string(),
+            grammar: Some("aor 3rd sg".to_string()),
+            meaning: "do not make".to_string(),
+        };
+        let shown = ui_entry(&with);
+        assert_eq!(shown.tag.as_deref(), Some("aor · aor 3rd sg"));
+        assert_eq!(
+            (shown.headword.as_str(), shown.meaning.as_str()),
+            ("mākāsi", "do not make")
+        );
+        let without = learn_core::words::WordEntry {
+            grammar: None,
+            ..with
+        };
+        assert_eq!(ui_entry(&without).tag.as_deref(), Some("aor"));
+    }
+
+    #[test]
+    fn the_more_line_is_in_the_pages_language() {
+        for (language, line) in [
+            (Language::En, "+ 2 more"),
+            (Language::Fr, "+ 2 de plus"),
+            (Language::Vi, "+ 2 nữa"),
+        ] {
+            assert_eq!(more_words(Locale::from(language), 2), line, "{language:?}");
         }
     }
 }

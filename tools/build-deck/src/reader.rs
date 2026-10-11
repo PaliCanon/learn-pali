@@ -169,7 +169,7 @@ pub(crate) mod testdb {
     pub(crate) fn populate(conn: &Connection) {
         conn.execute_batch(
             "CREATE TABLE dpd_headwords (id INTEGER PRIMARY KEY, lemma_1 TEXT, pos TEXT,
-               meaning_1 TEXT, meaning_lit TEXT, construction TEXT, root_key TEXT,
+               meaning_1 TEXT, meaning_2 TEXT, meaning_lit TEXT, construction TEXT, root_key TEXT,
                example_1 TEXT, source_1 TEXT, sutta_1 TEXT, inflections_html TEXT, ebt_count INT);
              CREATE TABLE dpd_roots (root TEXT PRIMARY KEY, root_meaning TEXT);
              CREATE TABLE db_info (id INTEGER PRIMARY KEY, key TEXT, value TEXT);
@@ -181,6 +181,54 @@ pub(crate) mod testdb {
         for row in &rows() {
             insert(conn, row);
         }
+        populate_lookup(conn);
+    }
+
+    /// The `lookup` table and the headwords it points to (ids from 101):
+    /// `atha` (two headwords), `āmantesi` (grammar), `sampādethāti` (a
+    /// sandhi form with its own headword and a deconstruction whose parts
+    /// `sampādetha` and `iti` have theirs; meaning in `meaning_2`),
+    /// `mākāsi` (a sandhi form with no deconstruction), `ti` (four
+    /// headwords, grammar for one pos), `tasseva` (deconstructor only;
+    /// `tassa` has two headwords), `kho` (a second headword before the
+    /// deck's own), `nomean` (its only headword has no meaning).
+    pub(crate) fn populate_lookup(conn: &Connection) {
+        conn.execute_batch(
+            r#"CREATE TABLE lookup (lookup_key TEXT PRIMARY KEY, headwords TEXT NOT NULL,
+                 grammar TEXT NOT NULL, deconstructor TEXT NOT NULL);
+             INSERT INTO dpd_headwords (id, lemma_1, pos, meaning_1, meaning_2) VALUES
+               (101, 'atha 1', 'ind', 'then; also; and so; after that', 'then, and also'),
+               (102, 'atha 2', 'ind', 'but; rather; even', ''),
+               (103, 'āmanteti', 'pr', 'invites; calls; summons', ''),
+               (104, 'āmantesi', 'aor', 'addressed; said (to); advised', ''),
+               (105, 'sampādeti 1', 'pr', '', 'tries to accomplish'),
+               (106, 'kho 2', 'ind', 'a second kho', NULL),
+               (107, 'ti 1', 'card', 'three (3)', ''),
+               (108, 'ti 2', 'ind', '(end of direct speech)', ''),
+               (109, 'ti 3', 've', 'verbal ending', ''),
+               (110, 'ti 4', 'ind', 'a fourth ti', ''),
+               (111, 'ta 1', 'pron', 'that; he; it', ''),
+               (112, 'eva', 'ind', 'only; just; really', ''),
+               (113, 'iti', 'ind', 'thus; like this', ''),
+               (114, 'mākāsi', 'aor', 'do not make', ''),
+               (115, 'sampādethāti', 'sandhi', 'the joined form''s own entry', ''),
+               (116, 'ta 2', 'letter', 'letter t', '');
+             INSERT INTO lookup VALUES
+               ('atha', '[101, 102]', '', ''),
+               ('āmantesi', '[103, 104]', '[["āmanteti", "verb", "pr 2nd sg"],
+                  ["āmantesi", "verb", "aor 3rd sg"], ["āmantesi", "verb", "aor 2nd sg"]]', ''),
+               ('sampādethāti', '[115]', '', '["sampādetha + iti"]'),
+               ('sampādetha', '[105]', '[["sampādeti", "verb", "imp 2nd pl"]]', ''),
+               ('iti', '[113]', '', ''),
+               ('mākāsi', '[114]', '[["mākāsi", "verb", "aor 3rd sg"]]', ''),
+               ('ti', '[107, 108, 109, 110]', '[["ti", "ve", "masc nom sg"]]', ''),
+               ('tasseva', '', '', '["tassa + eva", "tassā + eva"]'),
+               ('tassa', '[111, 116]', '[["ta", "pron", "masc dat sg"]]', ''),
+               ('eva', '[112]', '', ''),
+               ('kho', '[106, 2]', '', ''),
+               ('nomean', '[5]', '', '');"#,
+        )
+        .unwrap();
     }
 
     /// The headwords: `sati 1.1` (marked example, forms, root), `kho`

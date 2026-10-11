@@ -82,5 +82,6 @@
   "summary_nothing_due": "Hôm nay không có gì cần ôn",
   "summary_practice_done": "Đã luyện xong",
   "summary_title": "Xong buổi ôn",
-  "unit_cards": "thẻ"
+  "unit_cards": "thẻ",
+  "words_more": "+ {{ count }} nữa"
 }

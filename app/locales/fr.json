@@ -82,5 +82,6 @@
   "summary_nothing_due": "Rien à revoir aujourd’hui",
   "summary_practice_done": "Entraînement terminé",
   "summary_title": "Séance terminée",
-  "unit_cards": "cartes"
+  "unit_cards": "cartes",
+  "words_more": "+ {{ count }} de plus"
 }

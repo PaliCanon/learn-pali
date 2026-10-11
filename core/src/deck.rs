@@ -11,6 +11,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::words::WordEntry;
+
 /// The deck's own key: the DPD lemma key (`sati 1.1`). Unique in a deck.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -175,6 +177,11 @@ pub struct Deck {
     pub source: String,
     /// The terms; ids are unique, the list is never empty.
     pub terms: Vec<Term>,
+    /// The entries of every word of the examples, by [`crate::words::word_key`]
+    /// of the word as written; a word the dictionary does not know is
+    /// absent. Empty in a deck written before them.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub words: BTreeMap<String, Vec<WordEntry>>,
 }
 
 impl Deck {
@@ -211,12 +218,13 @@ impl Deck {
         Ok(deck)
     }
 
-    /// The deck as pretty JSON, terms in their stored order.
+    /// The deck as compact JSON on one line (the site embeds it), terms in
+    /// their stored order.
     ///
     /// # Panics
     /// Never in practice: the types serialise without failing.
     pub fn to_json(&self) -> String {
-        serde_json::to_string_pretty(self).expect("a deck always serialises")
+        serde_json::to_string(self).expect("a deck always serialises")
     }
 
     /// The term with this id, if the deck has it.
@@ -300,6 +308,7 @@ pub(crate) mod samples {
             version: Deck::VERSION,
             source: "test deck".to_string(),
             terms,
+            words: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -389,6 +398,51 @@ mod tests {
         let again = Deck::from_json(&deck.to_json()).unwrap();
         assert_eq!(again, deck);
         assert!(deck.to_json().contains("\"translations\""));
+    }
+
+    fn atha() -> WordEntry {
+        WordEntry {
+            headword: "atha 1".to_string(),
+            pos: "ind".to_string(),
+            grammar: None,
+            meaning: "then; also".to_string(),
+        }
+    }
+
+    #[test]
+    fn a_deck_carries_its_words_and_round_trips() {
+        let mut with_words = two_terms();
+        let amantesi = WordEntry {
+            headword: "āmantesi".to_string(),
+            pos: "aor".to_string(),
+            grammar: Some("aor 3rd sg".to_string()),
+            meaning: "addressed".to_string(),
+        };
+        with_words.words.insert("atha".to_string(), vec![atha()]);
+        with_words
+            .words
+            .insert("āmantesi".to_string(), vec![amantesi]);
+        let json = with_words.to_json();
+        assert!(json.contains("\"words\""), "{json}");
+        assert!(json.contains("aor 3rd sg"), "{json}");
+        assert_eq!(Deck::from_json(&json).unwrap(), with_words);
+    }
+
+    #[test]
+    fn a_deck_without_words_omits_them_and_an_old_deck_still_parses() {
+        let json = two_terms().to_json();
+        assert!(!json.contains("\"words\""), "{json}");
+        let old = r#"{"version":1,"source":"s","terms":[{"id":"a","lemma":"a","pos":"ind",
+            "meaning":{"en":"x"},"rank":1}]}"#;
+        let deck = Deck::from_json(old).unwrap();
+        assert_eq!(deck.words.len(), 0);
+    }
+
+    #[test]
+    fn the_deck_is_written_as_one_compact_line() {
+        let json = two_terms().to_json();
+        assert!(!json.contains('\n'), "{json}");
+        assert!(json.starts_with("{\"version\":1,\"source\":"), "{json}");
     }
 
     #[test]

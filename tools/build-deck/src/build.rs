@@ -15,6 +15,7 @@ use rusqlite::Connection;
 use crate::blank::blank_example;
 use crate::inflections::parse_inflections;
 use crate::reader::{RawTerm, ReadError, read_db_info, read_root, read_term};
+use crate::words::deck_words;
 
 /// What a build saw, printed on stderr by the command.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -34,6 +35,10 @@ pub struct Report {
     pub notes: Vec<String>,
     /// Examples given a translation, per language (with `--api` only).
     pub translated: std::collections::BTreeMap<String, usize>,
+    /// The distinct written forms of the examples.
+    pub word_forms: usize,
+    /// The forms the DPD gave at least one entry.
+    pub words_found: usize,
 }
 
 /// Why a deck was not built.
@@ -119,11 +124,15 @@ pub fn build(
     if strict && !report.warnings.is_empty() {
         return Err(BuildError::Strict(report));
     }
+    let words = deck_words(conn, &terms)?;
+    report.word_forms = words.forms;
+    report.words_found = words.words.len();
     let source = format!("Digital Pāḷi Dictionary {}, {}", info.release, info.licence);
     let deck = Deck {
         version: Deck::VERSION,
         source,
         terms,
+        words: words.words,
     };
     Ok((deck, report))
 }
@@ -312,6 +321,20 @@ mod tests {
             report.notes[0].starts_with("lone 1: no blank"),
             "{report:?}"
         );
+    }
+
+    #[test]
+    fn the_deck_carries_the_words_of_its_examples_its_own_terms_first() {
+        let (deck, report) = build(&connection(), &keys(&["kho", "sati 1.1"]), false).unwrap();
+        let heads: Vec<&str> = deck.words["kho"]
+            .iter()
+            .map(|e| e.headword.as_str())
+            .collect();
+        assert_eq!(heads, vec!["kho", "kho 2"]);
+        // evaṃ kho bhagavā · atthi dhammā satiyā sacchikaraṇīyā
+        assert_eq!((report.word_forms, report.words_found), (7, 1));
+        let again = Deck::from_json(&deck.to_json()).unwrap();
+        assert_eq!(again.words, deck.words);
     }
 
     #[test]

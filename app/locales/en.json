@@ -82,5 +82,6 @@
   "summary_nothing_due": "Nothing due today",
   "summary_practice_done": "Practice done",
   "summary_title": "Session done",
-  "unit_cards": "cards"
+  "unit_cards": "cards",
+  "words_more": "+ {{ count }} more"
 }

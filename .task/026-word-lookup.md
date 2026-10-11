@@ -1,6 +1,6 @@
 # 026 Tap a word of the example, see its meaning
 
-status: building · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-11: « in the definition, I want to be able to click and see the meaning of the word », a capture of the 'ayaṃ' Recall card's example, 'atha' as the example) · after: [ui-lib 059]
+status: review · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-11: « in the definition, I want to be able to click and see the meaning of the word », a capture of the 'ayaṃ' Recall card's example, 'atha' as the example) · after: [ui-lib 059]
 
 ## Summary
 On a card's reveal, every word of the example's Pāli line can be pressed to see its meaning (DPD). Decided:
@@ -13,6 +13,8 @@ Rank 5: a pipeline step, a deck format field, a ui-lib dependency, mobile behavi
 ## Log
 | Step | Result | Output |
 | --- | --- | --- |
+| Build | done | lane Opus: core Deck.words + word_key, build-deck lookups (454/454 forms; sandhi with an apostrophe shows its parts), the fixture deck as compact JSON (238,812 B), dee93ac the reveal's examples through ui-lib PaliText (Context line: the stretches between blanks, the gold answer not clickable); 327 ssr + workspace tests; clippy ×4, fmt, leptosfmt, rustdoc, deny EXIT 0 |
+| Capture | done | orchestrator, :3201 on the branch: no word button before the reveal; 16 after; 'sutaṃ' opens 'suta 1.1 · pp · nt nom sg… · heard'; grade keys still work with a panel open; no page error. Seen: the panel is clipped by the card's scrolling body near its bottom; a console warning from ui-lib's catalogue (a signal read outside tracking) — both noted, not blocking |
 | Define | done | the DPD lookup table checked (atha → 2 headwords, āmantesi grammar, sampādethāti deconstructor); offline chosen (no backend, no token at run time) |
 
 ## Retro

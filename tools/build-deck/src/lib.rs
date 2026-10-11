@@ -21,6 +21,7 @@ pub mod reader;
 pub mod segments;
 pub mod source;
 pub mod translate;
+pub mod words;
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -166,6 +167,11 @@ fn print_report(report: &build::Report, err: &mut dyn Write) {
         report.notes.len(),
         report.empty_cells
     );
+    let _ = writeln!(
+        err,
+        "words: {} of {} forms found",
+        report.words_found, report.word_forms
+    );
     if !report.translated.is_empty() {
         let counts: Vec<String> = report
             .translated
@@ -304,6 +310,7 @@ mod tests {
         let (code, report) = run_to_string(&args);
         assert_eq!(code, 0, "{report}");
         assert!(report.contains("2 terms"), "{report}");
+        assert!(report.contains("words: 1 of 7 forms found"), "{report}");
         let text = fs::read_to_string(dir.join("out.json")).unwrap();
         let deck = learn_core::deck::Deck::from_json(&text).unwrap();
         assert_eq!(deck.terms.len(), 2);
