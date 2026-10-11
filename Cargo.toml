@@ -6,7 +6,7 @@ members = ["app", "core", "cli", "tools/build-deck"]
 version = "0.0.0"
 edition = "2024"
 rust-version = "1.88"
-license = "MIT OR Apache-2.0"
+license = "CC-BY-NC-4.0"
 repository = "https://github.com/PaliCanon/learn-pali"
 
 [workspace.dependencies]
