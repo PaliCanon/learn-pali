@@ -574,8 +574,8 @@ fn forms_front(card: Card, language: Language) -> impl IntoView {
 
 /// Context: the windowed line, its blanks filled in place once
 /// `revealed` (the reveal does not repeat the line), under it the line's
-/// translation once `revealed` ([`translation_view`]), then where it comes
-/// from (`Dhp 127 · <sutta>`).
+/// translation ([`translation_view`]), then where it comes from
+/// (`Dhp 127 · <sutta>`).
 fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl IntoView {
     let example = card.term.example.as_ref();
     let line = example
@@ -587,14 +587,7 @@ fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl
                 </p>
             }
         });
-    let translation = example.cloned().map(|example| {
-        move || {
-            revealed
-                .get()
-                .then(|| translation_view(&example, language))
-                .flatten()
-        }
-    });
+    let translation = example.and_then(|example| translation_view(example, language));
     let origin = example.map(|example| {
         view! {
             <p class="text-sm text-muted">
@@ -611,7 +604,8 @@ fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl
 
 /// The example's translation in the page's language, English when that
 /// one is missing, with its translator after a middle dot (no em dash in
-/// UI copy): italic and muted; nothing when the example has none.
+/// UI copy): italic and muted; nothing when the example has none. Shown on
+/// the Context front and in the reveal's answer block.
 fn translation_view(example: &Example, language: Language) -> Option<impl IntoView + use<>> {
     translation_for(example, language).map(|translation| {
         let credit = format!(" · {}", translator_name(&translation.translator));
@@ -1156,6 +1150,10 @@ pub(crate) mod tests {
         );
         assert!(!front.contains("<mark"), "{front}");
         assert!(!text_of(&front).contains("kho"), "{front}");
+        assert!(
+            text_of(&front).contains(" · Bhikkhu Sujato"),
+            "translation with credit appears on front: {front}"
+        );
     }
 
     #[test]
@@ -1287,9 +1285,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_context_front_gives_the_translation_under_the_line_once_revealed() {
+    fn the_context_front_gives_the_translation_under_the_line_even_before_revealed() {
         let hidden = front_with(Language::En, yo(Facet::Context), false);
-        assert!(!text_of(&hidden).contains("Enough"), "{hidden}");
+        assert!(
+            text_of(&hidden).contains("Enough"),
+            "translation appears before reveal: {hidden}"
+        );
         let shown = front_with(Language::En, yo(Facet::Context), true);
         let text = text_of(&shown);
         let line = text.find("passati").expect(&text);
@@ -1300,10 +1301,10 @@ pub(crate) mod tests {
         assert!(!text.contains("— Bhikkhu Sujato"), "{text}");
         let html = render(yo(Facet::Context));
         let (_, reveal) = split(&html);
-        assert!(
-            !text_of(reveal).contains("Enough"),
-            "not repeated: {reveal}"
-        );
+        let reveal_text = text_of(reveal);
+        // Translation should appear exactly once in total (on front, not repeated on reveal)
+        let count = reveal_text.matches("Enough").count();
+        assert_eq!(count, 0, "translation not repeated on reveal: {reveal}");
     }
 
     #[test]
