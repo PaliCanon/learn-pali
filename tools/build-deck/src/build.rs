@@ -29,8 +29,11 @@ pub struct Report {
     pub warnings: Vec<String>,
     /// Titled cells with no value, over all terms: info, never a failure.
     pub empty_cells: usize,
-    /// Info lines: examples with no blank (never a failure).
+    /// Info lines: examples with no blank, examples or languages with no
+    /// translation (never a failure).
     pub notes: Vec<String>,
+    /// Examples given a translation, per language (with `--api` only).
+    pub translated: std::collections::BTreeMap<String, usize>,
 }
 
 /// Why a deck was not built.
@@ -195,6 +198,7 @@ fn make_example(
         source: raw.source_1.trim().to_string(),
         sutta: raw.sutta_1.trim().to_string(),
         blank: blanked.blank,
+        translations: std::collections::BTreeMap::new(),
     })
 }
 

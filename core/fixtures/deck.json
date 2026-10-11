@@ -17,6 +17,12 @@
           "before": "evaṃ vutte aññataro bhikkhu there bhikkhū etadavoca, phasso ",
           "answer": "kho",
           "after": ", āvuso, eko anto, phassasamudayo dutiyo anto, phassanirodho majjhe, taṇhā sibbinī."
+        },
+        "translations": {
+          "en": {
+            "text": "When this was said, one of the mendicants said to the senior mendicants: “Contact, reverends, is one end. The origin of contact is the second end. The cessation of contact is the middle. And craving is the seamstress,",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -37,6 +43,16 @@
           "before": "dvīhi, bhikkhave, dhammehi samannāgato bālo abyatto asappuriso khataṃ upahataṃ attānaṃ pariharati sāvajjo ",
           "answer": "ca",
           "after": " hoti sānuvajjo ca viññūnaṃ bahuñ'ca apuññaṃ pasavati"
+        },
+        "translations": {
+          "en": {
+            "text": "When a foolish, incompetent untrue person has two qualities they keep themselves broken and damaged. They deserve to be blamed and criticized by sensible people, and they brim with much wickedness.",
+            "translator": "sujato"
+          },
+          "fr": {
+            "text": "Doué de deux choses, mendiants, une mauvaise personne, sotte et incompétente, s’entretient dans un état de déracinement, détériorée, et elle est répréhensible et est critiquée par les hommes de connaissance, et elle accumule beaucoup de dé·mérite.",
+            "translator": "sekha"
+          }
         }
       },
       "forms": [],
@@ -57,6 +73,12 @@
           "before": "sānuṃ pabuddhaṃ vajjāsi,\nyakkhānaṃ vacanaṃ idaṃ,\nm'ākāsi pāpakaṃ kammaṃ,\nāvi ",
           "answer": "vā",
           "after": " yadi vā raho."
+        },
+        "translations": {
+          "en": {
+            "text": "When Sānu regains consciousness tell him this saying of the native spirits: Don’t do bad deeds either openly or in secret.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -78,6 +100,12 @@
           "before": "",
           "answer": "evaṃ",
           "after": " me sutaṃ, ekaṃ samayaṃ bhagavā ukkaṭṭhāyaṃ viharati subhagavane sālarājamūle. tatra kho bhagavā bhikkhū āmantesi, bhikkhavo'ti."
+        },
+        "translations": {
+          "en": {
+            "text": "So I have heard. At one time the Buddha was staying near Ukkaṭṭhā in the Subhaga Forest at the root of a magnificent sal tree. There the Buddha addressed the mendicants, “Mendicants!”",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -98,6 +126,12 @@
           "before": "",
           "answer": "iti",
           "after": " kho, bhikkhave, na'y'idaṃ brahmacariyaṃ lābhasakkārasilok'ānisaṃsaṃ na sīlasampad'ānisaṃsaṃ na samādhisampad'ānisaṃsaṃ na ñāṇadassan'ānisaṃsaṃ"
+        },
+        "translations": {
+          "en": {
+            "text": "And so, brahmin, this spiritual life is not lived for the sake of possessions, honor, and popularity, or for accomplishment in ethics, or for accomplishment in immersion, or for knowledge and vision.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -118,6 +152,16 @@
           "before": "",
           "answer": "na",
           "after": " antalikkhe na samuddamajjhe,\nna pabbatānaṃ vivaraṃ pavissa,\nna vijjati so jagatippadeso,\nyatthaṭṭhito mucceyya pāpakammā."
+        },
+        "translations": {
+          "en": {
+            "text": "Not in midair, nor mid-ocean, nor hiding in a mountain cleft; you’ll find no place on the planet to escape your wicked deeds.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Không trên trời, giữa biển, Không lánh vào động núi, Không chỗ nào trên đời, Trốn được quả ác nghiệp.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [],
@@ -138,6 +182,12 @@
           "before": "taṇhā ",
           "answer": "hi",
           "after": " naṃ sibbati tassa tass'eva bhavassa abhinibbattiyā."
+        },
+        "translations": {
+          "en": {
+            "text": "for craving weaves one to being regenerated in one state of existence or another.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -158,6 +208,16 @@
           "before": "sabbe saṅkhārā aniccā'ti,\nyadā paññāya passati,\n",
           "answer": "atha",
           "after": " nibbindati dukkhe,\nesa maggo visuddhiyā."
+        },
+        "translations": {
+          "en": {
+            "text": "All conditions are impermanent— when this is seen with wisdom, one grows disillusioned with suffering: this is the path to purity.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Tất cả hành vô thường Với Tuệ, quán thấy vậy Ðau khổ được nhàm chán: Chính con đường thanh tịnh.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [],
@@ -178,6 +238,12 @@
           "before": "bahussuto ca medhāvī,\nsīlesu susamāhito,\ncetosamatham'anuyutto,\n",
           "answer": "api",
           "after": " muddhani tiṭṭhatu."
+        },
+        "translations": {
+          "en": {
+            "text": "“An intelligent, learned person, steady in ethics, devoted to serenity of heart— let them stand at the head.”",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [],
@@ -203,6 +269,12 @@
           "before": "tasmā't'iha ",
           "answer": "bhikkhave",
           "after": " attadīpā viharatha"
+        },
+        "translations": {
+          "en": {
+            "text": "So mendicants, live as your own island, your own refuge, with no other refuge. Let the teaching be your island and your refuge, with no other refuge.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -358,6 +430,12 @@
           "before": "kathañ'c'ānanda appaṇidhāya bhāvanā ",
           "answer": "hoti",
           "after": "?"
+        },
+        "translations": {
+          "en": {
+            "text": "And how is there undirected development?",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -463,6 +541,12 @@
           "before": "ekam'antaṃ nisinnā kho ",
           "answer": "tā",
           "after": " bhikkhuniyo āyasmantaṃ ānandaṃ etadavocuṃ"
+        },
+        "translations": {
+          "en": {
+            "text": "Then several nuns went up to Venerable Ānanda bowed, sat down to one side, and said to him:",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -863,6 +947,16 @@
           "before": "yato kho ",
           "answer": "tvaṃ",
           "after": " anuruddha ime aṭṭha mahāpurisavitakke vitakkessasi, tato tvaṃ anuruddha yāva'd'eva ākaṅkhissasi… "
+        },
+        "translations": {
+          "en": {
+            "text": "First you’ll reflect on these eight thoughts of a great man. Then as far as you want, quite secluded from sensual pleasures, secluded from unskillful qualities, you’ll enter and remain in the first absorption, which has the rapture and bliss born of seclusion, while placing the mind and keeping it connected.",
+            "translator": "sujato"
+          },
+          "fr": {
+            "text": "D’abord vous réfléchissez à ces huit pensées d’un grand homme. Ensuite, autant que vous le souhaitez, assez isolé des plaisirs des sens, isolé des qualités malhabilles, vous entrerez et demeurerez dans la première absorption, qui a l’extase et la félicité nées de la réclusion, tout en plaçant l’esprit et en le gardant connecté.",
+            "translator": "christelle"
+          }
         }
       },
       "forms": [
@@ -1000,6 +1094,12 @@
           "before": "",
           "answer": "ahaṃ",
           "after": " kho, samaṇa, kasāmi ca vapāmi ca. kasitvā ca vapitvā ca bhuñjāmi. tvam'pi, samaṇa, kasassu ca vapassu ca. kasitvā ca vapitvā ca bhuñjassū'ti."
+        },
+        "translations": {
+          "en": {
+            "text": "“I plough and sow, ascetic, and then I eat. You too should plough and sow, then you may eat.”",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -1144,6 +1244,12 @@
           "before": "atha kho bhagavā bhikkhū āmantesi, handa dāni, bhikkhave, āmantayāmi vo, vayadhammā saṅkhārā appamādena sampādethā'ti. ",
           "answer": "ayaṃ",
           "after": " tathāgatassa pacchimā vācā."
+        },
+        "translations": {
+          "en": {
+            "text": "Then the Buddha said to the mendicants: “Come now, mendicants, I say to you all: ‘Conditions fall apart. Persist with diligence.’” These were the Realized One’s last words.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -1520,6 +1626,16 @@
           "before": "alaṃ, vakkali, kiṃ te iminā pūtikāyena diṭṭhena? ",
           "answer": "yo",
           "after": " kho, vakkali, dhammaṃ passati so maṃ passati, yo maṃ passati so dhammaṃ passati"
+        },
+        "translations": {
+          "en": {
+            "text": "Enough, Vakkali! Why would you want to see this rotting body? One who sees the teaching sees me. One who sees me sees the teaching.",
+            "translator": "sujato"
+          },
+          "fr": {
+            "text": "Assez, Vakkali ! Pourquoi vouloir voir ce corps pourrissant ? Celui qui voit l’enseignement me voit. Celui qui me voit, voit l’enseignement.",
+            "translator": "christelle"
+          }
         }
       },
       "forms": [
@@ -1857,6 +1973,12 @@
           "before": "",
           "answer": "so",
           "after": " sabbehi imehi pāpakehi akusalehi dhammehi visuddham'attānaṃ samanupassati, vimuttam'attānaṃ samanupassati."
+        },
+        "translations": {
+          "en": {
+            "text": "They see themselves purified from all these bad, unskillful qualities.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -2256,6 +2378,16 @@
           "before": "",
           "answer": "sabbe",
           "after": " saṅkhārā aniccā'ti,\nyadā paññāya passati,\natha nibbindati dukkhe,\nesa maggo visuddhiyā."
+        },
+        "translations": {
+          "en": {
+            "text": "All conditions are impermanent— when this is seen with wisdom, one grows disillusioned with suffering: this is the path to purity.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Tất cả hành vô thường Với Tuệ, quán thấy vậy Ðau khổ được nhàm chán: Chính con đường thanh tịnh.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -2595,6 +2727,12 @@
           "before": "seyyathā'pi, bhikkhave, mahāsamuddo ",
           "answer": "eka",
           "after": "raso loṇaraso, evam'eva kho, bhikkhave, ayaṃ dhammavinayo ekaraso vimuttiraso"
+        },
+        "translations": {
+          "en": {
+            "text": "The ocean has just one taste, the taste of salt. In the same way, this teaching and training has one taste, the taste of freedom.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -2780,6 +2918,12 @@
           "before": "evaṃ passaṃ, bhikkhave, sutavā ariyasāvako ",
           "answer": "rūpasmim",
           "after": "'pi nibbindati vedanāya'pi nibbindati saññāya'pi nibbindati saṅkhāresu'pi nibbindati viññāṇasmim'pi nibbindati"
+        },
+        "translations": {
+          "en": {
+            "text": "Seeing this, a learned noble disciple grows disillusioned with form, feeling, perception, choices, and consciousness.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -2931,6 +3075,12 @@
           "before": "cha'y'ime, bhikkhave, ",
           "answer": "vedanā",
           "after": "kāyā, cakkhusamphassajā vedanā, sotasamphassajā vedanā, ghānasamphassajā vedanā, kāyasamphassajā vedanā, manosamphassajā vedanā."
+        },
+        "translations": {
+          "en": {
+            "text": "There are these six classes of feeling: feeling born of eye contact … feeling born of mind contact.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -3077,6 +3227,12 @@
           "before": "",
           "answer": "saññaṃ",
           "after": " pariññā vitareyya oghaṃ,\npariggahesu muni n'opalitto,\nabbūḷhasallo caram'appamatto,\nn'āsīsatī lokam'imaṃ parañ'cā'ti."
+        },
+        "translations": {
+          "en": {
+            "text": "Having completely understood perception and having crossed the flood, the sage, not clinging to possessions, with dart plucked out, living diligently, does not hope for this world or the next.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -3224,6 +3380,12 @@
           "before": "avijjāpaccayā ",
           "answer": "saṅkhārā",
           "after": ", saṅkhārapaccayā viññāṇaṃ, viññāṇapaccayā nāmarūpaṃ"
+        },
+        "translations": {
+          "en": {
+            "text": "So, ignorance is a requirement for choices. Choices are a requirement for consciousness. Consciousness is a requirement for name and form.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -3369,6 +3531,12 @@
           "before": "",
           "answer": "viññāṇaṃ",
           "after": " viññāṇan'ti, āvuso, vuccati. kittāvatā nu kho, āvuso, viññāṇan'ti vuccatī'ti? vijānāti vijānātī'ti kho, āvuso, tasmā viññāṇan'ti vuccati."
+        },
+        "translations": {
+          "en": {
+            "text": "They speak of ‘consciousness’. How is consciousness defined?” “It’s called consciousness because it cognizes.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -3517,6 +3685,12 @@
           "before": "puna caparaṃ, bhikkhave, bhikkhu gacchanto vā ",
           "answer": "gacchāmī",
           "after": "'ti pajānāti ṭhito vā ṭhito'mhī'ti pajānāti nisinno vā nisinno'mhī'ti pajānāti sayāno vā sayāno'mhī'ti pajānāti"
+        },
+        "translations": {
+          "en": {
+            "text": "Furthermore, when a mendicant is walking they know: ‘I am walking.’ When standing they know: ‘I am standing.’ When sitting they know: ‘I am sitting.’ And when lying down they know: ‘I am lying down.’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -3890,6 +4064,12 @@
           "before": "daharā ca apāpikā c'asi,\nkiṃ te pabbajjā ",
           "answer": "karissati",
           "after": ",\nnikkhipa kāsāyacīvaraṃ,\nehi ramāma supupphite vane."
+        },
+        "translations": {
+          "en": {
+            "text": "You’re young and flawless— what will going-forth do for you? Throw away the ocher robe, come and play in the blossom grove.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -4235,6 +4415,16 @@
           "before": "yo ca buddhañ'ca dhammañ'ca,\nsaṅghañ'ca saraṇaṃ gato,\ncattāri ariyasaccāni,\nsammappaññāya ",
           "answer": "passati",
           "after": "."
+        },
+        "translations": {
+          "en": {
+            "text": "One gone for refuge to the Buddha, to his teaching and to the Saṅgha, sees the four noble truths with right understanding:",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Ai quy y Ðức Phật, Chánh Pháp và chư Tăng, Ai dùng chánh tri kiến, Thấy được bốn Thánh đế.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -4612,6 +4802,16 @@
           "before": "idha, bhikkhave, bhikkhu app'iccho samāno app'iccho'ti maṃ ",
           "answer": "jāneyyun",
           "after": "'ti na icchati"
+        },
+        "translations": {
+          "en": {
+            "text": "A mendicant with few wishes doesn’t wish: ‘May they know me as having few wishes!’ When contented, they don’t wish: ‘May they know me as contented!’ When secluded, they don’t wish: ‘May they know me as secluded!’ When energetic, they don’t wish: ‘May they know me as energetic!’ When mindful, they don’t wish: ‘May they know me as mindful!’ When immersed, they don’t wish: ‘May they know me as immersed!’ When wise, they don’t wish: ‘May they know me as wise!’ When not enjoying proliferation, they don’t wish: ‘May they know me as one who doesn’t enjoy proliferating!’",
+            "translator": "sujato"
+          },
+          "fr": {
+            "text": "Un membre monastique avec peu de souhaits ne souhaite pas : ‘ Que je sois connu comme ayant peu de souhaits ! ’ Quand il est facilement satisfait, il ne souhaite pas : ‘ Que je sois connu comme étant facilement satisfait ! ’ Quand il est solitaire, il ne souhaite pas : ‘ Que je soit connu comme étant solitaire ! ’ Quand il est énérgique, il ne souhaite pas : ‘ Que je soit connu comme étant énergique ! ’ Quand il est attentif, il ne souhaite pas : ‘ Que je soit connu comme étant attentif ! ’ Quand il est avec immersion, il ne souhaite pas : ‘ Que je sois connu comme ayant l’immersion ! ’ Quand il est sage, il ne souhaite pas : ‘ Que je sois connu comme sage ! ’ Quand il n’apprécie pas la prolifération, il ne souhaite pas : ‘ Que je sois connu comme quelqu’un qui n’apprécie pas la prolifération ! ’",
+            "translator": "christelle"
+          }
         }
       },
       "forms": [
@@ -4987,6 +5187,12 @@
           "before": "devo ca vassati devo ca gaḷagaḷāyati,\nekako c'āhaṃ bherave bile ",
           "answer": "viharāmi",
           "after": ",\ntassa mayhaṃ ekakassa bherave bile viharato,\nn'atthi bhayaṃ vā chambhitattaṃ vā lomahaṃso vā."
+        },
+        "translations": {
+          "en": {
+            "text": "The heavens rain, the heavens pour, I’m staying alone in a frightful hole. But while I’m staying alone in that frightful hole, I’ve no fear, no dread, no goosebumps.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -5361,6 +5567,12 @@
           "before": "diṭṭhi-saṃyojana-saṃyutto, bhikkhave, assutavā puthujjano na parimuccati jātiyā jarāya maraṇena sokehi paridevehi dukkhehi domanassehi upāyāsehi, na parimuccati dukkhasmā'ti ",
           "answer": "vadāmi",
           "after": ""
+        },
+        "translations": {
+          "en": {
+            "text": "An unlearned ordinary person who is fettered by views is not freed from rebirth, old age, and death, from sorrow, lamentation, pain, sadness, and distress. They’re not freed from suffering, I say.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -5734,6 +5946,12 @@
           "before": "atthi, bhikkhave, dhammā kāyena sacchikaraṇīyā, atthi, bhikkhave, dhammā ",
           "answer": "satiyā",
           "after": " sacchikaraṇīyā, atthi, bhikkhave, dhammā cakkhunā sacchikaraṇīyā, atthi, bhikkhave, dhammā paññāya sacchikaraṇīyā."
+        },
+        "translations": {
+          "en": {
+            "text": "There are things to be realized with direct meditative experience. There are things to be realized with recollection. There are things to be realized with vision. There are things to be realized with wisdom.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -5878,6 +6096,16 @@
           "before": "anekajātisaṃsāraṃ,\nsandhāvissaṃ anibbisaṃ,\ngahakārakaṃ gavesanto,\n",
           "answer": "dukkhā",
           "after": " jāti punappunaṃ."
+        },
+        "translations": {
+          "en": {
+            "text": "Transmigrating through countless rebirths, I’ve journeyed without reward, searching for the house-builder; painful is birth again and again.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Lang thang bao kiếp sống Ta tìm nhưng chẳng gặp, Người xây dựng nhà này, Khổ thay, phải tái sanh.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -6256,6 +6484,12 @@
           "before": "idha, bhikkhave, bhikkhu ",
           "answer": "sukhaṃ",
           "after": " vā vedanaṃ vedayamāno sukhaṃ vedanaṃ vedayāmī'ti pajānāti. dukkhaṃ vā vedanaṃ vedayamāno dukkhaṃ vedanaṃ vedayāmī'ti pajānāti."
+        },
+        "translations": {
+          "en": {
+            "text": "It’s when a mendicant who feels a pleasant feeling knows: ‘I feel a pleasant feeling.’ When they feel a painful feeling, they know: ‘I feel a painful feeling.’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -6630,6 +6864,12 @@
           "before": "yaṃ rūpaṃ paṭicca uppajjati sukhaṃ somanassaṃ, ayaṃ rūpassa assādo. yaṃ rūpaṃ ",
           "answer": "aniccaṃ",
           "after": " dukkhaṃ vipariṇāmadhammaṃ, ayaṃ rūpassa ādīnavo."
+        },
+        "translations": {
+          "en": {
+            "text": "The pleasure and happiness that arise from form: this is its gratification. That form is impermanent, suffering, and perishable: this is its drawback.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -7156,6 +7396,12 @@
           "before": "idha pana, bhikkhave, bhikkhu evaṃ vadeyya, asukasmiṃ nāma āvāse ",
           "answer": "saṅgho",
           "after": " viharati sathero sapāmokkho. tassa me saṅghassa sammukhā sutaṃ sammukhā paṭiggahitaṃ, ayaṃ dhammo, ayaṃ vinayo, idaṃ satthusāsanan'ti."
+        },
+        "translations": {
+          "en": {
+            "text": "Take another mendicant who says: ‘In such-and-such monastery lives a Saṅgha with seniors and leaders. I’ve heard and learned this in the presence of that Saṅgha: this is the teaching, this is the training, this is the Teacher’s instruction.’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -7303,6 +7549,12 @@
           "before": "atthi nu kho bhante kiñci rūpaṃ yaṃ rūpaṃ niccaṃ dhuvaṃ sassataṃ avipariṇāma",
           "answer": "dhammaṃ",
           "after": " sassatisamaṃ tath'eva ṭhassati"
+        },
+        "translations": {
+          "en": {
+            "text": "Sir, is there any form at all that’s permanent, everlasting, eternal, imperishable, and will last forever and ever?",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -7450,6 +7702,16 @@
           "before": "aññā hi lābh'ūpanisā,\naññā nibbānagāminī,\nevam'etaṃ abhiññāya,\nbhikkhu ",
           "answer": "buddhassa",
           "after": " sāvako,\nsakkāraṃ n'ābhinandeyya,\nvivekam'anubrūhaye."
+        },
+        "translations": {
+          "en": {
+            "text": "For the means to profit and the path to quenching are two quite different things. A mendicant disciple of the Buddha, understanding what this really means, would never delight in honors, but rather would foster seclusion.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Khác thay duyên thế lợi, Khác thay đường Niết-bàn. Tỳ-kheo, đệ tử Phật, Hãy như vậy thắng tri. Chớ ưa thích cung kính, Hãy tu hạnh viễn ly.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -7601,6 +7863,12 @@
           "before": "kāmesu n'ābhigijjheyya,\nmanas'ānāvilo siyā,\nkusalo sabbadhammānaṃ,\nsato ",
           "answer": "bhikkhu",
           "after": " paribbaje'ti."
+        },
+        "translations": {
+          "en": {
+            "text": "“Not greedy for sensual pleasures, their mind would be unclouded. Skilled in all things, a mendicant would wander mindful.”",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -7756,6 +8024,12 @@
           "before": "atha kho ",
           "answer": "bhagavā",
           "after": " bhikkhū āmantesi, handa dāni, bhikkhave, āmantayāmi vo, vayadhammā saṅkhārā appamādena sampādethā'ti. ayaṃ tathāgatassa pacchimā vācā."
+        },
+        "translations": {
+          "en": {
+            "text": "Then the Buddha said to the mendicants: “Come now, mendicants, I say to you all: ‘Conditions fall apart. Persist with diligence.’” These were the Realized One’s last words.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -7908,6 +8182,12 @@
           "before": "iti kho, ānanda, ",
           "answer": "kammaṃ",
           "after": " khettaṃ, viññāṇaṃ bījaṃ, taṇhā sneho."
+        },
+        "translations": {
+          "en": {
+            "text": "So, Ānanda, deeds are the field, consciousness is the seed, and craving is the moisture.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -8063,6 +8343,12 @@
           "before": "saddhā bījaṃ tapo vuṭṭhi,\n",
           "answer": "paññā",
           "after": " me yuganaṅgalaṃ,\nhirī īsā mano yottaṃ,\nsati me phālapācanaṃ."
+        },
+        "translations": {
+          "en": {
+            "text": "Faith is my seed, fervor my rain, and wisdom is my yoke and plough. Conscience is my draft-pole, mind my strap, mindfulness my plowshare and goad.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -8208,6 +8494,12 @@
           "before": "kacci nu kho me attā ",
           "answer": "sīlato",
           "after": " na upavadatī'ti pabbajitena abhiṇhaṃ paccavekkhitabbaṃ"
+        },
+        "translations": {
+          "en": {
+            "text": "‘I hope there’s no reason to blame myself when it comes to ethical conduct?’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -8359,6 +8651,16 @@
           "before": "asso yathā bhadro kasāniviṭṭho,\nātāpino saṃvegino bhavātha,\nsaddhāya sīlena ca vīriyena ca,\n",
           "answer": "samādhinā",
           "after": " dhammavinicchayena ca,\nsampannavijjācaraṇā patissatā,\njahissatha dukkham'idaṃ anappakaṃ."
+        },
+        "translations": {
+          "en": {
+            "text": "Like a fine horse under the whip, be keen and full of urgency. With faith, ethics, and energy, immersion, and investigation of principles, accomplished in knowledge and conduct, mindful, give up this vast suffering.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Như ngựa hiền chạm roi, Hãy nhiệt tâm, hăng hái, Với tín, giới, tinh tấn, Thiền định cùng trạch pháp. Minh hạnh đủ, chánh niệm, Ðoạn khổ này vô lượng.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -8507,6 +8809,12 @@
           "before": "khīṇā ",
           "answer": "jāti",
           "after": " vusitaṃ brahmacariyaṃ kataṃ karaṇīyaṃ n'āparaṃ itthattāyā'ti pajānāti"
+        },
+        "translations": {
+          "en": {
+            "text": "They understand: ‘Rebirth is ended, the spiritual journey has been completed, what had to be done has been done, there is nothing further for this place.’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -8653,6 +8961,16 @@
           "before": "aṭṭhīnaṃ nagaraṃ kataṃ,\nmaṃsalohitalepanaṃ,\nyattha ",
           "answer": "jarā",
           "after": " ca maccu ca,\nmāno makkho ca ohito."
+        },
+        "translations": {
+          "en": {
+            "text": "In this city built of bones, plastered with flesh and blood, old age and death are stashed away, along with conceit and contempt.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Thành này làm bằng xương, Quét tô bằng thịt máu, Ở đây già và chết, Mạn, lừa đảo chất chứa.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -8796,6 +9114,12 @@
           "before": "evañ'hi, bhikkhave, tassa purisassa hoti, imaṃ c'āhaṃ aṅgārakāsuṃ papatissāmi, tatonidānaṃ ",
           "answer": "maraṇaṃ",
           "after": " vā nigacchāmi maraṇamattaṃ vā dukkhan'ti"
+        },
+        "translations": {
+          "en": {
+            "text": "Because that person would think: ‘If I fall in that pit of glowing coals, that will result in my death or deadly pain.’",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -8947,6 +9271,12 @@
           "before": "nandisaṃyojano loko,\nvitakkassa vicāraṇaṃ,\n",
           "answer": "taṇhāya",
           "after": " vippahānena,\nnibbānaṃ iti vuccati."
+        },
+        "translations": {
+          "en": {
+            "text": "“Delight fetters the world. It travels about by means of thought. With the giving up of craving extinguishment is spoken of.”",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [
@@ -9091,6 +9421,16 @@
           "before": "vāṇijo'va bhayaṃ ",
           "answer": "maggaṃ",
           "after": ",\nappasattho mahaddhano,\nvisaṃ jīvitu'kāmo'va,\npāpāni parivajjaye."
+        },
+        "translations": {
+          "en": {
+            "text": "Avoid wickedness, as a merchant with rich cargo and small escort would avoid a dangerous road, or one who loves life would avoid drinking poison.",
+            "translator": "sujato"
+          },
+          "vi": {
+            "text": "Ít bạn đường, nhiều tiền, Người buôn tránh đường hiểm. Muốn sống, tránh thuốc độc, Hãy tránh ác như vậy.",
+            "translator": "phantuananh"
+          }
         }
       },
       "forms": [
@@ -9236,6 +9576,12 @@
           "before": "kāmaṃ kho pana m'āhu paro loko, hotu nesaṃ bhavataṃ samaṇabrāhmaṇānaṃ ",
           "answer": "saccaṃ",
           "after": " vacanaṃ, atha ca pan'āyaṃ bhavaṃ purisapuggalo diṭṭh'eva dhamme viññūnaṃ gārayho"
+        },
+        "translations": {
+          "en": {
+            "text": "But let us grant that those who say that there is no other world are correct. Regardless, that individual is still criticized by sensible people in this very life as being an immoral individual of wrong view, a nihilist.",
+            "translator": "sujato"
+          }
         }
       },
       "forms": [

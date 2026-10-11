@@ -14,6 +14,8 @@ path = "src/main.rs"
 [dependencies]
 learn_core = { version = "0.0.0", path = "../../core" }
 rusqlite = { version = "0.40", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 unicode-normalization = "0.1"
 
 [lints]

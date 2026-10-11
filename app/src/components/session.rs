@@ -26,7 +26,7 @@
 //! by a native test.
 
 use learn_core::date::Date;
-use learn_core::deck::Blank;
+use learn_core::deck::{Blank, Example};
 use learn_core::facet::Facet;
 use learn_core::progress::State;
 use learn_core::session::{Answer, Session, nearest};
@@ -47,6 +47,7 @@ use crate::learn::home_state::BrokenKind;
 use crate::learn::key::{GradeGate, grade_key};
 use crate::learn::run::{Card, ReviewRun};
 use crate::learn::summary::Summary;
+use crate::learn::translation::{translation_for, translator_name};
 use crate::learn::window::{MAX_CHARS, Segment, context_window, source_ref};
 use crate::learn::words::{date_words, label_words, pos_words};
 use crate::seed::browser_seed;
@@ -527,7 +528,7 @@ fn front_body(card: Card, language: Language, revealed: Signal<bool>) -> AnyView
         Facet::Meaning => meaning_front(card, language).into_any(),
         Facet::Recall => recall_front(card, language).into_any(),
         Facet::Forms => forms_front(card, language).into_any(),
-        Facet::Context => context_front(card, revealed).into_any(),
+        Facet::Context => context_front(card, language, revealed).into_any(),
     }
 }
 
@@ -572,9 +573,10 @@ fn forms_front(card: Card, language: Language) -> impl IntoView {
 }
 
 /// Context: the windowed line, its blanks filled in place once
-/// `revealed` (the reveal does not repeat the line), then where it comes
+/// `revealed` (the reveal does not repeat the line), under it the line's
+/// translation once `revealed` ([`translation_view`]), then where it comes
 /// from (`Dhp 127 · <sutta>`).
-fn context_front(card: Card, revealed: Signal<bool>) -> impl IntoView {
+fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl IntoView {
     let example = card.term.example.as_ref();
     let line = example
         .and_then(|example| example.blank.as_ref())
@@ -585,9 +587,14 @@ fn context_front(card: Card, revealed: Signal<bool>) -> impl IntoView {
                 </p>
             }
         });
-    // The line's translation goes here, under the filled line: in italics,
-    // muted, with its translator, once the deck's `Example` carries one
-    // (task 004). Nothing until then.
+    let translation = example.cloned().map(|example| {
+        move || {
+            revealed
+                .get()
+                .then(|| translation_view(&example, language))
+                .flatten()
+        }
+    });
     let origin = example.map(|example| {
         view! {
             <p class="text-sm text-muted">
@@ -597,8 +604,23 @@ fn context_front(card: Card, revealed: Signal<bool>) -> impl IntoView {
     });
     view! {
         {line}
+        {translation}
         {origin}
     }
+}
+
+/// The example's translation in the page's language, English when that
+/// one is missing, with its translator after a middle dot (no em dash in
+/// UI copy): italic and muted; nothing when the example has none.
+fn translation_view(example: &Example, language: Language) -> Option<impl IntoView + use<>> {
+    translation_for(example, language).map(|translation| {
+        let credit = format!(" · {}", translator_name(&translation.translator));
+        view! {
+            <p class="mt-2 text-sm italic text-muted">
+                {translation.text.clone()} <span class="not-italic">{credit}</span>
+            </p>
+        }
+    })
 }
 
 /// The example's line, windowed ([`context_window`]), as runs of text and
@@ -661,7 +683,7 @@ fn reveal_view(card: Card, language: Language) -> impl IntoView {
                 .practice
                 .then(|| {
                     view! { <p class="text-sm text-muted">{td_string!(locale, practice_note)}</p> }
-                })} {answer} {details_view(card, locale)}
+                })} {answer} {details_view(card, language)}
         </div>
     }
 }
@@ -718,10 +740,12 @@ fn captioned(caption: &'static str, body: impl IntoView + 'static) -> impl IntoV
     }
 }
 
-/// The literal meaning, the construction, the root, the example: each only
-/// when the term has it. Context shows neither the literal (its answer
-/// block has it) nor the example (its front's line is filled in place).
-fn details_view(card: Card, locale: Locale) -> impl IntoView {
+/// The literal meaning, the construction, the root, the example (and its
+/// translation, [`translation_view`]): each only when the term has it.
+/// Context shows neither the literal (its answer block has it) nor the
+/// example (its front's line is filled in place, its translation under it).
+fn details_view(card: Card, language: Language) -> impl IntoView {
+    let locale = Locale::from(language);
     let term = card.term;
     let context = card.facet == Facet::Context;
     let literal = term
@@ -753,6 +777,7 @@ fn details_view(card: Card, locale: Locale) -> impl IntoView {
             <p>
                 <Pali layout="whitespace-pre-line">{example.text.clone()}</Pali>
             </p>
+            {translation_view(example, language)}
         };
         captioned(td_string!(locale, reveal_example), body)
     });
@@ -1211,6 +1236,86 @@ pub(crate) mod tests {
         assert!(!text.contains("Construction"), "{text}");
         assert!(!text.contains("Root"), "{text}");
         assert!(text.contains("Example"), "{text}");
+    }
+
+    // ---- 025: the example's translation ----
+
+    /// `yo` (the Vakkali example, translated in English and French) asks
+    /// only `asked`.
+    fn yo(asked: Facet) -> ReviewRun {
+        let others: Vec<Facet> = Facet::ALL
+            .into_iter()
+            .filter(|facet| *facet != asked)
+            .collect();
+        run_on("yo", &others, Stage::Day)
+    }
+
+    const EN_LINE: &str = "Enough, Vakkali! Why would you want to see this rotting body?";
+
+    #[test]
+    fn the_meaning_reveal_gives_the_translation_under_the_example() {
+        for (language, line, name) in [
+            (Language::En, EN_LINE, "Bhikkhu Sujato"),
+            (Language::Fr, "Assez, Vakkali", "Christelle"),
+        ] {
+            let html = render_with(language, yo(Facet::Meaning), false);
+            let (_, reveal) = split(&html);
+            let tag = tag_before(reveal, line);
+            assert!(
+                tag.starts_with(r#"<p class="mt-2 text-sm italic text-muted">"#),
+                "{language:?}: {tag}"
+            );
+            let credit = format!(r#"<span class="not-italic"> · {name}</span>"#);
+            assert!(reveal.contains(&credit), "{language:?}: {reveal}");
+            let paragraph = &reveal[reveal.find(line).unwrap()..];
+            let paragraph = &paragraph[..paragraph.find("</p>").unwrap()];
+            assert!(!paragraph.contains('—'), "no em dash: {paragraph}");
+            let text = text_of(reveal);
+            let pali = text.find("dhammaṃ passati").expect(&text);
+            assert!(pali < text.find(line).expect(&text), "{text}");
+        }
+    }
+
+    #[test]
+    fn a_language_without_its_translation_gets_the_english_one() {
+        let html = render_with(Language::Vi, yo(Facet::Meaning), false);
+        let (_, reveal) = split(&html);
+        let text = text_of(reveal);
+        assert!(text.contains(EN_LINE), "{text}");
+        assert!(text.contains(" · Bhikkhu Sujato"), "{text}");
+        assert!(!text.contains("— Bhikkhu Sujato"), "{text}");
+    }
+
+    #[test]
+    fn the_context_front_gives_the_translation_under_the_line_once_revealed() {
+        let hidden = front_with(Language::En, yo(Facet::Context), false);
+        assert!(!text_of(&hidden).contains("Enough"), "{hidden}");
+        let shown = front_with(Language::En, yo(Facet::Context), true);
+        let text = text_of(&shown);
+        let line = text.find("passati").expect(&text);
+        let translation = text.find(EN_LINE).expect(&text);
+        let origin = text.find("SN 22.87").expect(&text);
+        assert!(line < translation && translation < origin, "{text}");
+        assert!(text.contains(" · Bhikkhu Sujato"), "{text}");
+        assert!(!text.contains("— Bhikkhu Sujato"), "{text}");
+        let html = render(yo(Facet::Context));
+        let (_, reveal) = split(&html);
+        assert!(
+            !text_of(reveal).contains("Enough"),
+            "not repeated: {reveal}"
+        );
+    }
+
+    #[test]
+    fn an_example_without_a_translation_shows_none() {
+        let mut example = deck()
+            .term(&TermId("yo".to_string()))
+            .and_then(|term| term.example.clone())
+            .unwrap();
+        example.translations.clear();
+        for language in Language::ALL {
+            assert!(translation_view(&example, language).is_none());
+        }
     }
 
     // ---- T3: practice ----

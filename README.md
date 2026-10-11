@@ -99,6 +99,23 @@ cargo run -p build_deck -- ../pali-embedder/data/dpd.db --terms core/fixtures/te
 # 50 terms, 41 with forms, 50 with a blank, 0 warnings, 0 notes, empty cells: 3
 ```
 
+That build makes no call and its examples carry no translation. The
+committed deck adds each example's translations (en, fr, vi) from the
+PaliCanon API with `--api`, the token read from the keychain into the process
+(`curl` gets it on its standard input; nothing prints it); `--cache` keeps the
+API's answers, so a rebuild fetches nothing twice:
+
+```sh
+PALI_API_TOKEN="$(security find-generic-password -a pali-canon-api -s pali-api-token-prod-site -w)" \
+  cargo run -p build_deck -- ../pali-embedder/data/dpd.db --terms core/fixtures/terms.txt \
+  -o core/fixtures/deck.json --strict --api https://api.palicanon.app --cache <a folder outside git>
+# 50 terms, 41 with forms, 50 with a blank, 0 warnings, 66 notes, empty cells: 3
+# translations: en 49, fr 4, vi 9
+```
+
+The notes list each example or language left out and why (a text keyed by
+paragraph, an example not found in its sutta).
+
 `--strict` turns the parser's warnings into a failure; the output is
 byte-for-byte the same on every run (`cmp` against the committed file). The 9
 indeclinables have no forms; the 3 empty cells are padding in the DPD's own

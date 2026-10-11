@@ -6,6 +6,7 @@
 //! Loading ([`Deck::from_json`]) refuses what the rest of the crate relies
 //! on not to meet: an unknown version, a term id twice, a deck with no term.
 
+use std::collections::BTreeMap;
 use std::fmt;
 
 use serde::{Deserialize, Serialize};
@@ -66,6 +67,16 @@ pub struct Blank {
     pub after: String,
 }
 
+/// One translation of an example's line: the translated text and who
+/// translated it (the PaliCanon API's translator id: `sujato`, `christelle`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Translation {
+    /// The translated line, plain text.
+    pub text: String,
+    /// The translator's id, as the API gives it.
+    pub translator: String,
+}
+
 /// An example of the term in a sentence. Its `blank` is what makes the
 /// Context facet: an example without one is shown but never asked.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,6 +90,10 @@ pub struct Example {
     /// The sentence with the word blanked, when the builder found it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blank: Option<Blank>,
+    /// The line's translations by language code (`en`, `fr`, `vi`); empty
+    /// when the builder found none (and in a deck written before them).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub translations: BTreeMap<String, Translation>,
 }
 
 /// One labelled inflected form: `fem acc pl` → `satiyo`, `satī`. `rare` is
@@ -264,6 +279,7 @@ pub(crate) mod samples {
                 answer: "me".to_string(),
                 after: " sutaṃ".to_string(),
             }),
+            translations: std::collections::BTreeMap::new(),
         }
     }
 
@@ -336,6 +352,43 @@ mod tests {
         let deck = Deck::from_json(text).unwrap();
         assert_eq!(deck.terms[0].forms[0].values, vec!["satiyo", "satī"]);
         assert_eq!(Deck::from_json(&deck.to_json()).unwrap(), deck);
+    }
+
+    #[test]
+    fn an_example_without_translations_still_parses_and_omits_them() {
+        let old = r#"{"version":1,"source":"s","terms":[{"id":"a","lemma":"a","pos":"ind",
+            "meaning":{"en":"x"},"rank":1,
+            "example":{"text":"evaṃ me sutaṃ","source":"MN1","sutta":"mn1"}}]}"#;
+        let deck = Deck::from_json(old).unwrap();
+        let example = deck.terms[0].example.as_ref().unwrap();
+        assert_eq!(example.translations.len(), 0);
+        assert!(
+            !deck.to_json().contains("translations"),
+            "{}",
+            deck.to_json()
+        );
+    }
+
+    #[test]
+    fn an_example_carries_its_translations_by_language() {
+        let text = r#"{"version":1,"source":"s","terms":[{"id":"a","lemma":"a","pos":"ind",
+            "meaning":{"en":"x"},"rank":1,
+            "example":{"text":"alaṃ, vakkali","source":"SN22.87","sutta":"vakkalisuttaṃ",
+              "translations":{
+                "en":{"text":"Enough, Vakkali!","translator":"sujato"},
+                "fr":{"text":"Assez, Vakkali !","translator":"christelle"}}}}]}"#;
+        let deck = Deck::from_json(text).unwrap();
+        let translations = &deck.terms[0].example.as_ref().unwrap().translations;
+        assert_eq!(translations.len(), 2);
+        let en = &translations["en"];
+        assert_eq!(
+            (en.text.as_str(), en.translator.as_str()),
+            ("Enough, Vakkali!", "sujato")
+        );
+        assert_eq!(translations["fr"].translator, "christelle");
+        let again = Deck::from_json(&deck.to_json()).unwrap();
+        assert_eq!(again, deck);
+        assert!(deck.to_json().contains("\"translations\""));
     }
 
     #[test]

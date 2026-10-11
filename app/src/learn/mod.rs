@@ -8,11 +8,13 @@
 //! - [`key`]: the card's presentation key and the grade keys' rules.
 //! - [`run`]: a review session as the review page drives it.
 //! - [`stages`]: the stages' names and counts.
+//! - [`translation`]: the example's translation to show, and its translator.
 
 pub(crate) mod home_state;
 pub(crate) mod key;
 pub(crate) mod run;
 pub(crate) mod stages;
 pub(crate) mod summary;
+pub(crate) mod translation;
 pub(crate) mod window;
 pub(crate) mod words;

@@ -182,6 +182,8 @@ version = "0.0.0"
 dependencies = [
  "learn_core",
  "rusqlite",
+ "serde",
+ "serde_json",
  "unicode-normalization",
 ]
 
