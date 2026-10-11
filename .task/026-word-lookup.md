@@ -1,6 +1,6 @@
 # 026 Tap a word of the example, see its meaning
 
-status: review · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-11: « in the definition, I want to be able to click and see the meaning of the word », a capture of the 'ayaṃ' Recall card's example, 'atha' as the example) · after: [ui-lib 059]
+status: merged · rank: 5 · level: standard · type: feature · request: learn-pali (user, 2026-10-11: « in the definition, I want to be able to click and see the meaning of the word », a capture of the 'ayaṃ' Recall card's example, 'atha' as the example) · after: [ui-lib 059]
 
 ## Summary
 On a card's reveal, every word of the example's Pāli line can be pressed to see its meaning (DPD). Decided:
@@ -17,4 +17,8 @@ Rank 5: a pipeline step, a deck format field, a ui-lib dependency, mobile behavi
 | Capture | done | orchestrator, :3201 on the branch: no word button before the reveal; 16 after; 'sutaṃ' opens 'suta 1.1 · pp · nt nom sg… · heard'; grade keys still work with a panel open; no page error. Seen: the panel is clipped by the card's scrolling body near its bottom; a console warning from ui-lib's catalogue (a signal read outside tracking) — both noted, not blocking |
 | Define | done | the DPD lookup table checked (atha → 2 headwords, āmantesi grammar, sampādethāti deconstructor); offline chosen (no backend, no token at run time) |
 
+## Merge
+dbbd2b1 (squash, 2026-10-11), after ui-lib 059.
+
 ## Retro
+Offline lookups kept the no-backend design. Left for 004: the DPD's first sense is not always the context's; several readings of one form all show. Seen at the capture: the panel clipped by the card's scrolling body; a ui-lib catalogue warning.
