@@ -49,6 +49,7 @@ use crate::learn::run::{Card, ReviewRun};
 use crate::learn::summary::Summary;
 use crate::learn::window::{MAX_CHARS, Segment, context_window, source_ref};
 use crate::learn::words::{date_words, label_words, pos_words};
+use crate::seed::browser_seed;
 use crate::store::{Load, load, save};
 use crate::today::{browser_today, session_today};
 
@@ -88,7 +89,7 @@ pub(crate) fn start_phase(owner: &Owner) -> Phase {
 /// saving first the promotions the start itself made.
 fn begin(owner: &Owner, state: State) -> Phase {
     let today = session_today(browser_today(), &state);
-    match Session::start(deck(), state.clone(), today) {
+    match Session::start(deck(), state.clone(), today, browser_seed()) {
         Ok(session) => {
             if session.changed_at_start() {
                 save(&session.snapshot());
@@ -106,7 +107,7 @@ pub(crate) fn practice_phase(owner: &Owner, n: usize, only: Option<Stage>) -> Op
     match load() {
         Load::Ok(state) => {
             let today = session_today(browser_today(), &state);
-            let run = practice_run(state, today, n, only)?;
+            let run = practice_run(state, today, n, only, browser_seed())?;
             Some(Phase::Running(owner.with(|| RwSignal::new(run))))
         }
         Load::Empty => None,
@@ -117,19 +118,20 @@ pub(crate) fn practice_phase(owner: &Owner, n: usize, only: Option<Stage>) -> Op
 
 /// A practice ahead on `state`: the `n` started terms with the nearest
 /// next review ([`nearest`]), of stage `only` when given, every facet of
-/// each asked as practice ([`Session::practice`]); `None` when no term is
-/// picked.
+/// each asked as practice ([`Session::practice`]) in the order `seed` draws;
+/// `None` when no term is picked.
 pub(crate) fn practice_run(
     state: State,
     today: Date,
     n: usize,
     only: Option<Stage>,
+    seed: u64,
 ) -> Option<ReviewRun> {
     let terms = nearest(&state, deck(), only, n);
     if terms.is_empty() {
         return None;
     }
-    let session = Session::practice(deck(), &state, today, &terms);
+    let session = Session::practice(deck(), &state, today, &terms, seed);
     Some(ReviewRun::practice(session, state))
 }
 
@@ -878,7 +880,7 @@ pub(crate) mod tests {
         }
         let mut before = State::empty();
         before.progress.push(entry);
-        let session = Session::start(deck(), before.clone(), today()).unwrap();
+        let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
         ReviewRun::new(session, before)
     }
 
@@ -901,7 +903,7 @@ pub(crate) mod tests {
     }
 
     pub(crate) fn nothing_due() -> ReviewRun {
-        let session = Session::start(deck(), State::empty(), today()).unwrap();
+        let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         ReviewRun::new(session, State::empty())
     }
 
@@ -1362,7 +1364,7 @@ pub(crate) mod tests {
 
     #[test]
     fn a_session_with_two_terms_moved_says_terms() {
-        let mut session = Session::start(deck(), State::empty(), today()).unwrap();
+        let mut session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         session.request_new(2);
         let mut run = ReviewRun::new(session, State::empty());
         for _ in 0..6 {
@@ -1499,16 +1501,23 @@ pub(crate) mod tests {
         (asked, saved)
     }
 
+    /// The terms a session asked, sorted and once each: the order of the
+    /// cards is the seed's, the terms are the practice's.
+    fn terms_of(asked: &[(String, bool)]) -> Vec<&str> {
+        let mut terms: Vec<&str> = asked.iter().map(|(term, _)| term.as_str()).collect();
+        terms.sort_unstable();
+        terms.dedup();
+        terms
+    }
+
     #[test]
     fn practice_ahead_asks_the_nearest_terms_of_the_stage_all_as_practice() {
         let state = ahead_state();
         for answer in [Answer::Pass, Answer::Fail] {
             let mut run =
-                practice_run(state.clone(), today(), 5, Some(Stage::Week)).expect("a run");
+                practice_run(state.clone(), today(), 5, Some(Stage::Week), 0).expect("a run");
             let (asked, saved) = drain(&mut run, answer);
-            let mut terms: Vec<&str> = asked.iter().map(|(term, _)| term.as_str()).collect();
-            terms.dedup();
-            assert_eq!(terms, ["kho", "evaṃ 1"], "Week only, nearest first");
+            assert_eq!(terms_of(&asked), ["evaṃ 1", "kho"], "Week only");
             assert!(asked.iter().all(|(_, practice)| *practice), "{asked:?}");
             assert!(
                 saved.iter().all(|saved| *saved == state),
@@ -1519,25 +1528,42 @@ pub(crate) mod tests {
 
     #[test]
     fn practice_ahead_takes_the_batch_and_every_stage_when_none_is_selected() {
-        let mut run = practice_run(ahead_state(), today(), 2, None).expect("a run");
+        let mut run = practice_run(ahead_state(), today(), 2, None, 0).expect("a run");
         let (asked, _) = drain(&mut run, Answer::Pass);
-        let mut terms: Vec<&str> = asked.iter().map(|(term, _)| term.as_str()).collect();
-        terms.dedup();
-        assert_eq!(terms, ["kho", "hoti 1"]);
+        assert_eq!(terms_of(&asked), ["hoti 1", "kho"]);
+    }
+
+    /// The seed sets the order, and only the order: every seed asks the
+    /// same cards, two seeds do not ask them in the same sequence.
+    #[test]
+    fn the_seed_orders_a_practice_ahead_and_nothing_else() {
+        let ask = |seed| {
+            let mut run = practice_run(ahead_state(), today(), 5, None, seed).expect("a run");
+            drain(&mut run, Answer::Pass).0
+        };
+        let mut base = ask(0);
+        assert!((1..20).any(|seed| ask(seed) != base), "some seed reorders");
+        assert_eq!(ask(3), ask(3), "the same seed, the same order");
+        base.sort();
+        for seed in 1..20 {
+            let mut asked = ask(seed);
+            asked.sort();
+            assert_eq!(asked, base, "{seed}");
+        }
     }
 
     #[test]
     fn practice_ahead_with_nothing_to_ask_starts_nothing() {
-        assert!(practice_run(ahead_state(), today(), 5, Some(Stage::Year)).is_none());
-        assert!(practice_run(State::empty(), today(), 5, None).is_none());
-        assert!(practice_run(ahead_state(), today(), 0, None).is_none());
+        assert!(practice_run(ahead_state(), today(), 5, Some(Stage::Year), 0).is_none());
+        assert!(practice_run(State::empty(), today(), 5, None, 0).is_none());
+        assert!(practice_run(ahead_state(), today(), 0, None, 0).is_none());
     }
 
     /// The header counts every question of the practice (`kho`: Meaning,
     /// Recall, Context).
     #[test]
     fn the_practice_header_counts_every_question() {
-        let run = practice_run(ahead_state(), today(), 1, None).expect("kho");
+        let run = practice_run(ahead_state(), today(), 1, None, 0).expect("kho");
         assert!(run.is_practice());
         let text = text_of(&render(run));
         assert!(text.contains("0 / 3 cards"), "{text}");
@@ -1553,7 +1579,7 @@ pub(crate) mod tests {
             (Language::Fr, "Entraînement terminé"),
             (Language::Vi, "Đã luyện xong"),
         ] {
-            let mut run = practice_run(ahead_state(), today(), 1, None).expect("kho");
+            let mut run = practice_run(ahead_state(), today(), 1, None, 0).expect("kho");
             drain(&mut run, Answer::Fail);
             let html = render_with(language, run, false);
             let text = text_of(&html);

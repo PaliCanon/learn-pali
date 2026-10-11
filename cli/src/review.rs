@@ -48,13 +48,14 @@ pub fn review<R: BufRead, W: Write>(
     deck: &Deck,
     state: State,
     today: Date,
+    seed: u64,
     input: R,
     out: W,
     state_path: &Path,
 ) -> Result<Outcome, CliError> {
     let mut input = input;
     let mut out = out;
-    let mut session = Session::start(deck, state, today)?;
+    let mut session = Session::start(deck, state, today, seed)?;
     if session.changed_at_start() {
         save_state(state_path, &session.snapshot())?;
     }
@@ -304,10 +305,70 @@ mod tests {
         answers.iter().flat_map(|a| ["\n", a, "\n"]).collect()
     }
 
+    /// A seed whose shuffle leaves the questions of `state` in the deck's
+    /// order (by term, then facet; the test deck's ids sort as its ranks):
+    /// the tests below read the questions in a known sequence.
+    fn deck_order_seed(state: &State) -> u64 {
+        let deck = deck();
+        (0..10_000)
+            .find(|seed| {
+                let Ok(mut session) = Session::start(&deck, state.clone(), day(TODAY), *seed)
+                else {
+                    return true; // a refused start asks nothing, any seed will do
+                };
+                let mut asked = Vec::new();
+                while let Some(question) = session.next().cloned() {
+                    asked.push((question.term.0.clone(), question.facet));
+                    let (term, facet) = (question.term, question.facet);
+                    session.answer(&term, facet, Answer::Pass).unwrap();
+                }
+                asked.windows(2).all(|pair| pair[0] <= pair[1])
+            })
+            .expect("a seed that keeps the deck's order")
+    }
+
     fn run_review(state: State, input: &str, path: &Path) -> (Result<Outcome, CliError>, String) {
         let mut out = Vec::new();
-        let result = review(&deck(), state, day(TODAY), input.as_bytes(), &mut out, path);
+        let seed = deck_order_seed(&state);
+        let result = review(
+            &deck(),
+            state,
+            day(TODAY),
+            seed,
+            input.as_bytes(),
+            &mut out,
+            path,
+        );
         (result, String::from_utf8(out).unwrap())
+    }
+
+    /// What a review prints with `seed`, every answer `y`.
+    fn printed(seed: u64, name: &str) -> String {
+        let path = dir(name).join("state.json");
+        let mut out = Vec::new();
+        let input = typed(&["y"; 6]);
+        let state = started(&["alpha", "beta"]);
+        review(
+            &deck(),
+            state,
+            day(TODAY),
+            seed,
+            input.as_bytes(),
+            &mut out,
+            &path,
+        )
+        .unwrap();
+        String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn the_seed_sets_the_order_the_same_seed_repeats_it() {
+        assert_eq!(printed(3, "seed-a"), printed(3, "seed-b"));
+        let base = printed(0, "seed-c");
+        assert!(
+            (1..20).any(|seed| printed(seed, "seed-d") != base),
+            "some seed asks in another order"
+        );
     }
 
     #[test]
@@ -413,7 +474,8 @@ mod tests {
         // The next session starts with the question that was left.
         let saved = load_state(&path).unwrap();
         let deck = deck();
-        let mut session = Session::start(&deck, saved, day(TODAY)).unwrap();
+        let seed = deck_order_seed(&saved);
+        let mut session = Session::start(&deck, saved, day(TODAY), seed).unwrap();
         let next = session.next().unwrap();
         assert_eq!((next.term.0.as_str(), next.facet), ("alpha", Facet::Recall));
     }
@@ -428,7 +490,8 @@ mod tests {
         assert!(out.contains("End of input"), "{out}");
         let deck = deck();
         let saved = load_state(&path).unwrap();
-        let mut session = Session::start(&deck, saved, day(TODAY)).unwrap();
+        let seed = deck_order_seed(&saved);
+        let mut session = Session::start(&deck, saved, day(TODAY), seed).unwrap();
         assert_eq!(session.next().unwrap().facet, Facet::Recall);
     }
 

@@ -5,8 +5,10 @@
 //! from the state and never stored: every term with `due <= today` that the
 //! deck knows, oldest `due` first and ties by `rank`, each one expanded into
 //! the facets of [`facets_of`] it has not passed at its stage, in [`Facet`]
-//! order. A term the deck does not know (an orphan) stays in the state and is
-//! never asked.
+//! order, then **shuffled** by the caller's `seed` (the same seed gives the
+//! same order; nothing here draws randomness, as nothing reads a clock). A
+//! term the deck does not know (an orphan) stays in the state and is never
+//! asked.
 //!
 //! [`Session::next`] shows the current question and [`Session::answer`]
 //! settles it:
@@ -23,8 +25,11 @@
 //!   is never queued again, so a session always ends.
 //!
 //! [`Session::practice`] builds a session of practice questions only, to
-//! study ahead: every facet of each term it is given, so it changes nothing
-//! in the state whatever the answers. [`nearest`] picks those terms: the
+//! study ahead: every facet of each term it is given, shuffled by the
+//! caller's `seed` like the queue, so it changes nothing in the state
+//! whatever the answers. The order never changes an outcome: the questions
+//! are the same, only their sequence differs. The practice questions a
+//! failure adds still come after the whole queue. [`nearest`] picks those terms: the
 //! started ones with the nearest next review.
 //!
 //! [`Session::into_state`] gives the state back with `last_today` recorded;
@@ -37,6 +42,7 @@ use crate::date::Date;
 use crate::deck::{Deck, Term, TermId};
 use crate::facet::{Facet, FacetSet, facets_of};
 use crate::progress::{Progress, State};
+use crate::shuffle::shuffle;
 use crate::stage::Stage;
 
 /// One thing to ask: a facet of a term.
@@ -121,7 +127,8 @@ pub struct Session<'d> {
 }
 
 impl<'d> Session<'d> {
-    /// Starts a session. See the module documentation for the queue.
+    /// Starts a session. See the module documentation for the queue, which
+    /// is put in a random order drawn from `seed`.
     ///
     /// A due term whose effective passed facets already cover all its facets
     /// (the deck lost the facet it was waiting for) has nothing left to ask:
@@ -131,8 +138,19 @@ impl<'d> Session<'d> {
     /// [`SessionError::TodayBeforeLast`] when `today < state.last_today`.
     pub fn start(
         deck: &'d Deck,
+        state: State,
+        today: Date,
+        seed: u64,
+    ) -> Result<Session<'d>, SessionError> {
+        Session::start_with(deck, state, today, |queue| shuffle(queue, seed))
+    }
+
+    /// [`Session::start`] with the order of the queue left to `order`.
+    fn start_with(
+        deck: &'d Deck,
         mut state: State,
         today: Date,
+        order: impl FnOnce(&mut [Question]),
     ) -> Result<Session<'d>, SessionError> {
         if let Some(last) = state.last_today
             && today < last
@@ -140,7 +158,8 @@ impl<'d> Session<'d> {
             return Err(SessionError::TodayBeforeLast { today, last });
         }
         let changed_at_start = settle_complete(deck, &mut state, today);
-        let queue = due_queue(deck, &state, today);
+        let mut queue = due_queue(deck, &state, today);
+        order(queue.make_contiguous());
         Ok(Session {
             deck,
             state,
@@ -153,18 +172,35 @@ impl<'d> Session<'d> {
     }
 
     /// A session of practice questions only (studying ahead): every facet
-    /// of each term of `terms`, in their order and in [`Facet`] order,
-    /// whatever it has passed. A term the deck does not know, one the state
+    /// of each term of `terms`, whatever it has passed, in a random order
+    /// drawn from `seed`. A term the deck does not know, one the state
     /// has not started and a repeat are skipped. Every answer, Pass or Fail,
     /// changes nothing in the state; nothing is promoted at the start
     /// ([`Session::changed_at_start`] is false).
     ///
     /// The session's day is `today`, or the state's last day when it is
     /// later: a practice never moves `last_today` back.
-    pub fn practice(deck: &'d Deck, state: &State, today: Date, terms: &[TermId]) -> Session<'d> {
+    pub fn practice(
+        deck: &'d Deck,
+        state: &State,
+        today: Date,
+        terms: &[TermId],
+        seed: u64,
+    ) -> Session<'d> {
+        Session::practice_with(deck, state, today, terms, |queue| shuffle(queue, seed))
+    }
+
+    /// [`Session::practice`] with the order of the queue left to `order`.
+    fn practice_with(
+        deck: &'d Deck,
+        state: &State,
+        today: Date,
+        terms: &[TermId],
+        order: impl FnOnce(&mut [Question]),
+    ) -> Session<'d> {
         let today = state.last_today.map_or(today, |last| today.max(last));
         let mut seen = HashSet::new();
-        let queue = terms
+        let mut queue: VecDeque<Question> = terms
             .iter()
             .filter(|id| seen.insert(*id))
             .filter(|id| state.get(id).is_some())
@@ -180,6 +216,7 @@ impl<'d> Session<'d> {
                     .collect::<Vec<_>>()
             })
             .collect();
+        order(queue.make_contiguous());
         Session {
             deck,
             state: state.clone(),
@@ -417,8 +454,19 @@ mod tests {
         }
     }
 
+    /// A session in the deck's own order (no shuffle): the tests of the
+    /// rules read the queue in a known order.
     fn start(deck: &Deck, state: State, today: u32) -> Session<'_> {
-        Session::start(deck, state, day(today)).unwrap()
+        Session::start_with(deck, state, day(today), |_| {}).unwrap()
+    }
+
+    fn practice_in_order<'d>(
+        deck: &'d Deck,
+        state: &State,
+        today: Date,
+        terms: &[TermId],
+    ) -> Session<'d> {
+        Session::practice_with(deck, state, today, terms, |_| {})
     }
 
     /// Answers every question with `answer`; what was asked, in order.
@@ -843,7 +891,7 @@ mod tests {
         let deck = deck_of(vec![indeclinable("kho", 1)]);
         let mut state = state_of(vec![]);
         state.last_today = Some(day(TODAY));
-        let error = Session::start(&deck, state.clone(), day(TODAY - 1)).unwrap_err();
+        let error = Session::start(&deck, state.clone(), day(TODAY - 1), 0).unwrap_err();
         assert_eq!(
             error,
             SessionError::TodayBeforeLast {
@@ -855,7 +903,7 @@ mod tests {
         assert!(message.contains("2026-10-04"), "{message}");
         assert!(message.contains("2026-10-05"), "{message}");
         assert!(
-            Session::start(&deck, state, day(TODAY)).is_ok(),
+            Session::start(&deck, state, day(TODAY), 0).is_ok(),
             "same day is fine"
         );
     }
@@ -1030,7 +1078,7 @@ mod tests {
         kho.passed.insert(Facet::Meaning);
         let state = dated(vec![kho, entry("sati 1.1", Stage::Month, day(TODAY + 9))]);
         let mut session =
-            Session::practice(&deck, &state, day(TODAY), &[id("kho"), id("sati 1.1")]);
+            practice_in_order(&deck, &state, day(TODAY), &[id("kho"), id("sati 1.1")]);
         assert!(!session.changed_at_start());
         let seen = drain(&mut session, Answer::Pass);
         assert_eq!(
@@ -1057,7 +1105,7 @@ mod tests {
         let before = state.to_json();
         for answer in [Answer::Pass, Answer::Fail] {
             let mut session =
-                Session::practice(&deck, &state, day(TODAY), &[id("sati 1.1"), id("kho")]);
+                practice_in_order(&deck, &state, day(TODAY), &[id("sati 1.1"), id("kho")]);
             assert_eq!(session.snapshot().to_json(), before);
             let mut asked = 0;
             while let Some(question) = session.next().cloned() {
@@ -1084,7 +1132,7 @@ mod tests {
             entry("ghost", Stage::Year, day(TODAY + 1)),
         ]);
         let terms = [id("ghost"), id("kho"), id("ca"), id("kho"), id("zzz")];
-        let mut session = Session::practice(&deck, &state, day(TODAY), &terms);
+        let mut session = practice_in_order(&deck, &state, day(TODAY), &terms);
         let seen = drain(&mut session, Answer::Fail);
         assert_eq!(
             seen,
@@ -1093,7 +1141,7 @@ mod tests {
                 ("kho".to_string(), Facet::Recall, true),
             ]
         );
-        let mut empty = Session::practice(&deck, &state, day(TODAY), &[]);
+        let mut empty = practice_in_order(&deck, &state, day(TODAY), &[]);
         assert_eq!(empty.next(), None);
     }
 
@@ -1102,7 +1150,7 @@ mod tests {
         let deck = practice_deck();
         let mut state = dated(vec![entry("kho", Stage::Week, day(TODAY + 2))]);
         state.last_today = Some(day(TODAY + 1));
-        let session = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        let session = practice_in_order(&deck, &state, day(TODAY), &[id("kho")]);
         assert_eq!(session.today(), day(TODAY + 1));
         assert_eq!(session.into_state(), state);
     }
@@ -1111,7 +1159,7 @@ mod tests {
     fn remaining_counts_what_is_left_to_ask_the_current_question_included() {
         let deck = practice_deck();
         let state = dated(vec![entry("kho", Stage::Week, day(TODAY + 2))]);
-        let mut session = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        let mut session = practice_in_order(&deck, &state, day(TODAY), &[id("kho")]);
         assert_eq!(session.remaining(), 2);
         let first = session.next().cloned().unwrap();
         assert_eq!(session.remaining(), 2, "the current one is still to answer");
@@ -1132,10 +1180,10 @@ mod tests {
         let mut normal = start(&deck, state.clone(), TODAY);
         drain(&mut normal, Answer::Pass);
         assert_eq!(normal.into_state().progress[0].stage, Stage::Month);
-        let mut practice = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        let mut practice = practice_in_order(&deck, &state, day(TODAY), &[id("kho")]);
         drain(&mut practice, Answer::Pass);
         assert_eq!(practice.into_state().progress[0].stage, Stage::Week);
-        let mut failed = Session::practice(&deck, &state, day(TODAY), &[id("kho")]);
+        let mut failed = practice_in_order(&deck, &state, day(TODAY), &[id("kho")]);
         drain(&mut failed, Answer::Fail);
         let kho = failed.into_state().progress.remove(0);
         assert_eq!(
@@ -1198,5 +1246,148 @@ mod tests {
             "the orphan"
         );
         assert_eq!(nearest(&State::empty(), &deck, None, 5).len(), 0);
+    }
+
+    // ---- shuffle: the queue comes in a random order ----
+
+    /// Eight facets: a noun (four) and two indeclinables (two each).
+    fn shuffle_deck() -> Deck {
+        practice_deck()
+    }
+
+    fn shuffle_state(due: Date) -> State {
+        dated(vec![
+            entry("sati 1.1", Stage::Day, due),
+            entry("kho", Stage::Day, due),
+            entry("ca", Stage::Day, due),
+        ])
+    }
+
+    fn shuffled_start(seed: u64) -> Vec<(String, Facet, bool)> {
+        let deck = shuffle_deck();
+        let mut session =
+            Session::start(&deck, shuffle_state(day(TODAY)), day(TODAY), seed).unwrap();
+        drain(&mut session, Answer::Pass)
+    }
+
+    fn shuffled_practice(seed: u64) -> Vec<(String, Facet, bool)> {
+        let deck = shuffle_deck();
+        let state = shuffle_state(day(TODAY + 3));
+        let terms = [id("sati 1.1"), id("kho"), id("ca")];
+        let mut session = Session::practice(&deck, &state, day(TODAY), &terms, seed);
+        drain(&mut session, Answer::Pass)
+    }
+
+    fn sorted(mut asked: Vec<(String, Facet, bool)>) -> Vec<(String, Facet, bool)> {
+        asked.sort_by_key(|(term, facet, _)| (term.clone(), *facet));
+        asked
+    }
+
+    #[test]
+    fn the_same_seed_gives_the_same_order() {
+        assert_eq!(shuffled_start(7), shuffled_start(7));
+        assert_eq!(shuffled_practice(7), shuffled_practice(7));
+    }
+
+    #[test]
+    fn two_seeds_give_two_orders() {
+        assert_ne!(shuffled_start(1), shuffled_start(2));
+        assert_ne!(shuffled_practice(1), shuffled_practice(2));
+    }
+
+    #[test]
+    fn the_shuffled_queue_is_a_permutation_of_the_unshuffled_one() {
+        let deck = shuffle_deck();
+        let mut plain = start(&deck, shuffle_state(day(TODAY)), TODAY);
+        let plain = drain(&mut plain, Answer::Pass);
+        let state = shuffle_state(day(TODAY + 3));
+        let terms = [id("sati 1.1"), id("kho"), id("ca")];
+        let mut plain_practice = practice_in_order(&deck, &state, day(TODAY), &terms);
+        let plain_practice = drain(&mut plain_practice, Answer::Pass);
+        assert_eq!(plain.len(), 8);
+        for seed in 0..20 {
+            assert_eq!(
+                sorted(shuffled_start(seed)),
+                sorted(plain.clone()),
+                "{seed}"
+            );
+            assert_eq!(
+                sorted(shuffled_practice(seed)),
+                sorted(plain_practice.clone()),
+                "{seed}"
+            );
+        }
+    }
+
+    #[test]
+    fn some_seed_moves_the_first_card_off_the_decks_order() {
+        let first = |seed| shuffled_start(seed).remove(0);
+        assert!((0..20).any(|seed| first(seed) != first(seed + 20)));
+        let deck_first = ("sati 1.1".to_string(), Facet::Meaning, false);
+        assert!((0..20).any(|seed| first(seed) != deck_first));
+    }
+
+    #[test]
+    fn the_re_ask_after_a_fail_still_comes_after_every_queue_card() {
+        let deck = shuffle_deck();
+        for seed in 0..20 {
+            let mut session =
+                Session::start(&deck, shuffle_state(day(TODAY)), day(TODAY), seed).unwrap();
+            let asked = drain(&mut session, Answer::Fail);
+            let practice_from = asked.iter().position(|(_, _, practice)| *practice);
+            let practice_from = practice_from.expect("a failure is asked again");
+            assert!(
+                asked[practice_from..]
+                    .iter()
+                    .all(|(_, _, practice)| *practice),
+                "{seed}: queue cards after a re-ask"
+            );
+            assert!(
+                asked[..practice_from]
+                    .iter()
+                    .all(|(_, _, practice)| !practice),
+                "{seed}"
+            );
+            assert_eq!(
+                asked.len(),
+                6,
+                "{seed}: three terms, one failure each, asked twice"
+            );
+        }
+    }
+
+    #[test]
+    fn a_queue_of_nothing_or_one_card_is_fine_with_any_seed() {
+        let deck = shuffle_deck();
+        for seed in [0, 1, u64::MAX] {
+            let mut none = Session::start(&deck, dated(vec![]), day(TODAY), seed).unwrap();
+            assert_eq!(none.next(), None);
+            let mut empty = Session::practice(&deck, &dated(vec![]), day(TODAY), &[], seed);
+            assert_eq!(empty.next(), None);
+            let one = deck_of(vec![indeclinable("kho", 1)]);
+            let mut state = dated(vec![entry("kho", Stage::Day, day(TODAY))]);
+            state.progress[0].passed.insert(Facet::Meaning);
+            let mut session = Session::start(&one, state, day(TODAY), seed).unwrap();
+            assert_eq!(drain(&mut session, Answer::Pass).len(), 1);
+        }
+    }
+
+    /// The rule pair: the order changes the questions' sequence, never the
+    /// outcome of answering all of them.
+    #[test]
+    fn the_state_after_answering_everything_is_the_same_whatever_the_seed() {
+        let deck = shuffle_deck();
+        let outcome = |seed, answer| {
+            let mut session =
+                Session::start(&deck, shuffle_state(day(TODAY)), day(TODAY), seed).unwrap();
+            drain(&mut session, answer);
+            session.into_state().to_json()
+        };
+        for answer in [Answer::Pass, Answer::Fail] {
+            let base = outcome(0, answer);
+            for seed in 1..20 {
+                assert_eq!(outcome(seed, answer), base, "{answer:?} {seed}");
+            }
+        }
     }
 }

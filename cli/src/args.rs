@@ -1,8 +1,10 @@
 //! Argument parsing.
 //!
 //! `learn-cli --deck deck.json --state state.json [--today YYYY-MM-DD]
-//! <review | stats | new N | advance K>`. Options may come before or after
-//! the command. `today` defaults to the UTC calendar date of the system
+//! [--seed N] <review | stats | new N | advance K>`. Options may come before
+//! or after the command. `--seed` sets the random order of a session's
+//! questions (default: drawn from the system clock, so each run differs;
+//! the same seed repeats an order). `today` defaults to the UTC calendar date of the system
 //! clock ([`utc_today`]); the standard library has no time zone, so the
 //! local date needs `--today`.
 
@@ -21,6 +23,8 @@ pub struct Args {
     pub state: PathBuf,
     /// The day given with `--today`, if any.
     pub today: Option<Date>,
+    /// The seed given with `--seed`, if any ([`Args::seed_or_now`]).
+    pub seed: Option<u64>,
     /// The command to run.
     pub command: Command,
 }
@@ -47,6 +51,9 @@ pub enum ArgsError {
     Unknown(String),
     /// The `--today` value is not a date (the date error's message).
     BadDate(String),
+    /// The `--seed` value is not a whole number from 0 to 2^64 - 1 (the
+    /// text given).
+    BadSeed(String),
     /// The count of `new` or `advance` is not a positive whole number
     /// (empty when it is absent).
     BadCount(String),
@@ -64,6 +71,10 @@ impl fmt::Display for ArgsError {
             ArgsError::Missing(what) => write!(f, "missing {what}"),
             ArgsError::Unknown(option) => write!(f, "unknown option {option}"),
             ArgsError::BadDate(cause) => write!(f, "bad --today: {cause}"),
+            ArgsError::BadSeed(text) => write!(
+                f,
+                "bad --seed: {text:?} is not a whole number from 0 to 18446744073709551615"
+            ),
             ArgsError::BadCount(text) if text.is_empty() => {
                 f.write_str("this command needs a count (a positive whole number)")
             }
@@ -82,12 +93,14 @@ impl std::error::Error for ArgsError {}
 /// The synopsis and one line per command.
 pub fn usage() -> &'static str {
     "learn-cli --deck deck.json --state state.json [--today YYYY-MM-DD] \
-<review | stats | new N | advance K>
+[--seed N] <review | stats | new N | advance K>
   review      ask the questions that are due
   stats       print the terms per stage, what is due and what is new
   new N       start N new terms (by rank)
   advance K   bring K terms forward after a pause (only when nothing is due)
-  --today     the day to use (default: today's UTC date)"
+  --today     the day to use (default: today's UTC date)
+  --seed      the number that sets the random order of the questions
+              (default: from the clock; the same seed, the same order)"
 }
 
 /// Reads the command line (the arguments without the program name).
@@ -103,6 +116,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
     let mut deck = None;
     let mut state = None;
     let mut today = None;
+    let mut seed = None;
     let mut words = Vec::new();
     let mut rest = args.into_iter();
     while let Some(arg) = rest.next() {
@@ -113,6 +127,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
                 let text = value(&mut rest, "--today")?;
                 today = Some(Date::parse(&text).map_err(|e| ArgsError::BadDate(e.to_string()))?);
             }
+            "--seed" => {
+                let text = value(&mut rest, "--seed")?;
+                seed = Some(text.parse::<u64>().map_err(|_| ArgsError::BadSeed(text))?);
+            }
             _ if is_option(&arg) => return Err(ArgsError::Unknown(arg)),
             _ => words.push(arg),
         }
@@ -122,6 +140,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
         deck: deck.ok_or(ArgsError::Missing("--deck"))?,
         state: state.ok_or(ArgsError::Missing("--state"))?,
         today,
+        seed,
         command,
     })
 }
@@ -185,6 +204,30 @@ impl Args {
     }
 }
 
+impl Args {
+    /// `--seed` when given, else a seed drawn from the system clock (its
+    /// nanoseconds since the epoch, mixed), so each run is in a new order.
+    pub fn seed_or_now(&self) -> u64 {
+        self.seed.unwrap_or_else(clock_seed)
+    }
+}
+
+/// A seed from the system clock: the nanoseconds since the epoch, folded
+/// into 64 bits. The shuffle mixes it, so near seeds give unrelated orders.
+fn clock_seed() -> u64 {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "the high bits are folded in on purpose"
+    )]
+    {
+        (nanos ^ (nanos >> 64)) as u64
+    }
+}
+
 /// The UTC calendar date of the system clock.
 ///
 /// The standard library has no time zone: this is the UTC day, so late in
@@ -235,6 +278,50 @@ mod tests {
             ok("--deck d --state s advance 12").command,
             Command::Advance(12)
         );
+    }
+
+    #[test]
+    fn seed_is_parsed_and_defaults_to_none() {
+        assert_eq!(ok("--deck d --state s review").seed, None);
+        let args = ok("--deck d --state s --seed 42 review");
+        assert_eq!(args.seed, Some(42));
+        assert_eq!(args.seed_or_now(), 42);
+        assert_eq!(ok("review --seed 0 --deck d --state s").seed_or_now(), 0);
+        let big = format!("--deck d --state s --seed {} review", u64::MAX);
+        assert_eq!(ok(&big).seed, Some(u64::MAX));
+    }
+
+    #[test]
+    fn a_bad_seed_is_refused() {
+        for text in ["-1", "abc", "1.5", "18446744073709551616", ""] {
+            let line = ["--deck", "d", "--state", "s", "--seed", text, "review"];
+            assert_eq!(
+                parse_args(line.map(str::to_owned)),
+                Err(ArgsError::BadSeed(text.to_owned())),
+                "{text:?}"
+            );
+        }
+        assert_eq!(
+            parse("--deck d --state s review --seed"),
+            Err(ArgsError::Missing("--seed"))
+        );
+        assert!(
+            ArgsError::BadSeed("x".to_owned())
+                .to_string()
+                .contains("--seed")
+        );
+    }
+
+    #[test]
+    fn without_a_seed_the_clock_gives_one_that_changes() {
+        let args = ok("--deck d --state s review");
+        let draws: Vec<u64> = (0..5)
+            .map(|_| {
+                std::thread::sleep(std::time::Duration::from_millis(2));
+                args.seed_or_now()
+            })
+            .collect();
+        assert!(draws.windows(2).any(|pair| pair[0] != pair[1]), "{draws:?}");
     }
 
     #[test]
@@ -394,7 +481,7 @@ mod tests {
     fn usage_names_every_command() {
         let text = usage();
         assert!(text.starts_with("learn-cli --deck deck.json --state state.json"));
-        for word in ["review", "stats", "new N", "advance K", "--today"] {
+        for word in ["review", "stats", "new N", "advance K", "--today", "--seed"] {
             assert!(text.contains(word), "{word}");
         }
     }

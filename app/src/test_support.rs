@@ -19,7 +19,7 @@ pub(crate) fn today() -> Date {
 /// and two facets passed (due 12 October 2026); one orphan, `ghost 1`, in
 /// Quarter.
 pub(crate) fn progress_fixture() -> State {
-    let mut session = Session::start(deck(), State::empty(), today()).expect("a session");
+    let mut session = Session::start(deck(), State::empty(), today(), 0).expect("a session");
     assert_eq!(session.request_new(3), 3);
     let mut state = session.into_state();
     let week = &mut state.progress[0];

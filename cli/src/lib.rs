@@ -111,11 +111,12 @@ fn execute<R: BufRead, W: Write>(args: &Args, input: R, mut out: W) -> Result<()
     let deck = load_deck(&args.deck)?;
     let state = load_state(&args.state)?;
     let today = args.today_or_now();
+    let seed = args.seed_or_now();
     if args.command == Command::Review {
-        review(&deck, state, today, input, out, &args.state)?;
+        review(&deck, state, today, seed, input, out, &args.state)?;
         return Ok(());
     }
-    let mut session = Session::start(&deck, state, today)?;
+    let mut session = Session::start(&deck, state, today, seed)?;
     match args.command {
         Command::Review => {}
         Command::Stats => {
@@ -298,6 +299,35 @@ mod tests {
             saved.last_today.map(|d| d.to_string()).as_deref(),
             Some("2026-10-05")
         );
+    }
+
+    /// What `review --seed` prints for 5 new terms, no answer typed (the
+    /// first question only).
+    fn first_question(seed: &str) -> String {
+        // The same folder every time: the output names the state file.
+        let state = dir("seed-order").join("state.json");
+        go_with(&state, "2026-10-05", &["new", "5"], "");
+        let (code, out, err) = go_with(&state, "2026-10-05", &["--seed", seed, "review"], "");
+        assert_eq!((code, err.as_str()), (0, ""), "{out}");
+        out
+    }
+
+    #[test]
+    fn review_with_a_seed_repeats_its_order_and_another_seed_changes_it() {
+        assert_eq!(first_question("7"), first_question("7"));
+        let base = first_question("0");
+        assert!(
+            (1..20).any(|seed| first_question(&seed.to_string()) != base),
+            "some seed asks another first question"
+        );
+    }
+
+    #[test]
+    fn a_bad_seed_exits_2_naming_the_option() {
+        let state = dir("badseed").join("state.json");
+        let (code, _, err) = go_with(&state, "2026-10-05", &["--seed", "x", "review"], "");
+        assert_eq!(code, 2);
+        assert!(err.contains("--seed"), "{err}");
     }
 
     #[test]

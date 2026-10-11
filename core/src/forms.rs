@@ -141,10 +141,10 @@ mod tests {
             last_today: None,
             progress: vec![progress],
         };
-        let mut today = Session::start(&deck, state.clone(), Date::from_days(20731)).unwrap();
+        let mut today = Session::start(&deck, state.clone(), Date::from_days(20731), 0).unwrap();
         assert_eq!(today.next(), None, "not asked today");
         assert_eq!(today.stats().due_today, 0, "not pulled forward");
-        let mut due = Session::start(&deck, state, tomorrow).unwrap();
+        let mut due = Session::start(&deck, state, tomorrow, 0).unwrap();
         let queued: Vec<Facet> = due.queue.iter().map(|q| q.facet).collect();
         assert_eq!(queued, [Facet::Forms], "exactly the gained facet");
         let first = due.next().unwrap();

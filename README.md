@@ -78,6 +78,10 @@ cargo run -p learn_cli -- --deck core/fixtures/deck.json --state /tmp/state.json
 cargo run -p learn_cli -- --deck core/fixtures/deck.json --state /tmp/state.json --today 2026-10-13 review
 ```
 
+A session asks its questions in a random order. `--seed N` fixes it (the
+same seed, the same order; the default comes from the clock, so each run
+differs).
+
 Two more commands: `new N` starts N new terms (it only starts them; ask for
 them with `review`), and `advance K` brings K long-stage terms (Month or
 later) forward after a pause — refused, with the reason, while anything is

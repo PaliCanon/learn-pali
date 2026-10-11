@@ -204,7 +204,7 @@ mod tests {
     /// A run on the embedded deck over `n` new terms: `kho` and `ca 2.1`
     /// are indeclinables, so each asks Meaning, Recall, Context (3 cards).
     fn started(n: usize) -> ReviewRun {
-        let mut session = Session::start(deck(), State::empty(), today()).unwrap();
+        let mut session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         session.request_new(n);
         ReviewRun::new(session, State::empty())
     }
@@ -362,7 +362,7 @@ mod tests {
 
     #[test]
     fn nothing_due_is_an_empty_run_with_no_key_and_no_count() {
-        let session = Session::start(deck(), State::empty(), today()).unwrap();
+        let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         let mut run = ReviewRun::new(session, State::empty());
         assert_eq!(asked(&run), None);
         assert_eq!((run.done(), run.total()), (0, 0));
@@ -375,7 +375,7 @@ mod tests {
 
     #[test]
     fn grading_an_empty_run_saves_nothing_whatever_the_answer() {
-        let session = Session::start(deck(), State::empty(), today()).unwrap();
+        let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         let mut run = ReviewRun::new(session, State::empty());
         let saves = Cell::new(0_usize);
         for answer in [Answer::Pass, Answer::Fail] {
@@ -396,7 +396,7 @@ mod tests {
         }
         let mut before = State::empty();
         before.progress.push(entry);
-        let session = Session::start(deck(), before.clone(), today()).unwrap();
+        let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
         ReviewRun::new(session, before)
     }
 
@@ -427,7 +427,7 @@ mod tests {
 
     #[test]
     fn there_is_no_card_when_nothing_is_asked() {
-        let session = Session::start(deck(), State::empty(), today()).unwrap();
+        let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         assert!(ReviewRun::new(session, State::empty()).card().is_none());
     }
 

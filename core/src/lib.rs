@@ -25,5 +25,6 @@ pub mod forms;
 pub mod grow;
 pub mod progress;
 pub mod session;
+mod shuffle;
 pub mod stage;
 pub mod stats;

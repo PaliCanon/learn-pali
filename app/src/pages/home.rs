@@ -368,7 +368,8 @@ fn compute(load: &Load, deck: &Deck, browser: Date) -> Model {
 /// The state after `action` (new terms), to be saved; `None` when it
 /// moved nothing (or the day is before the state's last).
 fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<State> {
-    let mut session = Session::start(deck, state, today).ok()?;
+    // Only the terms it adds matter here, not the order of a queue: seed 0.
+    let mut session = Session::start(deck, state, today, 0).ok()?;
     let moved = match action {
         HomeAction::AddNew(n) => session.request_new(n),
         HomeAction::Review

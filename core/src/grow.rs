@@ -126,7 +126,7 @@ mod tests {
     }
 
     fn start(deck: &Deck, state: State) -> Session<'_> {
-        Session::start(deck, state, day(TODAY)).unwrap()
+        Session::start(deck, state, day(TODAY), 0).unwrap()
     }
 
     /// The terms of the state, in order.

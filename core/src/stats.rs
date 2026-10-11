@@ -80,7 +80,7 @@ mod tests {
     #[test]
     fn an_empty_state_has_everything_left_to_start() {
         let deck = five_terms();
-        let session = Session::start(&deck, State::empty(), Date::from_days(TODAY)).unwrap();
+        let session = Session::start(&deck, State::empty(), Date::from_days(TODAY), 0).unwrap();
         let counts = session.stats();
         assert_eq!(
             counts,
@@ -100,7 +100,7 @@ mod tests {
             entry("t3", Stage::Week, TODAY + 4, 1),
             entry("ghost", Stage::Year, TODAY - 9, 7),
         ]);
-        let session = Session::start(&deck, state, Date::from_days(TODAY)).unwrap();
+        let session = Session::start(&deck, state, Date::from_days(TODAY), 0).unwrap();
         let counts = session.stats();
         assert_eq!(counts.per_stage, [1, 2, 0, 0, 0, 0]);
         assert_eq!(counts.due_today, 2, "an orphan is never due");
@@ -113,7 +113,7 @@ mod tests {
     fn the_stats_follow_the_session() {
         let deck = five_terms();
         let state = state_of(vec![entry("t1", Stage::Day, TODAY, 0)]);
-        let mut session = Session::start(&deck, state, Date::from_days(TODAY)).unwrap();
+        let mut session = Session::start(&deck, state, Date::from_days(TODAY), 0).unwrap();
         assert_eq!(session.stats().due_today, 1);
         for _ in 0..2 {
             let question = session.next().cloned().unwrap();

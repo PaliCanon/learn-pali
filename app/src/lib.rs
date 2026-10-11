@@ -18,6 +18,7 @@ mod components;
 mod deck;
 mod learn;
 mod pages;
+mod seed;
 mod store;
 #[cfg(test)]
 mod test_support;
