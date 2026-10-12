@@ -1,0 +1,35 @@
+# Checks PaliCanon/ui-lib out beside this repository (`ui-lib/`), at the tag
+# app/Cargo.toml pins, guards that the checkout's version is that tag, and
+# loads the deploy key into an ssh agent for Cargo's git fetch. Used by every
+# job that builds (ci.yml, deploy.yml); this repository must already be
+# checked out in `learn-pali/`.
+name: ui-lib at the pinned tag
+description: Check out PaliCanon/ui-lib at the tag app/Cargo.toml pins, guarded.
+inputs:
+  ssh-key:
+    description: The read-only deploy key on PaliCanon/ui-lib.
+    required: true
+runs:
+  using: composite
+  steps:
+    - id: pin
+      shell: bash
+      run: |
+        tag=$(sed -n 's/^palicanon-ui-lib = .*tag = "\(v[^"]*\)".*/\1/p' learn-pali/app/Cargo.toml)
+        if [ -z "$tag" ]; then echo "::error::app/Cargo.toml pins no ui-lib tag"; exit 1; fi
+        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+    - uses: actions/checkout@v7
+      with:
+        repository: PaliCanon/ui-lib
+        path: ui-lib
+        ref: ${{ steps.pin.outputs.tag }}
+        ssh-key: ${{ inputs.ssh-key }}
+    - shell: bash
+      run: |
+        version=$(sed -n 's/^version = "\(.*\)"/\1/p' ui-lib/Cargo.toml | head -1)
+        if [ "v$version" != "${{ steps.pin.outputs.tag }}" ]; then
+          echo "::error::ui-lib ${{ steps.pin.outputs.tag }} says version $version"; exit 1
+        fi
+    - uses: webfactory/ssh-agent@v0.9.0
+      with:
+        ssh-private-key: ${{ inputs.ssh-key }}

@@ -11,10 +11,12 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-# Built from ../ui-lib (the workspace's [patch]); the branch must hold the
-# standalone manifest, Cargo reads it even when patched; the version is a real
-# constraint, so cargo-deny's wildcard rule holds.
-palicanon-ui-lib = { version = "0.1", git = "ssh://git@github.com/PaliCanon/ui-lib.git", branch = "main" }
+# Pinned by tag (docs conventions/ui-lib.md): taking a new ui-lib is a bump of
+# this tag. Built from ../ui-lib (the workspace's [patch]); CI and deploy check
+# ../ui-lib out at this same tag (.github/actions/ui-lib) and fail when its
+# version differs. The version is a real constraint, so cargo-deny's wildcard
+# rule holds.
+palicanon-ui-lib = { version = "0.1", git = "ssh://git@github.com/PaliCanon/ui-lib.git", tag = "v0.1.0" }
 leptos.workspace = true
 leptos_meta.workspace = true
 leptos_router.workspace = true

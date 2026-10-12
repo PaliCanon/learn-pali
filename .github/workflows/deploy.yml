@@ -31,8 +31,9 @@ env:
   REGION: europe-west1
 
 # Two checkouts side by side, as in ci.yml: the build reaches `../ui-lib`
-# (the workspace's [patch], main.css, build.rs). Commands run in learn-pali/;
-# the Docker build context is the folder holding both.
+# (the workspace's [patch], main.css, build.rs). ui-lib is checked out at
+# the tag app/Cargo.toml pins, through the composite action. Commands run
+# in learn-pali/; the Docker build context is the folder holding both.
 defaults:
   run:
     working-directory: learn-pali
@@ -48,16 +49,11 @@ jobs:
         with:
           path: learn-pali
           persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          repository: PaliCanon/ui-lib
-          path: ui-lib
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
       # The same key, in an ssh agent, for the build: Cargo fetches the
       # private ui-lib git dependency inside Docker (`--ssh default`).
-      - uses: webfactory/ssh-agent@v0.9.0
+      - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-private-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
 
       - uses: google-github-actions/auth@v2
         with:
