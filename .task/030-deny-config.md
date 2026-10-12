@@ -1,6 +1,6 @@
 # 030 deny.toml parses again
 
-status: building · rank: 1 · level: simple · type: fix · request: found by the orchestrator during 029, 2026-10-12 · light path
+status: merged · rank: 1 · level: simple · type: fix · request: found by the orchestrator during 029, 2026-10-12 · light path
 
 ## Summary
 Rank: difficulty 1 (one config file), impact 2 (cargo-deny, a CI job, fails on every run) → 1.
@@ -11,3 +11,7 @@ Rank: difficulty 1 (one config file), impact 2 (cargo-deny, a CI job, fails on e
 | --- | --- | --- |
 | Build | done | 4754197; red: `failed to parse config ... expected an equals, found a comma`; green: `advisories ok, bans ok, licenses ok, sources ok` |
 | Check | done | orchestrator, tip 7ca9b73: diff read, `cargo deny check` advisories, bans, licenses, sources ok. No visible result |
+| Merge | done | 7c1a605 on main (not pushed) |
+
+## Retro
+One line (light path): 028 edited deny.toml without running cargo deny; a config file is checked by the tool that reads it before its commit.
