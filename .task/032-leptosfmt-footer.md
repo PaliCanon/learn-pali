@@ -1,6 +1,6 @@
 # 032 leptosfmt passes on main again
 
-status: building · rank: 1 · level: simple · type: style · request: found by lane:guard during 031, 2026-10-12 · light path
+status: merged · rank: 1 · level: simple · type: style · request: found by lane:guard during 031, 2026-10-12 · light path
 
 ## Summary
 Rank: difficulty 1 (one generated formatting change in a test), impact 1 (no behaviour; CI's leptosfmt check fails on main) → 1.
@@ -11,3 +11,7 @@ Rank: difficulty 1 (one generated formatting change in a test), impact 1 (no beh
 | --- | --- | --- |
 | Build | done | 82cfeb7; leptosfmt --check 0, fmt 0, footer tests 6 passed |
 | Check | done | orchestrator: diff is the generated block only; leptosfmt --check 0 per the lane. No visible result |
+| Merge | done | cd65d7b on main (not pushed) |
+
+## Retro
+One line (light path): the formatter of view! macros was not run before 010 merged; the merge gate runs every check of the README, leptosfmt included.
