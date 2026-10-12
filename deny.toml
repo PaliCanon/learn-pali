@@ -8,8 +8,8 @@ ignore = [
 
 [licenses]
 version = 2
-# Permissive licenses only — the crate itself is MIT OR Apache-2.0 and must
-# stay embeddable in closed-source products.
+# PaliCanon's own licence (every PaliCanon crate, ui-lib included, is
+# CC-BY-NC-4.0), then permissive licences for the dependencies.
 allow = [
     "CC-BY-NC-4.0",
     "MIT",
@@ -28,13 +28,6 @@ allow = [
 confidence-threshold = 0.9
 # The allow list is a policy, not an inventory of the current tree.
 unused-allowed-license = "allow"
-
-# ui-lib is PaliCanon's own private library (license LicenseRef-Proprietary,
-# not an SPDX license): the one exception, for that crate alone.
-[[licenses.exceptions]]
-name = "palicanon-ui-lib"
-allow = ["LicenseRef-Proprietary"]
-    "CC-BY-NC-4.0",
 
 [bans]
 multiple-versions = "warn"
