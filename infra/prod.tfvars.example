@@ -1,13 +1,20 @@
 # The second apply, once dev has deployed from CI and been checked:
 #   tofu apply -var-file=prod.tfvars   (copy this file to prod.tfvars)
-# `envs` is replaced as a whole, so dev is listed again.
+# `envs` is replaced as a whole, so dev is listed again (with its access flag).
+# prod has no `access`: it is public (false when omitted).
 envs = {
   dev = {
     host          = "learn.dev.palicanon.app"
     max_instances = 2
+    access        = true
   }
   prod = {
     host          = "learn.palicanon.app"
     max_instances = 3
   }
 }
+
+# Who passes Cloudflare Access on dev. Not stored in the repository: pass
+# it as TF_VAR_admin_emails='["you@example.com"]' or uncomment it in your
+# own prod.tfvars (never commit that file).
+# admin_emails = ["you@example.com"]

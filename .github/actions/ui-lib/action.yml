@@ -1,13 +1,24 @@
 # Checks PaliCanon/ui-lib out beside this repository (`ui-lib/`), at the tag
-# app/Cargo.toml pins, guards that the checkout's version is that tag, and
-# loads the deploy key into an ssh agent for Cargo's git fetch. Used by every
-# job that builds (ci.yml, deploy.yml); this repository must already be
-# checked out in `learn-pali/`.
+# app/Cargo.toml pins, and guards that the checkout's version is that tag.
+# Used by every job that builds (ci.yml, deploy.yml); this repository must
+# already be checked out in `learn-pali/`.
+#
+# The credential is the GitHub App `palicanon-ci` (Contents: read): a token
+# minted for PaliCanon/ui-lib only, valid one hour and revoked when the job
+# ends (create-github-app-token's post step), is the checkout's `token`. It is
+# not left in `.git/config` (`persist-credentials: false`). No ssh key, no ssh
+# agent: Cargo.lock holds no git source (the patched ui-lib is a path package),
+# so cargo fetches nothing private; app/Dockerfile asserts it (its
+# `RUN ! grep -q '^source = "git+' Cargo.lock` guard) and a step below
+# fails the job, naming Cargo.lock, before anything is fetched.
 name: ui-lib at the pinned tag
 description: Check out PaliCanon/ui-lib at the tag app/Cargo.toml pins, guarded.
 inputs:
-  ssh-key:
-    description: The read-only deploy key on PaliCanon/ui-lib.
+  app-id:
+    description: The GitHub App's id (a repository secret of the caller).
+    required: true
+  private-key:
+    description: The GitHub App's private key (a repository secret of the caller).
     required: true
 runs:
   using: composite
@@ -18,18 +29,32 @@ runs:
         tag=$(sed -n 's/^palicanon-ui-lib = .*tag = "\(v[^"]*\)".*/\1/p' learn-pali/app/Cargo.toml)
         if [ -z "$tag" ]; then echo "::error::app/Cargo.toml pins no ui-lib tag"; exit 1; fi
         echo "tag=$tag" >> "$GITHUB_OUTPUT"
+    - name: Cargo.lock holds no git source
+      shell: bash
+      run: |
+        if grep -q '^source = "git+' learn-pali/Cargo.lock; then
+          echo "::error::learn-pali/Cargo.lock holds a git source: CI fetches nothing private (no ssh, the App token reads ui-lib only); patch ui-lib as a path package"
+          exit 1
+        fi
+    - name: Mint a token for ui-lib only, Contents read
+      id: app
+      uses: actions/create-github-app-token@v2
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
+        owner: PaliCanon
+        repositories: ui-lib
+        permission-contents: read
     - uses: actions/checkout@v7
       with:
         repository: PaliCanon/ui-lib
         path: ui-lib
         ref: ${{ steps.pin.outputs.tag }}
-        ssh-key: ${{ inputs.ssh-key }}
+        token: ${{ steps.app.outputs.token }}
+        persist-credentials: false
     - shell: bash
       run: |
         version=$(sed -n 's/^version = "\(.*\)"/\1/p' ui-lib/Cargo.toml | head -1)
         if [ "v$version" != "${{ steps.pin.outputs.tag }}" ]; then
           echo "::error::ui-lib ${{ steps.pin.outputs.tag }} says version $version"; exit 1
         fi
-    - uses: webfactory/ssh-agent@v0.9.0
-      with:
-        ssh-private-key: ${{ inputs.ssh-key }}

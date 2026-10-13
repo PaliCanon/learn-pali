@@ -13,9 +13,11 @@
 # `../../../ui-lib/style/theme.css`) and `app/build.rs` (`#[path]` to
 # `../../ui-lib/build/placeholders.rs`) all reach `../ui-lib`. ui-lib is
 # checked out at the tag app/Cargo.toml pins, through the composite action,
-# guarded to match its version. The secret `UI_LIB_DEPLOY_KEY` is a read-only
-# deploy key on ui-lib (its private half lives here, as a repository secret),
-# used by the clone and by the ssh agent cargo fetches through.
+# guarded to match its version. The credential is the GitHub App `palicanon-ci`
+# (Contents: read): the action mints a one-hour token for ui-lib only from the
+# repository secrets APP_ID and APP_PRIVATE_KEY and checks out with it. No ssh
+# key, no ssh agent: Cargo.lock holds no git source, cargo fetches nothing
+# private.
 # Cargo steps run in `learn-pali/` (`defaults.run`).
 name: CI
 
@@ -41,7 +43,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -67,7 +70,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -83,7 +87,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p learn_pali --features ssr
       - run: cargo test --locked -p learn_core -p learn_cli -p build_deck
@@ -99,7 +104,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo doc --locked --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 
@@ -112,7 +118,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@1.88
       # --locked: the committed Cargo.lock is what the MSRV claim is verified
       # against; a fresh resolution could pull a dependency with a higher MSRV.
@@ -128,15 +135,12 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
-      # The action runs in a container: it takes the key itself (and GitHub's
-      # ed25519 host key, from https://api.github.com/meta) instead of the
-      # runner's ssh agent. The manifest path is relative to the workspace root.
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      # No ssh: the lock holds no git source, cargo-deny fetches nothing private.
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: learn-pali/Cargo.toml
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
-          ssh-known-hosts: github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
           command: check advisories bans sources licenses
 
   coverage:
@@ -148,7 +152,8 @@ jobs:
           path: learn-pali
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview

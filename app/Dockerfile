@@ -8,12 +8,15 @@
 # `../../../ui-lib/style/theme.css`) and `app/build.rs` (`#[path]` to
 # `../../ui-lib/build/placeholders.rs`). So, from that folder:
 #
-#   docker build -f learn-pali/app/Dockerfile --ssh default .
+#   docker build -f learn-pali/app/Dockerfile .
 #
-# `--ssh default` forwards an ssh agent holding the read-only deploy key on
-# PaliCanon/ui-lib: ui-lib is a private repository and also a git
-# dependency, so Cargo fetches it even though the patch replaces it. The key
-# is never written to a layer (`RUN --mount=type=ssh`).
+# NO CREDENTIAL IS NEEDED TO BUILD (task 031, as search-front 007). ui-lib is
+# a private git dependency, but the workspace's `[patch]` replaces it with the
+# sibling checkout COPYed below and `Cargo.lock` records it as a path package:
+# the lock holds no git source, so Cargo fetches nothing from GitHub. The
+# credential for the checkout lives in CI only; it is never an argument, a
+# mount or a layer here. A RUN below fails the build if the lock ever gains a
+# git source, instead of letting the build ask for a credential.
 #
 # There is no .dockerignore (it would live in the parent folder, outside this
 # repository); every COPY below names what it takes instead.
@@ -42,10 +45,6 @@ RUN WB=$(awk '/^name = "wasm-bindgen"$/ {getline; gsub(/[^0-9.]/, ""); print; ex
 
 # ---------------------------------------------------------------- builder
 FROM tools AS builder
-ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
-# GitHub's ed25519 host key (https://api.github.com/meta), as ci.yml pins it.
-RUN mkdir -p /root/.ssh \
-    && echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" > /root/.ssh/known_hosts
 WORKDIR /src
 # ui-lib: what the workspace reads (manifest, build script, locales, theme,
 # sources; README.md because a source `include_str!`s it). No .git.
@@ -69,8 +68,10 @@ COPY learn-pali/tools ./learn-pali/tools
 ARG LEARN_PALI_GIT_BRANCH=unknown
 ARG LEARN_PALI_GIT_COMMIT=unknown
 WORKDIR /src/learn-pali
-RUN --mount=type=ssh \
-    cargo leptos build --release --cargo-locked \
+# The build needs no credential only while the lock holds no git source.
+RUN ! grep -q '^source = "git+' Cargo.lock \
+    || { echo "Cargo.lock holds a git source: the build would need a GitHub credential (task 031)"; exit 1; }
+RUN cargo leptos build --release --cargo-locked \
     && mkdir /out \
     && cp target/release/learn_pali target/release/hash.txt /out/ \
     && cp -r target/site /out/site
@@ -94,17 +95,24 @@ ENV LEPTOS_OUTPUT_NAME=learn-pali \
     RUST_LOG=info \
     PORT=8080
 USER app
-# Smoke test: starts the server as the image will run it and asks it what
-# the rollout will ask (deploy.yml): `/` is 200 and names PaliLearn, the
-# hashed .wasm it references is served, `/review` is gone (404). A broken
-# build or a missing hash file fails here, not on Cloud Run. Plain bash
-# (/dev/tcp): the image has no curl and gains none.
+# Smoke test: starts the server as the image will run it, with a throwaway
+# origin secret made here (valid for this run only, never the real one), and
+# asks it what the rollout will ask (deploy.yml): `/` is 200 and names
+# PaliLearn, the hashed .wasm it references is served, `/review` is gone
+# (404), and a request without the header is 403 with an EMPTY body (the
+# guard's refusal; LEPTOS_ENV=PROD makes the service refuse to start without
+# ORIGIN_SECRET). A broken build or a missing
+# hash file fails here, not on Cloud Run. Plain bash (/dev/tcp): the image has
+# no curl and gains none.
 RUN <<'EOF'
 #!/bin/bash
 set -eu
-get() { exec 3<>"/dev/tcp/127.0.0.1/8080"; printf 'GET %s HTTP/1.0\r\nHost: smoke\r\n\r\n' "$1" >&3; cat <&3; }
+secret=$(head -c 24 /dev/urandom | od -An -tx1 | tr -d ' \n')
+req() { exec 3<>"/dev/tcp/127.0.0.1/8080"; printf 'GET %s HTTP/1.0\r\nHost: smoke\r\n%s' "$1" "$2" >&3; cat <&3; }
+get() { req "$1" "x-origin-auth: $secret"$'\r\n\r\n'; }
+anon() { req "$1" $'\r\n'; }
 status() { (get "$1") | { read -r _ code _; echo "$code"; }; }
-./learn_pali &
+ORIGIN_SECRET="$secret" ./learn_pali &
 pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
 page=""
@@ -119,6 +127,11 @@ wasm=$(printf '%s' "$page" | grep -o '/pkg/[A-Za-z0-9_.-]*\.wasm' | head -1)
 test -n "$wasm" || { echo "smoke: / references no .wasm"; exit 1; }
 test "$(status "$wasm")" = 200 || { echo "smoke: $wasm is not served"; exit 1; }
 test "$(status /review)" = 404 || { echo "smoke: /review is not 404"; exit 1; }
+# The trailing x keeps the command substitution from eating the final newlines.
+refusal=$(anon /; printf x)
+refusal=${refusal%x}
+test "$(printf '%s' "$refusal" | { read -r _ code _; echo "$code"; })" = 403 || { echo "smoke: a request without the header is not 403"; exit 1; }
+test -z "${refusal#*$'\r\n\r\n'}" || { echo "smoke: the 403 without the header has a body (the guard's refusal is empty)"; exit 1; }
 echo "smoke: ok ($wasm)"
 EOF
 EXPOSE 8080

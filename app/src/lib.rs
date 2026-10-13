@@ -17,6 +17,8 @@ mod catalogue;
 mod components;
 mod deck;
 mod learn;
+#[cfg(feature = "ssr")]
+pub mod origin;
 mod pages;
 mod seed;
 mod store;

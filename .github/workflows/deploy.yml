@@ -2,16 +2,22 @@ name: deploy
 
 # Push to main → dev (learn-pali-dev); tag v* → prod (learn-pali-prod).
 # The image is content-addressed: built only when its inputs changed, rolled
-# out with no traffic first, checked, then served. The model is the API's
-# deploy.yml; this file only runs once the repository variables below are set
-# (README.md, "Deploy"): until then a push to main fails at the first step
-# that needs them, touching nothing.
+# out with no traffic first, checked through the revision's tagged URL with
+# the origin header, given the traffic, then checked again: the bare Cloud Run
+# URL must refuse a call without the header (else the traffic goes back to the
+# revision that served before), and the public host must answer the Cloudflare
+# Access login (dev). The model is search-front's deploy.yml; this file only
+# runs once the repository variables below are set (README.md, "Deploy"):
+# until then a push to main fails at the first step that needs them, touching
+# nothing.
 #
 # Repository variables (not secrets, no value here):
 #   WIF_PROVIDER, DEPLOYER_SA, GCP_PROJECT — the workload identity of the
 #   `github-deployer` service account (platform / the site's infra).
-# Repository secret: UI_LIB_DEPLOY_KEY — the read-only deploy key on
-#   PaliCanon/ui-lib that ci.yml already uses.
+# Repository secrets: APP_ID, APP_PRIVATE_KEY — the GitHub App `palicanon-ci`
+#   (Contents: read) that ci.yml already uses; the ui-lib action mints a
+#   one-hour token for PaliCanon/ui-lib from them, for the checkout only: the
+#   image build takes no credential (app/Dockerfile).
 
 on:
   push:
@@ -28,7 +34,9 @@ permissions:
 
 env:
   ENV: ${{ startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  HOST: ${{ startsWith(github.ref, 'refs/tags/') && 'learn.palicanon.app' || 'learn.dev.palicanon.app' }}
   REGION: europe-west1
+  PROJECT: ${{ vars.GCP_PROJECT }}
 
 # Two checkouts side by side, as in ci.yml: the build reaches `../ui-lib`
 # (the workspace's [patch], main.css, build.rs). ui-lib is checked out at
@@ -49,11 +57,11 @@ jobs:
         with:
           path: learn-pali
           persist-credentials: false
-      # The same key, in an ssh agent, for the build: Cargo fetches the
-      # private ui-lib git dependency inside Docker (`--ssh default`).
+      # ui-lib, checked out beside this repository with a GitHub App token.
       - uses: ./learn-pali/.github/actions/ui-lib
         with:
-          ssh-key: ${{ secrets.UI_LIB_DEPLOY_KEY }}
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
 
       - uses: google-github-actions/auth@v2
         with:
@@ -102,7 +110,8 @@ jobs:
           file: learn-pali/app/Dockerfile
           # `working-directory` does not apply to `uses:` steps: the context
           # is the workspace root, the folder holding learn-pali/ and ui-lib/.
-          ssh: default=${{ env.SSH_AUTH_SOCK }}
+          # No `ssh:`, no `secrets:`: the build takes no credential (ui-lib
+          # is COPYed and the lock holds no git source).
           push: true
           # The badge's branch and commit: the image has no .git. A tag
           # build passes the tag name as the branch.
@@ -115,49 +124,207 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Roll out without traffic, check, then serve
+      # 1. What runs is the revision that SERVES the traffic, not the service's
+      #    template: after a rollout that built a revision and never moved the
+      #    traffic (a failed check, a cancelled job) the template already holds
+      #    the new image while the old revision still serves. That revision is
+      #    PREV, where a failed public check puts the traffic back; on the
+      #    first deploy it is the revision tofu bootstrapped, so a target
+      #    always exists. The 100% entry of a service that follows the latest
+      #    revision (what tofu creates) names none: then the latest ready one.
+      #    No revision at 100% (a split, a hand-made canary) fails, named: a
+      #    split is never this pipeline's state, and guessing PREV is worse.
+      - name: Is that image already running?
+        id: current
+        env:
+          IMAGE_HASH: ${{ steps.vars.outputs.image_hash }}
         run: |
           set -euo pipefail
-          SERVICE=learn-pali-${{ env.ENV }}
-          PROJECT="${{ vars.GCP_PROJECT }}"
-          IMAGE="${{ steps.vars.outputs.image_hash }}"
-          CURRENT=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
-            --format='value(spec.template.spec.containers[0].image)')
-          if [ "$CURRENT" = "$IMAGE" ]; then
-            echo "learn-pali: $SERVICE already runs $IMAGE, nothing to deploy"
-            exit 0
+          SERVICE="learn-pali-$ENV"
+          DESCRIBED=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json) || DESCRIBED=""
+          SERVING=$(printf '%s' "$DESCRIBED" \
+            | jq -r '([.status.traffic[]? | select(.percent == 100)] | first) as $e
+              | if $e == null then empty
+                elif ($e.revisionName // "") != "" then $e.revisionName
+                else (.status.latestReadyRevisionName // "") end') || SERVING=""
+          if [ -z "$SERVING" ]; then
+            SPLIT=$(printf '%s' "$DESCRIBED" \
+              | jq -r '[.status.traffic[]? | select((.percent // 0) > 0) | "\(.revisionName // "latest")=\(.percent)%"] | join(", ")') || SPLIT=""
+            if [ -n "$SPLIT" ]; then
+              echo "::error::traffic is split: $SPLIT; no revision holds 100% of $SERVICE, so the rollback would have nowhere to go (put 100% on one revision by hand)"
+            else
+              echo "::error::no revision serves $SERVICE: the rollback would have nowhere to go"
+            fi
+            exit 1
           fi
+          CURRENT=$(gcloud run revisions describe "$SERVING" --project "$PROJECT" --region "$REGION" \
+            --format='value(spec.containers[0].image)')
+          echo "serving=$SERVING" >> "$GITHUB_OUTPUT"
+          if [ "$CURRENT" = "$IMAGE_HASH" ]; then
+            echo "running=true" >> "$GITHUB_OUTPUT"
+            echo "learn-pali: $SERVICE already serves $IMAGE_HASH (revision $SERVING), nothing to deploy"
+          else
+            echo "running=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 2. A revision under a tag, with no traffic. One that never becomes
+      #    ready (the usual cause: the origin secret has no version, so the
+      #    container cannot start) fails here with the traffic untouched. Its
+      #    name is read right after, checked to be the one that carries the
+      #    tag, and handed to step 5: the traffic goes to THAT revision, not
+      #    to whatever is newest by then.
+      - name: Deploy the revision without traffic
+        id: deploy
+        if: steps.current.outputs.running != 'true'
+        env:
+          IMAGE_HASH: ${{ steps.vars.outputs.image_hash }}
+        run: |
+          set -euo pipefail
+          SERVICE="learn-pali-$ENV"
           TAG="sha-${GITHUB_SHA::7}"
-          gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE" \
-            --no-traffic --tag "$TAG" --quiet
-          URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json \
-            | jq -r --arg t "$TAG" '[.status.traffic[] | select(.tag == $t) | .url] | .[0] // empty')
-          test -n "$URL" || { echo "no URL for the revision tag $TAG on $SERVICE"; exit 1; }
+          gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE_HASH" \
+            --no-traffic --tag "$TAG" --quiet \
+            || { echo "::error::the revision of $SERVICE did not become ready (secret has no version? run infra/scripts/origin-secret create $ENV); the traffic is untouched"; exit 1; }
+          DESCRIBED=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json)
+          URL=$(printf '%s' "$DESCRIBED" | jq -r --arg t "$TAG" '[.status.traffic[] | select(.tag == $t) | .url] | .[0] // empty')
+          test -n "$URL" || { echo "::error::no URL for the revision tag $TAG on $SERVICE"; exit 1; }
+          REVISION=$(printf '%s' "$DESCRIBED" | jq -r '.status.latestCreatedRevisionName // empty')
+          TAGGED=$(printf '%s' "$DESCRIBED" | jq -r --arg t "$TAG" '[.status.traffic[] | select(.tag == $t) | .revisionName] | .[0] // empty')
+          if [ -z "$REVISION" ] || [ "$REVISION" != "$TAGGED" ]; then
+            echo "::error::the newest revision of $SERVICE (${REVISION:-none}) is not the one that carries the tag $TAG (${TAGGED:-none}): another deploy ran meanwhile; the traffic is untouched"
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "revision=$REVISION" >> "$GITHUB_OUTPUT"
 
-          # 1. `/` answers 200 and is the page. The body goes to a file, not a
-          #    pipe: `curl | grep -q` fails under pipefail when grep quits early.
-          curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 3 \
-            "$URL/" --output "$RUNNER_TEMP/home.html"
-          grep -q PaliLearn "$RUNNER_TEMP/home.html" \
-            || { echo "/ does not name PaliLearn"; exit 1; }
+      # 3. The origin secret, in its OWN step: piped from gcloud straight into
+      #    a 0600 file holding the curl header line (`rollout-check.sh` hands
+      #    it to curl as `-H @file`). It is never a shell variable, an
+      #    argument, an output or an env value; the file is read from disk
+      #    only and removed at the end of the job. It is masked before any
+      #    later step can print it, and no step runs with `set -x`.
+      - name: Read the origin secret into a header file
+        id: secret
+        if: steps.current.outputs.running != 'true'
+        run: |
+          set -euo pipefail
+          umask 077
+          HEADER_FILE="$RUNNER_TEMP/origin-header"
+          ERR="$RUNNER_TEMP/origin-header.err"
+          rm -f "$HEADER_FILE"
+          if ! gcloud secrets versions access latest --secret "learn-pali-origin-secret-$ENV" --project "$PROJECT" \
+            2> "$ERR" | awk '{ print "x-origin-auth: " $0 }' > "$HEADER_FILE"; then
+            rm -f "$HEADER_FILE"
+            if grep -q PERMISSION_DENIED "$ERR"; then
+              echo "::error::the deployer lacks secretAccessor on learn-pali-origin-secret-$ENV (infra: the role on the secret)"
+            else
+              echo "::error::could not read learn-pali-origin-secret-$ENV: $(head -c 300 "$ERR")"
+            fi
+            rm -f "$ERR"
+            exit 1
+          fi
+          rm -f "$ERR"
+          if [ ! -s "$HEADER_FILE" ]; then
+            rm -f "$HEADER_FILE"
+            echo "::error::learn-pali-origin-secret-$ENV has no value (infra/README.md: origin-secret create $ENV)"
+            exit 1
+          fi
+          # The mask line is the only place the value is printed.
+          sed -n 's/^x-origin-auth: /::add-mask::/p' "$HEADER_FILE"
 
-          # 2. The hashed .wasm that `/` references is served: a missing
-          #    hash file or site root would leave the page up and the
-          #    hydration dead (the page renders, nothing is interactive).
-          WASM=$(grep -o '/pkg/[A-Za-z0-9_.-]*\.wasm' "$RUNNER_TEMP/home.html" | head -n 1)
-          test -n "$WASM" || { echo "/ references no .wasm"; exit 1; }
-          curl --fail --silent --show-error --retry 3 --retry-all-errors \
-            "$URL$WASM" --output /dev/null
+      # 4. The tagged revision, before it has any traffic: the page, the
+      #    .wasm, no token shape in it, and the guard (no header, or a wrong
+      #    one: 403 with an empty body). A failure leaves the traffic alone.
+      - name: Check the revision
+        id: check
+        if: steps.current.outputs.running != 'true'
+        env:
+          URL: ${{ steps.deploy.outputs.url }}
+        run: |
+          set -euo pipefail
+          HEADER_FILE="$RUNNER_TEMP/origin-header"
+          scripts/rollout-check.sh revision "$URL" "$HEADER_FILE" \
+            || { echo "::error::the revision at its tagged URL failed rollout-check.sh; the traffic is untouched"; exit 1; }
 
-          # 3. /review is gone (the review runs in place on the home).
-          CODE=$(curl --silent --output /dev/null --write-out '%{http_code}' "$URL/review")
-          test "$CODE" = "404" || { echo "expected 404 on /review, got $CODE"; exit 1; }
+      # 5. The traffic, to the revision step 2 created and step 4 checked,
+      #    by name: a revision made meanwhile (tofu, a hand deploy) gets none.
+      - name: Move the traffic to the revision
+        id: traffic
+        if: steps.current.outputs.running != 'true'
+        env:
+          IMAGE_HASH: ${{ steps.vars.outputs.image_hash }}
+          REVISION: ${{ steps.deploy.outputs.revision }}
+        run: |
+          set -euo pipefail
+          SERVICE="learn-pali-$ENV"
+          test -n "$REVISION" || { echo "::error::step 2 named no revision: the traffic is untouched"; exit 1; }
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" \
+            --to-revisions="$REVISION=100" --quiet
+          echo "learn-pali: $SERVICE now serves $IMAGE_HASH (revision $REVISION)"
 
-          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" --to-latest --quiet
-          echo "learn-pali: $SERVICE now serves $IMAGE"
-
-          # The service's own URL, now that it carries the traffic.
+      # 6a. The bare Cloud Run URL, as anyone who learned it would call it:
+      #     it must refuse (403) with no header and with a wrong one. If it
+      #     answers, the traffic goes back to PREV and the job fails; when the
+      #     rollback itself does not restore PREV the job exits 5.
+      - name: Check that the bare origin refuses
+        id: refused
+        env:
+          # The revision that served before this run, and whether this run
+          # moved the traffic at all (nothing to undo when the image was
+          # already served).
+          PREVIOUS: ${{ steps.current.outputs.serving }}
+          MOVED: ${{ steps.current.outputs.running != 'true' }}
+        run: |
+          set -euo pipefail
+          SERVICE="learn-pali-$ENV"
           SERVICE_URL=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" \
             --format='value(status.url)')
-          curl --fail --silent --show-error --retry 3 --retry-all-errors \
-            "$SERVICE_URL/" --output /dev/null
+          RC=0
+          scripts/rollout-check.sh --refused "$SERVICE_URL" || RC=$?
+          if [ "$RC" = 0 ]; then
+            echo "learn-pali: $SERVICE_URL refuses a direct call"
+            exit 0
+          fi
+          echo "::error::the bare origin $SERVICE_URL answers a call without the origin header (rollout-check.sh --refused: exit $RC)"
+          if [ "$MOVED" != true ] || [ -z "$PREVIOUS" ]; then
+            echo "learn-pali: this run moved no traffic, nothing to put back"
+            exit 1
+          fi
+          # The rollback may itself fail; that must not end the step with
+          # gcloud's code in place of the check's, so it only reports. Then
+          # the traffic is read back: PREV must serve 100%, else exit 5.
+          gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" \
+            --to-revisions="$PREVIOUS=100" --quiet \
+            || echo "::error::rollback to $PREVIOUS failed"
+          NOW=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json \
+            | jq -r '([.status.traffic[]? | select(.percent == 100)] | first) | .revisionName // empty') || NOW=""
+          if [ "$NOW" != "$PREVIOUS" ]; then
+            echo "::error::rollback did not restore $PREVIOUS"
+            exit 5
+          fi
+          echo "::error::learn-pali: traffic of $SERVICE moved back to $PREVIOUS"
+          exit 1
+
+      # 6b. The public host, dev only (prod is public, with no Access in
+      #     front): it must answer the Cloudflare Access login. Never a
+      #     rollback: a missing Access policy or a down edge is not the
+      #     revision's fault. 0 ok; 2 Access is missing; 3 Cloudflare
+      #     challenged the runner (a warning: nothing was learned); 4 any
+      #     other answer or a timeout.
+      - name: Check that the host asks for the Access login
+        id: host
+        if: env.ENV == 'dev'
+        run: |
+          set -euo pipefail
+          RC=0
+          scripts/rollout-check.sh --access "https://$HOST" || RC=$?
+          case "$RC" in
+            0) echo "learn-pali: https://$HOST asks for the Access login" ;;
+            2) echo "::error::https://$HOST answered 200 without a login: Cloudflare Access is missing in front of the host (infra/cloudflare.tf); traffic left as is"; exit 2 ;;
+            3) echo "::warning::Cloudflare challenged the runner on https://$HOST/: the host check did not run" ;;
+            *) echo "::error::https://$HOST did not answer the Access redirect (rollout-check.sh --access: exit $RC); traffic left as is"; exit "$RC" ;;
+          esac
+
+      - name: Remove the origin header file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/origin-header" "$RUNNER_TEMP/origin-header.err"

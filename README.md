@@ -139,6 +139,14 @@ export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PAT
 cargo leptos watch
 ```
 
+A local run is open: `ORIGIN_SECRET` unset means no check, and the boot line
+says `origin: open (local)`. A deployed build (Cloud Run's `K_SERVICE` set, or
+`LEPTOS_ENV` prod, as the image sets it) needs `ORIGIN_SECRET` and refuses to
+start without it; a blank value is an error even locally. It then answers only
+the requests that carry that value in `x-origin-auth` (the Cloudflare Worker
+adds it), with a 403 and an empty body for every other one (`app/src/origin.rs`).
+The secret is in no log line and no message.
+
 It depends on `palicanon-ui-lib` by git (`branch = "main"`), with a local
 `[patch]` to `../ui-lib` (a worktree reaches it through the `wt/ui-lib`
 symlink) — a change spanning both repositories is seen at once. `ui-lib`'s
@@ -179,9 +187,9 @@ CI or pushed.
 
 - `app/Dockerfile` builds the server and the site in one image (`cargo leptos
   build --release`, then `debian:bookworm-slim`, a non-root user, port 8080).
-  Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, with
-  an ssh agent for the private ui-lib: the command is in the file's header. It
-  ends with a smoke test: the server starts and answers.
+  Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, and
+  takes no credential (ui-lib is COPYed): the command is in the file's header.
+  It ends with a smoke test: the server starts and answers.
 - `infra/` is the Cloud Run service, its service account and the Cloudflare
   Worker and route per environment, in their own tofu state; see
   `infra/README.md`.
@@ -200,7 +208,8 @@ Before the first deploy, the user:
    route. Prod comes later (step 4).
 2. The repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
    `GCP_PROJECT` are set (2026-10-09, the API's values, read from
-   `PaliCanon/api`); the secret `UI_LIB_DEPLOY_KEY` is already there for CI.
+   `PaliCanon/api`); the secrets `APP_ID` and `APP_PRIVATE_KEY` (the GitHub App
+   `palicanon-ci`, which checks ui-lib out) are what CI and the deploy need.
    The deployer holds `roles/run.developer` and Artifact Registry writer
    (checked). The repository is allowed to use the deploy identity (the site's
    `github_repos`, applied 2026-10-09; `infra/README.md`).

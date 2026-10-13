@@ -30,19 +30,41 @@ variable "cloudflare_account_id" {
 # prod host before dev has deployed and been checked from CI. Prod is added
 # afterwards, with `-var-file` or by uncommenting the block below (README,
 # "Order"), then a second apply.
+#
+# `access` puts the host behind Cloudflare Access (cloudflare.tf): true for
+# dev (user, 2026-10-12: dev behind Cloudflare with auth), false when omitted,
+# so prod stays public until it is decided otherwise.
 variable "envs" {
   type = map(object({
     host          = string
     max_instances = number
+    access        = optional(bool, false)
   }))
   default = {
     dev = {
       host          = "learn.dev.palicanon.app"
       max_instances = 2
+      access        = true
     }
     # prod = {
     #   host          = "learn.palicanon.app"
     #   max_instances = 3
     # }
+  }
+}
+
+# Who passes Cloudflare Access on the hosts that set `access`. An email
+# address is not a secret, but it is not written here either: pass it as
+# `TF_VAR_admin_emails='["you@example.com"]'` or in a git-ignored tfvars
+# file (README, "Only the user, in order"; prod.tfvars.example shows the
+# shape). No default on purpose: an apply without it fails instead of
+# opening the dev host to nobody or to anyone.
+variable "admin_emails" {
+  description = "Email addresses allowed through Cloudflare Access on the hosts with access = true."
+  type        = list(string)
+
+  validation {
+    condition     = length(var.admin_emails) > 0 && alltrue([for e in var.admin_emails : can(regex("^[^@\\s]+@[^@\\s]+$", e))])
+    error_message = "admin_emails must hold at least one address (name@domain)."
   }
 }
