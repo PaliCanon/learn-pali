@@ -1,6 +1,6 @@
 # 033 cargo deny passes again: unsafe-libyaml unmaintained
 
-status: building · rank: 1 · level: simple · type: fix · request: found by the orchestrator during 031's verify, 2026-10-13 · light path
+status: merged · rank: 1 · level: simple · type: fix · request: found by the orchestrator during 031's verify, 2026-10-13 · light path
 
 ## Summary
 Rank: difficulty 1 (one entry in deny.toml), impact 2 (cargo deny, a CI job, fails on main) → 1.
@@ -11,3 +11,7 @@ RUSTSEC-2024-0449 (published as unmaintained: the repository dtolnay/unsafe-liby
 | --- | --- | --- |
 | Build | done | d8e9a40; red: RUSTSEC-2024-0449; green: advisories ok, bans ok, licenses ok, sources ok |
 | Check | done | orchestrator: one deny.toml entry, its reason and drop condition read; cargo deny check ok per the lane. No visible result |
+| Merge | done | e71597f on main (not pushed) |
+
+## Retro
+One line (light path): an advisory published between two runs turns a green cargo deny red with no change of ours; the CI job catches it on the next push, nothing to change.
