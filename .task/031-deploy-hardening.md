@@ -13,7 +13,7 @@ Only the user (in order): the Cloudflare token in the keychain; the ui-lib crede
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v4 validated"]:::done --> Plan["Plan ✓ 3 slices"]:::done --> Build["Build ✓ G I R"]:::done --> Verify["Verify ✓ all checks"]:::done --> Review["Review ✓ 3 rounds + slice A"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ v4 validated"]:::done --> Plan["Plan ✓ 3 slices"]:::done --> Build["Build ✓ G I R"]:::done --> Verify["Verify ✓ all checks"]:::done --> Review["Review ✓ 3 rounds + slice A"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ 6e89629"]:::done --> Retro:::doing
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -37,6 +37,7 @@ flowchart LR
 | Fix slice A review | done | lane:a2 26103a0 (A1 permission-contents: read, A2 the Dockerfile guard named, A3 the lock guard step), red 8 → green 473/0 (#5767) |
 | Verify (final) | done | branch rebased on main 67c3439, tip 89bcae1; on wt/031-verify (learn-pali 89bcae1 beside ui-lib detached at v0.1.0 90378bb): fmt, leptosfmt, clippy ssr/hydrate/native, learn_pali 339+9+6, core 5, doc, deny (advisories ok, bans ok, licenses ok, sources ok), cargo leptos build --release, Worker 12, origin-secret 91/0, rollout-check 473/0, tofu fmt + validate, YAML — all 0. Not run here: docker, actionlint, shellcheck (absent): the image and the workflows first run on GitHub |
 | Check | done | orchestrator, tip 89bcae1 + ui-lib 90378bb: no visible result (infra, CI, a server guard) — checked by the orchestrator: every case table row has its test, every taken-in ruling of rounds 1–3 and slice A is in the code, the last-round gaps R3-T2/R3-T4 fixed by tests (user not answering, done as announced) |
+| Merge | done | 6e89629 on main (squash of feat/deploy-hardening; not pushed: a push deploys dev, after the user's steps u1–u4) |
 
 ## Design
 Viewer: learn-pali-031-deploy-hardening/design (d864b85b0d2454c), v7 — v4 validated by the user 2026-10-12 ("ok valide"); v5/v6 = review rulings (wording); v7 = the user's credential choice, the GitHub App (2026-10-13).
@@ -182,3 +183,4 @@ Reviewer graph: review d695db933549d4c v1; voices summoned #5533. Deep answered 
 | T5 | two headers on the tagged URL in `revision` mode | taken in | a `twice` probe in rollout-check `revision` mode: 403 |
 
 ## Merge
+6e89629 on main, 2026-10-13.
