@@ -11,7 +11,7 @@ State of the infra (applied 2026-10-13): secret learn-pali-origin-secret-dev (ve
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ user's instruction"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ coverage 96.74 %"]:::done --> Review["Review ✓ 3 rounds"]:::done --> Check["Check ✓"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ user's instruction"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ coverage 96.74 %"]:::done --> Review["Review ✓ 3 rounds"]:::done --> Check["Check ✓"]:::done --> Merge["Merge ✓ c6fef52"]:::done --> Retro:::todo
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -31,6 +31,7 @@ flowchart LR
 | Review round 3 | done | deep #5928: 302 closed; G1, G2, G4 taken in by the user, G3 ruled out (explained), G5 from #5918 |
 | Fix round 3 | done | lane:fix3 5ca4d59: any 30x to Access → 7, a missing/empty/unreadable pattern → 64 before any request, the wasm's own head read, comments indented, serve() comment (87; the new cases make ~100 now, noted); red 14 failed + a mutation for G2 → 838/0 three runs |
 | Check | done | orchestrator, tip 5ca4d59 + ui-lib 90378bb: rollout-check 838/0 twice, origin-secret 107/0, Worker, YAML, tofu fmt/validate; no Rust changed since Verify (cargo matrix and coverage 96.74 % stand). The live dev host answered through the Worker and `origin-secret check dev` OK (infra applied from this branch). No visible result beyond that: checked by the orchestrator |
+| Merge | done | c6fef52 on main, 2026-10-13 |
 
 ## Design
 Viewer: learn-pali-034-dev-public/design (d94e339a9c72d45), v1, validated by the user's instruction 2026-10-13.
@@ -88,3 +89,4 @@ Posted by the orchestrator (small fix diff; the user asked for the dev quickly):
 | R1 | README point 3 still says the Cloud Run origin is reachable directly (lane:dev-public-docs) | taken in — false since 031's guard | README.md: the origin answers only the Worker (403 otherwise) |
 
 ## Merge
+c6fef52 on main, 2026-10-13.
