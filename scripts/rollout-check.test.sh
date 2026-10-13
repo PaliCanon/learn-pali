@@ -568,6 +568,20 @@ run_smoke body403
 assert_eq "smoke: a 403 with a body fails" "1" "$rc"
 assert_match "smoke: and says the 403 has a body" "smoke: .*403.*body" "$out"
 
+# -------------------------------------------------------------------- infra/gcp.tf
+echo "== infra/gcp.tf: startup probe"
+gcp_file="$root/infra/gcp.tf"
+startup_block=$(grep -A20 'startup_probe {' "$gcp_file" | head -15)
+timeout=$(echo "$startup_block" | grep 'timeout_seconds' | sed 's/.*timeout_seconds[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/')
+period=$(echo "$startup_block" | grep 'period_seconds' | sed 's/.*period_seconds[[:space:]]*=[[:space:]]*\([0-9]*\).*/\1/')
+if [ -z "$timeout" ] || [ -z "$period" ]; then
+  flunk "startup probe: could not parse timeout_seconds or period_seconds"
+elif [ "$timeout" -lt "$period" ]; then
+  pass "startup probe: timeout_seconds ($timeout) < period_seconds ($period)"
+else
+  flunk "startup probe: timeout_seconds ($timeout) must be < period_seconds ($period)"
+fi
+
 # -------------------------------------------------------------------- deploy.yml
 echo "== deploy.yml"
 if python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "$workflow" 2>"$work/yaml.err"; then
@@ -624,7 +638,7 @@ for id in current deploy secret check traffic refused host; do
   assert_file_lacks "deploy.yml: '$id' has no \${{ }} in its script" "$work/step-$id.sh" '\$\{\{'
   assert_file_lacks "deploy.yml: '$id' never runs set -x" "$work/step-$id.sh" 'set -[a-z]*x'
 done
-assert_file_has "deploy.yml: the message names 'secret has no version?'" "$work/step-deploy.sh" 'secret has no version\?'
+assert_file_has "deploy.yml: the message names the usual causes (startup probe, origin secret)" "$work/step-deploy.sh" 'read its error above.*startup probe.*origin secret'
 assert_file_has "deploy.yml: the deploy has no traffic" "$work/step-deploy.sh" '--no-traffic'
 assert_file_lacks "deploy.yml: --to-latest appears nowhere" "$workflow" '--to-latest'
 assert_file_has "deploy.yml: step 5 reads the revision step 2 created" "$workflow" 'REVISION: \$\{\{ steps\.deploy\.outputs\.revision \}\}'
@@ -845,7 +859,7 @@ touch "$STUB/deploy-fails"
 out="$(step deploy)"
 rc=$?
 assert_eq "deploy: a revision that never becomes ready fails" "1" "$rc"
-assert_match "deploy: and names the missing secret version" "secret has no version\?" "$out"
+assert_match "deploy: and names the usual causes" "gcloud could not deploy.*read its error above" "$out"
 assert_absent "deploy: and touches no traffic" "update-traffic" "$(calls)"
 
 echo "== deploy.yml: step 3 (the origin secret)"

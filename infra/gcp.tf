@@ -118,9 +118,10 @@ resource "google_cloud_run_v2_service" "app" {
           port = 8080
         }
         # The margin covers a slow image pull on a cold start.
-        period_seconds    = 2
+        # gcloud run deploy refuses a timeout not shorter than the period (the first deploy, 2026-10-13); 4 × 15 keeps the 60 s margin.
+        period_seconds    = 4
         timeout_seconds   = 3
-        failure_threshold = 30
+        failure_threshold = 15
       }
     }
   }

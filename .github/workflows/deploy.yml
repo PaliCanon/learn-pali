@@ -191,7 +191,7 @@ jobs:
           TAG="sha-${GITHUB_SHA::7}"
           gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE_HASH" \
             --no-traffic --tag "$TAG" --quiet \
-            || { echo "::error::the revision of $SERVICE did not become ready (secret has no version? run infra/scripts/origin-secret create $ENV); the traffic is untouched"; exit 1; }
+            || { echo "::error::gcloud could not deploy a ready revision of $SERVICE: read its error above (usual causes: the startup probe, or the origin secret has no version: infra/scripts/origin-secret create $ENV); the traffic is untouched"; exit 1; }
           DESCRIBED=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json)
           URL=$(printf '%s' "$DESCRIBED" | jq -r --arg t "$TAG" '[.status.traffic[] | select(.tag == $t) | .url] | .[0] // empty')
           test -n "$URL" || { echo "::error::no URL for the revision tag $TAG on $SERVICE"; exit 1; }
