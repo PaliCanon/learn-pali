@@ -104,10 +104,10 @@ Nothing here has been applied yet (tasks 021 and 031 wrote it, did not run it).
    token reads and writes the Worker's secret **and** edits Access, accepted
    for dev; scopes: zone DNS, account Workers scripts (Custom Domains
    included), Access applications and policies on the zone.
-2. **The ui-lib read credential on learn-pali** (open: the deploy key
-   `UI_LIB_DEPLOY_KEY`, if the organisation enables deploy keys, or
-   search-front's GitHub App installed on learn-pali too). Not part of
-   `infra/`.
+2. **The ui-lib read credential on learn-pali** — done 2026-10-13: the
+   GitHub App `palicanon-ci` (the organisation disables deploy keys),
+   repository secrets `APP_ID` and `APP_PRIVATE_KEY`
+   (`.github/actions/ui-lib`). Not part of `infra/`.
 3. **Log in, then the targeted apply, the secret, the full apply.** The
    Cloud Run service cannot start before the secret has a version, so the
    secret and the accounts come first:
