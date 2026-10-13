@@ -1,6 +1,6 @@
 # 034 learn-pali's dev is public behind the origin guard, like search-front's
 
-status: review · rank: 5 · level: standard · type: infra · request: user, 2026-10-13 ("regarde comment les autres ont deployer, le search par example, et fait le meme pour learn") · session: learn-pali-034-dev-public · after: [031]
+status: merged · rank: 5 · level: standard · type: infra · request: user, 2026-10-13 ("regarde comment les autres ont deployer, le search par example, et fait le meme pour learn") · session: learn-pali-034-dev-public · after: [031]
 
 ## Summary
 Re-ranked 5 at review round 2 (a second round, a medium finding). Re-ranked 4 at review round 1 (a medium finding D1, a CI gap found). Rank (rank.md): difficulty 3 (a reviewed mode ported from search-front 007, a default flipped, one workflow step, their tests), impact 3 (the dev host becomes public; the origin guard stays the protection, as on search-dev) → 3. Fast path: no new module; the user's instruction validates the design (quoted in the discussion).
@@ -11,7 +11,7 @@ State of the infra (applied 2026-10-13): secret learn-pali-origin-secret-dev (ve
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ user's instruction"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ coverage 96.74 %"]:::done --> Review["Review ✓ 3 rounds"]:::done --> Check["Check ✓"]:::done --> Merge["Merge ✓ c6fef52"]:::done --> Retro:::todo
+  Define["Define ✓ user's instruction"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ coverage 96.74 %"]:::done --> Review["Review ✓ 3 rounds"]:::done --> Check["Check ✓"]:::done --> Merge["Merge ✓ c6fef52"]:::done --> Retro["Retro ✓ 3 lessons"]:::done
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -32,6 +32,7 @@ flowchart LR
 | Fix round 3 | done | lane:fix3 5ca4d59: any 30x to Access → 7, a missing/empty/unreadable pattern → 64 before any request, the wasm's own head read, comments indented, serve() comment (87; the new cases make ~100 now, noted); red 14 failed + a mutation for G2 → 838/0 three runs |
 | Check | done | orchestrator, tip 5ca4d59 + ui-lib 90378bb: rollout-check 838/0 twice, origin-secret 107/0, Worker, YAML, tofu fmt/validate; no Rust changed since Verify (cargo matrix and coverage 96.74 % stand). The live dev host answered through the Worker and `origin-secret check dev` OK (infra applied from this branch). No visible result beyond that: checked by the orchestrator |
 | Merge | done | c6fef52 on main, 2026-10-13 |
+| Retro | done | retro #5976 (11 errors); gemini 503 on three models, deep #5983. Lessons: the-deploy-refused-what-tofu-accepted, a-closed-lane-wiped-another-lanes-work, three-test-suites-never-ran-in-ci; docs fc9df02 (verify: coverage, the refusing gate; ask-yourself common/refusing-gate), dcaaa6a (lane: one writer, counted figures), 66b7c4c (quality: every test runs in CI). The dev live after 035: learn.dev.palicanon.app 200 through the Worker, *.run.app 403 (deploy run 38432354915) |
 
 ## Design
 Viewer: learn-pali-034-dev-public/design (d94e339a9c72d45), v1, validated by the user's instruction 2026-10-13.
@@ -90,3 +91,6 @@ Posted by the orchestrator (small fix diff; the user asked for the dev quickly):
 
 ## Merge
 c6fef52 on main, 2026-10-13.
+
+## Retro
+Retro 034 validated 2026-10-13 (retro-discussion de5fb2b88893e49). Three lessons: Verify runs the coverage command against main and the gate that refuses in production (035's probe); a worktree has one writer and a closed lane writes nothing, every figure written down was counted; every test the repository holds runs in CI. Not carried as a rule: the orchestrator posting rounds 2–3 without a reviewer graph on the user's request for speed (logged in process, a one-off); applying infra from the reviewed branch before its merge (the infra part was unchanged since review round 1).
