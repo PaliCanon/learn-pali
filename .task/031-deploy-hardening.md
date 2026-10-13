@@ -1,6 +1,6 @@
 # 031 learn-pali deploy hardening — the origin answers Cloudflare only, the rollout checks it
 
-status: review · rank: 6 · level: hard · type: infra · request: user, 2026-10-12 ("commence à préparer le deployment pour learn pali") · session: learn-pali-031-deploy-hardening · process: ../../docs/workflows/development-process.mmd · after: [029, 030]
+status: merged · rank: 6 · level: hard · type: infra · request: user, 2026-10-12 ("commence à préparer le deployment pour learn pali") · session: learn-pali-031-deploy-hardening · process: ../../docs/workflows/development-process.mmd · after: [029, 030]
 
 ## Summary
 Re-ranked 6 at review round 2 (a second round; two reviewers stalled). Re-ranked 5 at review round 1 (a medium finding, F1). Rank (rank.md): difficulty 4 (a reviewed model to port: search-front 007's origin guard, Worker secret, origin-secret script, rollout checks; new here: none of learn-pali's own), impact 4 (a public host and the security rule; learn-pali holds no API token at runtime, so a bypass spends nothing but compute) → 4. Level hard: security and infra, so the main orchestrator runs it; lanes on Sonnet (rank 3–7).
@@ -13,7 +13,7 @@ Only the user (in order): the Cloudflare token in the keychain; the ui-lib crede
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v4 validated"]:::done --> Plan["Plan ✓ 3 slices"]:::done --> Build["Build ✓ G I R"]:::done --> Verify["Verify ✓ all checks"]:::done --> Review["Review ✓ 3 rounds + slice A"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ 6e89629"]:::done --> Retro:::doing
+  Define["Define ✓ v4 validated"]:::done --> Plan["Plan ✓ 3 slices"]:::done --> Build["Build ✓ G I R"]:::done --> Verify["Verify ✓ all checks"]:::done --> Review["Review ✓ 3 rounds + slice A"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ 6e89629"]:::done --> Retro["Retro ✓ 4 lessons"]:::done
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -38,6 +38,7 @@ flowchart LR
 | Verify (final) | done | branch rebased on main 67c3439, tip 89bcae1; on wt/031-verify (learn-pali 89bcae1 beside ui-lib detached at v0.1.0 90378bb): fmt, leptosfmt, clippy ssr/hydrate/native, learn_pali 339+9+6, core 5, doc, deny (advisories ok, bans ok, licenses ok, sources ok), cargo leptos build --release, Worker 12, origin-secret 91/0, rollout-check 473/0, tofu fmt + validate, YAML — all 0. Not run here: docker, actionlint, shellcheck (absent): the image and the workflows first run on GitHub |
 | Check | done | orchestrator, tip 89bcae1 + ui-lib 90378bb: no visible result (infra, CI, a server guard) — checked by the orchestrator: every case table row has its test, every taken-in ruling of rounds 1–3 and slice A is in the code, the last-round gaps R3-T2/R3-T4 fixed by tests (user not answering, done as announced) |
 | Merge | done | 6e89629 on main (squash of feat/deploy-hardening; not pushed: a push deploys dev, after the user's steps u1–u4) |
+| Retro | done | retro agent #5775 (11 errors), gemini #5778 (on retry). Orchestrator: lessons reviewers-stalled-on-one-large-graph, the-second-voice-read-the-first, the-shared-sibling-moved-under-a-pinned-service, deploy-keys-were-disabled-by-the-organisation; docs 2191715 (review.md), 620f91e (ui-lib.md), 50a2185 (security.md, ask-yourself back), ce659df (decisions) |
 
 ## Design
 Viewer: learn-pali-031-deploy-hardening/design (d864b85b0d2454c), v7 — v4 validated by the user 2026-10-12 ("ok valide"); v5/v6 = review rulings (wording); v7 = the user's credential choice, the GitHub App (2026-10-13).
@@ -184,3 +185,6 @@ Reviewer graph: review d695db933549d4c v1; voices summoned #5533. Deep answered 
 
 ## Merge
 6e89629 on main, 2026-10-13.
+
+## Retro
+Retro 031 validated 2026-10-13 (retro-discussion da728f91bc9344f). Four lessons: a reviewer works in small visible steps; each voice reviews blind to the other with its window counted (a failed answer takes a slot; a file no voice read is not reviewed); a pinned service is verified against a ui-lib worktree at its tag and cargo runs `--locked` in a main checkout; the CI credential for private siblings is asked at Define (the org disables deploy keys: the GitHub App). Not carried: the new RustSec advisory (033, nothing to change), the user not answering the last-round gaps (fixed as announced, test-only).
