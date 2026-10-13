@@ -5,11 +5,12 @@ name: deploy
 # out with no traffic first, checked through the revision's tagged URL with
 # the origin header, given the traffic, then checked again: the bare Cloud Run
 # URL must refuse a call without the header (else the traffic goes back to the
-# revision that served before), and the public host must answer the Cloudflare
-# Access login (dev). The model is search-front's deploy.yml; this file only
-# runs once the repository variables below are set (README.md, "Deploy"):
-# until then a push to main fails at the first step that needs them, touching
-# nothing.
+# revision that served before), and the public host must answer through the
+# Worker (an env without Access, which is dev and prod today; an env with
+# Access is checked for its login redirect instead; step 6b). The model is
+# search-front's deploy.yml; this file only runs once the repository
+# variables below are set (README.md, "Deploy"): until then a push to main
+# fails at the first step that needs them, touching nothing.
 #
 # Repository variables (not secrets, no value here):
 #   WIF_PROVIDER, DEPLOYER_SA, GCP_PROJECT — the workload identity of the
@@ -37,6 +38,12 @@ env:
   HOST: ${{ startsWith(github.ref, 'refs/tags/') && 'learn.palicanon.app' || 'learn.dev.palicanon.app' }}
   REGION: europe-west1
   PROJECT: ${{ vars.GCP_PROJECT }}
+  # Whether each env's host sits behind Cloudflare Access (step 6b reads the
+  # one for $ENV). It mirrors infra/variables.tf `envs.<env>.access` (the
+  # defaults, both false today: dev and prod are public behind the origin
+  # guard): change both together.
+  ACCESS_dev: "false"
+  ACCESS_prod: "false"
 
 # Two checkouts side by side, as in ci.yml: the build reaches `../ui-lib`
 # (the workspace's [patch], main.css, build.rs). ui-lib is checked out at
@@ -305,25 +312,102 @@ jobs:
           echo "::error::learn-pali: traffic of $SERVICE moved back to $PREVIOUS"
           exit 1
 
-      # 6b. The public host, dev only (prod is public, with no Access in
-      #     front): it must answer the Cloudflare Access login. Never a
-      #     rollback: a missing Access policy or a down edge is not the
-      #     revision's fault. 0 ok; 2 Access is missing; 3 Cloudflare
-      #     challenged the runner (a warning: nothing was learned); 4 any
-      #     other answer or a timeout.
-      - name: Check that the host asks for the Access login
+      # 6b. The public host, every env, through Cloudflare. An env without
+      #     Access (ACCESS_<env> false, the workflow env above; dev and prod
+      #     today, public behind the origin guard like search-front's): through
+      #     the Worker, which adds the header (this script sends none and is
+      #     given none): the page, the wasm, no token on the wire. Exit 1 is a
+      #     refusal or a failed content check: a few tries (the new revision
+      #     and the edge settle), then the traffic goes back to PREVIOUS and
+      #     the job fails. Exit 4 is the Worker itself answering 500 (it lost
+      #     its secret) and exit 6 is the edge or the Worker failing (no answer,
+      #     a Cloudflare 52x, a 403): the revision is not at fault and a
+      #     rollback cures neither, so no rollback, the job fails naming the
+      #     remedy. Exit 3 is Cloudflare challenging the runner: a warning,
+      #     nothing was learned. Exit 7 is the host answering the Access login
+      #     redirect while ACCESS_<env> is false: the three copies of the fact
+      #     (tofu, the workflow, the host) disagree; no rollback, no retry, the job
+      #     fails naming ACCESS_<env>. An env WITH Access (ACCESS_<env> true): the
+      #     host must redirect to cloudflareaccess.com (--access); 2 and 4 fail
+      #     the job named, 3 warns, and none of them rolls back: the revision
+      #     was never served to the check. When a rollback does not restore
+      #     PREVIOUS the job exits 5.
+      - name: Check the public host
         id: host
-        if: env.ENV == 'dev'
+        env:
+          PREVIOUS: ${{ steps.current.outputs.serving }}
+          MOVED: ${{ steps.current.outputs.running != 'true' }}
         run: |
           set -euo pipefail
-          RC=0
-          scripts/rollout-check.sh --access "https://$HOST" || RC=$?
-          case "$RC" in
-            0) echo "learn-pali: https://$HOST asks for the Access login" ;;
-            2) echo "::error::https://$HOST answered 200 without a login: Cloudflare Access is missing in front of the host (infra/cloudflare.tf); traffic left as is"; exit 2 ;;
-            3) echo "::warning::Cloudflare challenged the runner on https://$HOST/: the host check did not run" ;;
-            *) echo "::error::https://$HOST did not answer the Access redirect (rollout-check.sh --access: exit $RC); traffic left as is"; exit "$RC" ;;
+          SERVICE="learn-pali-$ENV"
+          ACCESS_VAR="ACCESS_$ENV"
+          HAS_ACCESS="${!ACCESS_VAR:-}"
+          case "$HAS_ACCESS" in
+            true | false) ;;
+            *)
+              echo "::error::$ACCESS_VAR must be true or false in the workflow env (got '$HAS_ACCESS'); it mirrors infra/variables.tf envs.$ENV.access"
+              exit 1
+              ;;
           esac
+          if [ "$HAS_ACCESS" = true ]; then
+            RC=0
+            scripts/rollout-check.sh --access "https://$HOST" || RC=$?
+            if [ "$RC" = 0 ]; then
+              echo "learn-pali: https://$HOST redirects to Cloudflare Access"
+            elif [ "$RC" = 3 ]; then
+              echo "::warning::Cloudflare challenged the runner on https://$HOST/: the Access check did not run"
+            elif [ "$RC" = 2 ]; then
+              echo "::error::Access is missing on https://$HOST: it answered 200 with no login ($ACCESS_VAR is true; infra: access = true). The revision is not at fault: the traffic stays"
+              exit "$RC"
+            else
+              echo "::error::https://$HOST failed rollout-check.sh --access (exit $RC); the traffic stays"
+              exit "$RC"
+            fi
+            exit 0
+          fi
+          rollback() {
+            if [ "$MOVED" != true ] || [ -z "$PREVIOUS" ]; then
+              echo "learn-pali: this run moved no traffic, nothing to put back"
+              return 0
+            fi
+            gcloud run services update-traffic "$SERVICE" --project "$PROJECT" --region "$REGION" \
+              --to-revisions="$PREVIOUS=100" --quiet \
+              || echo "::error::rollback to $PREVIOUS failed"
+            NOW=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json \
+              | jq -r '([.status.traffic[]? | select(.percent == 100)] | first) | .revisionName // empty') || NOW=""
+            if [ "$NOW" != "$PREVIOUS" ]; then
+              echo "::error::rollback did not restore $PREVIOUS"
+              exit 5
+            fi
+            echo "::error::learn-pali: traffic of $SERVICE moved back to $PREVIOUS"
+          }
+          RC=1
+          for _ in 1 2 3 4 5; do
+            RC=0
+            scripts/rollout-check.sh --via-worker "https://$HOST" || RC=$?
+            [ "$RC" = 1 ] || break
+            sleep 3
+          done
+          if [ "$RC" = 0 ]; then
+            echo "learn-pali: https://$HOST answers through the Worker"
+          elif [ "$RC" = 3 ]; then
+            echo "::warning::Cloudflare challenged the runner on https://$HOST/: the public-host check did not run"
+          elif [ "$RC" = 4 ]; then
+            echo "::error::the Worker answered 500 — run infra/scripts/origin-secret push $ENV"
+            exit "$RC"
+          elif [ "$RC" = 7 ]; then
+            echo "::error::https://$HOST/ is behind Cloudflare Access but $ACCESS_VAR is false: set $ACCESS_VAR in deploy.yml (env) to match infra/variables.tf envs.$ENV.access; the revision is not at fault, no rollback"
+            exit "$RC"
+          elif [ "$RC" = 6 ]; then
+            echo "::error::the edge or the Worker failed on https://$HOST/ (rollout-check.sh --via-worker exit 6: no answer, a Cloudflare 52x, or a 403 from a wrong Worker secret); the revision is not at fault, no rollback. Check the Worker route, then infra/scripts/origin-secret push $ENV"
+            exit "$RC"
+          else
+            echo "https://$HOST/ failed rollout-check.sh --via-worker (exit $RC: the service refused it, or a content check failed)"
+            # A refusal or a failed content check (exit 1, after the retries):
+            # put the traffic back, and fail the job.
+            if [ "$RC" = 1 ]; then rollback; fi
+            exit "$RC"
+          fi
 
       - name: Remove the origin header file
         if: always()

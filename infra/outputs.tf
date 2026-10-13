@@ -19,6 +19,6 @@ output "origin_secrets" {
 }
 
 output "access_hosts" {
-  description = "The hosts behind Cloudflare Access."
+  description = "The hosts behind Cloudflare Access: those of the envs that set access = true (none by default; dev is public behind the origin guard)."
   value       = [for k, a in cloudflare_zero_trust_access_application.app : a.domain]
 }

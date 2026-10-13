@@ -166,3 +166,32 @@ jobs:
           fail_ci_if_error: false
         env:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # The infrastructure and its scripts (034 round 1): nothing else in CI runs
+  # them. No ui-lib checkout and no Rust: OpenTofu formats and validates
+  # `infra/` (init without the backend: no credential, the providers only),
+  # node runs the Worker's tests, bash the two script suites (python3 with
+  # PyYAML, curl and jq are on the runner; the first suite also reads
+  # deploy.yml and ci.yml). OpenTofu 1.10.0: versions.tf asks 1.8 or later and
+  # the cross-variable validation in variables.tf needs 1.9.
+  infra:
+    name: infra
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.10.0
+          tofu_wrapper: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: tofu fmt -check -recursive infra
+      - run: tofu -chdir=infra init -backend=false
+      - run: tofu -chdir=infra validate
+      - run: node --test infra/worker/proxy.test.mjs
+      - run: python3 -c 'import yaml' || sudo apt-get install -y python3-yaml
+      - run: bash scripts/rollout-check.test.sh
+      - run: bash infra/scripts/origin-secret.test.sh

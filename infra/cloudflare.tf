@@ -6,10 +6,14 @@ data "cloudflare_zone" "site" {
   name = "palicanon.app"
 }
 
-# Access on the hosts that set `access` (dev; prod public later), as the
-# site's dev (palisearch infra): an application on the exact host and one
-# allow policy on var.admin_emails. Nothing but the listed identities passes;
-# there is no service token (its secret would sit in the tofu state).
+# Access on the hosts that set `access = true`: none today (user, 2026-10-13:
+# dev is public behind the origin guard, as search-front's dev; the token the
+# applies run with has no Access permission). The resources stay for a host
+# that needs them later: an application on the exact host and one allow
+# policy on var.admin_emails (required then, variables.tf). Nothing but the
+# listed identities passes; there is no service token (its secret would sit
+# in the tofu state). With no such host, `for_each` is empty and the Custom
+# Domain below depends on nothing.
 locals {
   access_envs = { for k, v in var.envs : k => v if v.access }
 }

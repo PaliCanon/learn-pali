@@ -11,11 +11,19 @@
 #       the bare service URL (*.run.app), as anyone who learned it would call
 #       it: 403 with an EMPTY body without the header and with a wrong one (a
 #       403 with a body is Google's front end, not our guard). Sends no secret.
+#   scripts/rollout-check.sh --via-worker URL
+#       the public host (dev and prod, task 034): the Worker adds the header,
+#       this script sends none (and refuses to be given the secret, as a
+#       HEADER_FILE or as ORIGIN_SECRET). Same checks as `revision` that need
+#       no secret: `root`, `wasm`, `token`.
 #   scripts/rollout-check.sh --access URL
-#       the public host with Cloudflare Access in front (dev): it must answer
-#       302 to *.cloudflareaccess.com (scripts/access-redirect-pattern, the
-#       one rule infra/scripts/origin-secret check reads too). Sends no
-#       secret and follows nothing.
+#       a public host with Cloudflare Access in front (an env that sets
+#       `access` in infra/variables.tf; none does today, deploy.yml's step 6b
+#       calls it for an env whose ACCESS_<env> is true): it must answer 302 to
+#       *.cloudflareaccess.com
+#       (scripts/access-redirect-pattern, the one rule infra/scripts/
+#       origin-secret check reads too, with ACCESS=1). Sends no secret and
+#       follows nothing.
 #
 # `revision` checks, each named in the output: `root` (/ is 200 and names
 # PaliLearn), `wasm` (the .wasm the page links is served), `token` (no token
@@ -26,6 +34,23 @@
 #
 # Exit codes
 #   revision, --refused: 0 all good; 1 a check failed (named); 64 usage.
+#   --via-worker: 0 all good; 1 a check failed (named); 3 Cloudflare answered
+#     with a challenge (cf-mitigated): the runner is not allowed, which says
+#     nothing about the service; 4 the Worker itself answered 500, whose body
+#     ends with `is not configured.` (infra/worker/proxy.js: "The origin
+#     secret is not configured."; whitespace, CR and NUL trimmed, first 512
+#     bytes): the service was not reached and the remedy is
+#     `infra/scripts/origin-secret push <env>`, not a rollback; 6 the edge or
+#     the Worker failed, which no rollback cures: no HTTP answer at all
+#     (refused, closed, TLS, timeout: curl's 000), a Cloudflare 52x (520 to
+#     527), or a 403 (through the Worker the guard refuses only when the
+#     Worker's secret is wrong: `origin-secret push <env>`); 7 the host is
+#     behind Cloudflare Access (a 301, 302, 303, 307 or 308 whose Location matches
+#     scripts/access-redirect-pattern) while the workflow's ACCESS_<env> says
+#     false: set it in deploy.yml to match infra, no rollback cures it. Any
+#     other 500, 302 or status is the service's, relayed, and is a failed
+#     check (1); 64 usage, an empty or missing scripts/access-redirect-pattern
+#     included (checked before any request).
 #   --access: 0 the Access redirect; 2 the host answered 200 (Access is
 #     missing); 3 403 with cf-mitigated (Cloudflare challenged the runner:
 #     inconclusive, says nothing about the service); 4 anything else, a
@@ -43,7 +68,7 @@ work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
 usage() {
-  echo "usage: rollout-check.sh revision URL HEADER_FILE | --refused URL | --access URL" >&2
+  echo "usage: rollout-check.sh revision URL HEADER_FILE | --refused URL | --via-worker URL | --access URL" >&2
   exit 64
 }
 
@@ -51,7 +76,7 @@ case "$max_time" in '' | *[!0-9]*) echo "rollout-check: ROLLOUT_MAX_TIME must be
 
 mode="${1:-}"
 case "$mode" in
-  revision | --refused | --access) shift ;;
+  revision | --refused | --access | --via-worker) shift ;;
   *) usage ;;
 esac
 url="${1:-}"
@@ -70,6 +95,17 @@ if [ "$mode" = revision ]; then
   fi
 elif [ "$#" -gt 1 ]; then
   echo "rollout-check: usage: this mode never sends the origin secret: give none" >&2
+  exit 64
+elif [ "$mode" = --via-worker ] && [ -n "${ORIGIN_SECRET:-}" ]; then
+  echo "rollout-check: usage: --via-worker never sends the origin secret: unset ORIGIN_SECRET" >&2
+  exit 64
+fi
+
+# --via-worker judges a redirect against the Access pattern: a rule that cannot
+# be read is a usage error up front, never a failed check (1) that would roll a
+# good revision back.
+if [ "$mode" = --via-worker ] && { [ ! -s "$access_pattern_file" ] || [ ! -r "$access_pattern_file" ]; }; then
+  echo "rollout-check: usage: the pattern file $access_pattern_file is missing, empty or unreadable: --via-worker cannot tell an Access redirect from the service's own" >&2
   exit 64
 fi
 
@@ -93,6 +129,74 @@ fetch() {
   status="$(curl "${args[@]}" "$url$path" 2>/dev/null)" || true
   [ -n "$status" ] || status=000
   printf '%s' "$status"
+}
+
+# challenged NAME: exit 3 when Cloudflare's challenge, not the service, answered
+# (the public host only: a revision URL is not behind Cloudflare).
+challenged() {
+  [ "$mode" = --via-worker ] || return 0
+  if grep -iq '^cf-mitigated:' "$work/$1.head" 2>/dev/null; then
+    echo "rollout-check: challenge: Cloudflare challenged this runner (cf-mitigated); the service was not reached" >&2
+    exit 3
+  fi
+}
+
+# workers_500 NAME STATUS: exit 4 when the Worker's own 500 (not the service's)
+# answered through the public host. Every Worker 500 body ends with
+# `is not configured.` (proxy.js: misconfigured()): matched on that suffix of
+# the first 512 bytes, CR and NUL dropped, leading and trailing whitespace
+# trimmed, so a CRLF, a trailing newline or padding added on the way does not
+# hide it.
+workers_500() {
+  [ "$mode" = --via-worker ] && [ "$2" = 500 ] || return 0
+  local body
+  body="$(head -c 512 "$work/$1.body" 2>/dev/null | tr -d '\r\0')"
+  body="${body#"${body%%[![:space:]]*}"}"
+  body="${body%"${body##*[![:space:]]}"}"
+  if [ "${body%is not configured.}" != "$body" ]; then
+    echo "rollout-check: worker-500: the Worker answered 500 (no origin secret or origin configured: run infra/scripts/origin-secret push); the service was not reached" >&2
+    exit 4
+  fi
+}
+
+# edge_failure NAME STATUS: exit 6 when the edge or the Worker failed, not the
+# revision: no HTTP answer (000), a Cloudflare 52x (520 to 527), or a 403
+# (called after `challenged`, so a cf-mitigated 403 is already exit 3).
+edge_failure() {
+  [ "$mode" = --via-worker ] || return 0
+  case "$2" in
+    000) die 6 edge "$1: the edge or the Worker failed, no HTTP answer (refused, closed, TLS or timeout); the revision was not judged, no rollback cures it" ;;
+    52[0-7]) die 6 edge "$1: the edge or the Worker failed to reach the service, Cloudflare answered $2; the revision was not judged, no rollback cures it" ;;
+    403) die 6 edge "$1: the edge or the Worker was refused (403): the Worker's origin secret may be wrong, run infra/scripts/origin-secret push <env>" ;;
+  esac
+}
+
+# access_in_front NAME STATUS: exit 7 when the public host answers with the
+# Access login redirect (a 301, 302, 303, 307 or 308 whose Location matches
+# the pattern file the --access mode reads; the file is checked up front): the
+# host is behind Cloudflare Access while the workflow says it is not. The
+# revision is not at fault; a redirect elsewhere is the service's and stays a
+# failed check (1).
+access_in_front() {
+  [ "$mode" = --via-worker ] || return 0
+  case "$2" in 301 | 302 | 303 | 307 | 308) ;; *) return 0 ;; esac
+  local location
+  location="$(grep -i '^location:' "$work/$1.head" 2>/dev/null | head -n 1 | tr -d '\r' | cut -d' ' -f2-)"
+  if grep -Eiq -f "$access_pattern_file" <<<"$location"; then
+    die 7 access "the host is behind Cloudflare Access but the workflow's ACCESS setting for this env is false: set ACCESS_<env> in deploy.yml to match infra (infra/variables.tf envs.<env>.access); the revision was not judged, no rollback cures it"
+  fi
+}
+
+# want_200 CHECK NAME LABEL STATUS: the answer must be 200; else a challenge
+# (3), the Worker's own 500 (4), Access in front (7) or an edge failure (6) is
+# named before the failed check (1).
+want_200() {
+  [ "$4" = 200 ] && return 0
+  challenged "$2"
+  workers_500 "$2" "$4"
+  access_in_front "$2" "$4"
+  edge_failure "$3" "$4"
+  fail "$1" "$3 answered $4 (200 wanted)"
 }
 
 if [ "$mode" = --refused ]; then
@@ -135,16 +239,18 @@ if [ "$mode" = --access ]; then
   esac
 fi
 
-# mode revision
-status="$(fetch / root auth)"
-[ "$status" = 200 ] || fail root "/ answered $status (200 wanted)"
+# mode revision, or --via-worker (the Worker adds the header: none is sent)
+who=auth
+[ "$mode" = --via-worker ] && who=anon
+status="$(fetch / root "$who")"
+want_200 root root / "$status"
 grep -aFq 'PaliLearn' "$work/root.body" || fail root "/ does not name the page"
 echo "rollout-check: root ok"
 
 wasm="$(grep -aEo '/pkg/[^"'"'"' <>]*\.wasm' "$work/root.body" | head -n 1)"
 [ -n "$wasm" ] || fail wasm "the page links no .wasm"
-status="$(fetch "$wasm" wasm auth)"
-[ "$status" = 200 ] || fail wasm "$wasm answered $status (200 wanted)"
+status="$(fetch "$wasm" wasm "$who")"
+want_200 wasm wasm "$wasm" "$status"
 echo "rollout-check: wasm ok"
 
 for name in root wasm; do
@@ -155,6 +261,10 @@ for name in root wasm; do
   done
 done
 echo "rollout-check: token ok"
+
+if [ "$mode" = --via-worker ]; then
+  exit 0
+fi
 
 # What must never be served is the origin secret itself (learn-pali has no
 # API token): grep -F with the value in a file, so it is on no command line

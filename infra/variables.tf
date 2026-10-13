@@ -31,9 +31,11 @@ variable "cloudflare_account_id" {
 # afterwards, with `-var-file` or by uncommenting the block below (README,
 # "Order"), then a second apply.
 #
-# `access` puts the host behind Cloudflare Access (cloudflare.tf): true for
-# dev (user, 2026-10-12: dev behind Cloudflare with auth), false when omitted,
-# so prod stays public until it is decided otherwise.
+# `access` puts the host behind Cloudflare Access (cloudflare.tf). It is false
+# for dev and prod alike (user, 2026-10-13): dev is public behind the origin
+# guard, as search-front's dev is (search-dev.palicanon.app). The Access
+# resources stay behind the flag for a host that needs them later, and then
+# `admin_emails` is required (below).
 variable "envs" {
   type = map(object({
     host          = string
@@ -44,7 +46,7 @@ variable "envs" {
     dev = {
       host          = "learn.dev.palicanon.app"
       max_instances = 2
-      access        = true
+      access        = false
     }
     # prod = {
     #   host          = "learn.palicanon.app"
@@ -53,18 +55,26 @@ variable "envs" {
   }
 }
 
-# Who passes Cloudflare Access on the hosts that set `access`. An email
-# address is not a secret, but it is not written here either: pass it as
-# `TF_VAR_admin_emails='["you@example.com"]'` or in a git-ignored tfvars
-# file (README, "Only the user, in order"; prod.tfvars.example shows the
-# shape). No default on purpose: an apply without it fails instead of
-# opening the dev host to nobody or to anyone.
+# Who passes Cloudflare Access on the hosts that set `access = true`. Empty
+# by default: no env has Access, so nothing is needed (an apply asks for no
+# address). An email address is not a secret, but it is not written here
+# either: pass it as `TF_VAR_admin_emails='["you@example.com"]'` or in a
+# git-ignored tfvars file (README; prod.tfvars.example shows the shape).
+# An env with `access = true` and no address is refused (the second
+# validation: it reads `var.envs`, OpenTofu 1.9+) instead of opening the host
+# to nobody; a malformed address is refused whether an env needs it or not.
 variable "admin_emails" {
   description = "Email addresses allowed through Cloudflare Access on the hosts with access = true."
   type        = list(string)
+  default     = []
 
   validation {
-    condition     = length(var.admin_emails) > 0 && alltrue([for e in var.admin_emails : can(regex("^[^@\\s]+@[^@\\s]+$", e))])
-    error_message = "admin_emails must hold at least one address (name@domain)."
+    condition     = alltrue([for e in var.admin_emails : can(regex("^[^@\\s]+@[^@\\s]+$", e))])
+    error_message = "Every admin_emails entry must be an address (name@domain)."
+  }
+
+  validation {
+    condition     = !anytrue([for env in values(var.envs) : env.access]) || length(var.admin_emails) > 0
+    error_message = "An env sets access = true, so admin_emails must hold at least one address (name@domain)."
   }
 }

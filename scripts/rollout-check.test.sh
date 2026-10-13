@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Tests for scripts/rollout-check.sh, app/Dockerfile and .github/workflows/
-# deploy.yml (task 031, slice R). Run: scripts/rollout-check.test.sh
+# deploy.yml (task 031, slice R; 034: --via-worker). Run: scripts/rollout-check.test.sh
 #
 #   1. rollout-check.sh against a python3 fake server that plays every way a
 #      deployment can be wrong: each check has a server that must fail it, the
@@ -10,7 +10,10 @@
 #      (run against lockfiles), non-root, LEPTOS_ENV=PROD.
 #   3. deploy.yml: parses; its steps are run with a stub gcloud and a stub
 #      rollout-check to prove PREV, the skip, the no-traffic deploy, the
-#      secret step, the rollback (exit 5) and the host check (never a rollback).
+#      secret step, the rollback (exit 5) and the host check (--via-worker for
+#      every env: retries on 1, a warning on 3, no rollback on 4 or 6, one on 1;
+#      an env with Access runs --access: never a rollback), and ci.yml's `infra`
+#      job (034 round 1: it runs the script tests, the Worker tests, tofu).
 #
 # Needs bash, curl, python3 with PyYAML, jq. Exit 0 when every assertion held.
 set -uo pipefail
@@ -51,7 +54,7 @@ assert_file_lacks() { # name file pattern
 
 # ------------------------------------------------------------ the fake server
 cat > "$work/fake.py" <<'PY'
-import http.server, socketserver, sys, time
+import http.server, socket, socketserver, sys, time
 
 scenario, portfile, logfile = sys.argv[1:4]
 SECRET = "origin_canary_rollout_9d41c7"
@@ -66,8 +69,58 @@ def page(name, link, extra):
             % (name, '<link rel="preload" href="%s" as="fetch" type="application/wasm">' % link if link else "", extra)).encode()
 
 
+WORKER500 = b"The origin secret is not configured."
+
+
+def via(path, who, s):
+    """The public host through the Worker (--via-worker): the Worker adds the
+    header, so a request that carries one is the bug under test."""
+    if s == "via_hang": time.sleep(30)
+    if who != "none": return 500, {}, b"a request came with an x-origin-auth header"
+    worker500 = {"via_worker500": WORKER500, "via_worker500_crlf": WORKER500 + b"\r\n",
+                 "via_worker500_pad": b"  \n" + WORKER500 + b" \r\n\n",
+                 "via_worker500_origin": b"The origin is not configured.",
+                 "via_worker500_public": b"The public origin is not configured."}
+    if s.startswith("via_edge_") and path == "/": return int(s[len("via_edge_"):]), {}, b""
+    if s.startswith("via_edgewasm_") and path == WASM: return int(s[len("via_edgewasm_"):]), {}, b""
+    if s == "via_403wasm" and path == WASM: return 403, {}, b""
+    if path == "/":
+        if s in worker500: return 500, {"content-type": "text/plain"}, worker500[s]
+        if s == "via_root500": return 500, {}, b""
+        if s == "via_root500_service": return 500, {}, b"Internal Server Error"
+        if s == "via_500_suffix_middle": return 500, {}, WORKER500 + b" Try again later."
+        if s == "via_challenge": return 403, {"cf-mitigated": "challenge"}, b"Just a moment..."
+        if s == "via_403": return 403, {}, b""
+        if s == "via_302": return 302, {"location": ACCESS}, b""
+        if s == "via_302_other": return 302, {"location": "https://evil.example/login"}, b""
+        if s in ("via_301", "via_303", "via_307", "via_308"): return int(s[4:]), {"location": ACCESS}, b""
+        if s == "via_307_other": return 307, {"location": "https://evil.example/login"}, b""
+        if s == "via_root404": return 404, {}, b""
+        name = "Something else" if s == "via_noname" else "PaliLearn"
+        link = "" if s == "via_nowasm" else WASM
+        extra = TOKEN if s == "via_root_token" else ""
+        head = {"content-type": "text/html"}
+        # a decoy: the check must read the failing request's own head
+        if s == "via_wasm_302_other": head["location"] = ACCESS
+        if s == "via_wasm_302": head["location"] = "https://evil.example/root"
+        if s == "via_root_token_head": head["x-leak"] = TOKEN
+        return 200, head, page(name, link, extra)
+    if path == WASM:
+        if s == "via_wasm_302": return 302, {"location": ACCESS}, b""
+        if s == "via_wasm_302_other": return 302, {"location": "https://evil.example/login"}, b""
+        if s == "via_wasm404": return 404, {}, b""
+        if s == "via_wasm_worker500": return 500, {}, WORKER500
+        if s == "via_challenge_wasm": return 403, {"cf-mitigated": "challenge"}, b"Just a moment..."
+        if s == "via_wasm_500": return 500, {}, b"Internal Server Error"
+        if s == "via_wasm_token": return 200, {}, b"\0asm\x01\0\0\0" + TOKEN.encode() + b"\0"
+        if s == "via_wasm_token_head": return 200, {"x-leak": TOKEN}, b"\0asm\x01\0\0\0"
+        return 200, {"content-type": "application/wasm"}, b"\0asm\x01\0\0\0"
+    return 404, {}, b""
+
+
 def respond(path, who):
     s = scenario
+    if s.startswith("via_"): return via(path, who, s)
     # the host check (--access)
     if s == "access_ok": return 302, {"location": ACCESS}, b""
     if s == "access_other_redirect": return 302, {"location": "https://evil.example/login"}, b""
@@ -123,6 +176,10 @@ class H(http.server.BaseHTTPRequestHandler):
             if scenario == "twice_open" and vs[0] == SECRET: who = "right"
         with open(logfile, "a") as f:
             f.write("GET %s auth=%s\n" % (self.path, who))
+        if scenario == "via_close":
+            # the edge drops the connection with no HTTP answer at all
+            self.connection.shutdown(socket.SHUT_RDWR)
+            return
         status, headers, body = respond(self.path, who)
         self.send_response(status)
         for k, val in headers.items():
@@ -144,9 +201,14 @@ open(portfile, "w").write(str(srv.server_address[1]))
 srv.serve_forever()
 PY
 
+# A counter, not $RANDOM: 87 fake servers are started per run and two files
+# with the same random name made a case read the PREVIOUS server's port (a
+# refused connection, "000"): a $RANDOM collision hit about one run in ten.
+serve_n=0
 serve() { # scenario -> URL, SLOG, SRV_PID
-  SLOG="$work/log.$RANDOM"
-  local pf="$work/port.$RANDOM"
+  serve_n=$((serve_n + 1))
+  SLOG="$work/log.$serve_n"
+  local pf="$work/port.$serve_n"
   : > "$SLOG"
   python3 "$work/fake.py" "$1" "$pf" "$SLOG" &
   SRV_PID=$!
@@ -238,6 +300,76 @@ MAXT=2 run_case "access: the server never answers (timeout)" hang 4 "FAIL access
 log_acc="$(cat "$SLOG")"
 assert_absent "access: the secret header is never sent" "auth=right" "$log_acc"
 
+echo "== rollout-check.sh: --via-worker URL (the public host; the Worker adds the header)"
+run_case "via-worker: healthy" via_ok 0 "root ok" --via-worker @URL
+log_via="$(cat "$SLOG")"
+assert_match "via-worker: / was asked" "GET / auth=none" "$log_via"
+assert_match "via-worker: the wasm was asked" "GET /pkg/learn-pali.4f2a9c.wasm auth=none" "$log_via"
+assert_absent "via-worker: no request carried the origin header" "auth=right" "$log_via"
+assert_absent "via-worker: no request carried any x-origin-auth header" "auth=wrong" "$log_via"
+assert_eq "via-worker: the guard probes of the revision mode are not run (2 requests)" "2" "$(grep -c '^GET' <<<"$log_via")"
+assert_match "via-worker: names wasm, token" "wasm ok" "$out"
+assert_match "via-worker: and the token check" "token ok" "$out"
+assert_eq "via-worker: every curl call has --max-time" "0" "$(grep -vc -- '--max-time' "$work/curl-argv")"
+run_case "via-worker: / is 500 (the service's, empty body)" via_root500 1 "FAIL root" --via-worker @URL
+run_case "via-worker: / is 500 with another body (the service's)" via_root500_service 1 "FAIL root" --via-worker @URL
+run_case "via-worker: a 500 whose body only contains the Worker's words is the service's" via_500_suffix_middle 1 "FAIL root" --via-worker @URL
+run_case "via-worker: / is 404" via_root404 1 "FAIL root" --via-worker @URL
+run_case "via-worker: a plain 403 is the edge's (the Worker's secret may be wrong), not the revision's" via_403 6 "edge.*Worker.*origin-secret push" --via-worker @URL
+run_case "via-worker: a 403 on the wasm request is the edge's too" via_403wasm 6 "edge.*Worker.*origin-secret push" --via-worker @URL
+# E1/ET1 (034 round 2): a 302 to Cloudflare Access means the host is behind
+# Access while the workflow's setting says it is not: exit 7, never a rollback.
+run_case "via-worker: a 302 to cloudflareaccess.com (Access in front, ACCESS_<env> false)" via_302 7 "FAIL access.*behind Cloudflare Access.*ACCESS_<env>" --via-worker @URL
+assert_match "via-worker: the 7 names the remedy" "deploy.yml.*infra" "$out"
+run_case "via-worker: a 302 elsewhere stays a failed check" via_302_other 1 "FAIL root" --via-worker @URL
+# G1 (034 round 3): any 30x to Access is the same disagreement as the 302.
+for code in 301 303 307 308; do
+  run_case "via-worker: a $code to cloudflareaccess.com (Access in front)" "via_$code" 7 "FAIL access.*behind Cloudflare Access.*ACCESS_<env>" --via-worker @URL
+done
+run_case "via-worker: a 307 elsewhere stays a failed check" via_307_other 1 "FAIL root" --via-worker @URL
+# G2: the wasm answers the Access redirect while / answers 200; the Location
+# is read from the wasm's own head (root's decoy Location does not match, and
+# in the other scenario root's Location matches while the wasm's does not).
+run_case "via-worker: / 200, the wasm 302 to Access" via_wasm_302 7 "FAIL access.*behind Cloudflare Access.*ACCESS_<env>" --via-worker @URL
+run_case "via-worker: / 200 with an Access Location, the wasm 302 elsewhere stays a failed check" via_wasm_302_other 1 "FAIL wasm" --via-worker @URL
+run_case "via-worker: the page does not name PaliLearn" via_noname 1 "FAIL root" --via-worker @URL
+run_case "via-worker: the page links no wasm" via_nowasm 1 "FAIL wasm" --via-worker @URL
+run_case "via-worker: the wasm is 404" via_wasm404 1 "FAIL wasm" --via-worker @URL
+run_case "via-worker: a token shape in the page" via_root_token 1 "FAIL token" --via-worker @URL
+run_case "via-worker: a token shape in a header of the page" via_root_token_head 1 "FAIL token" --via-worker @URL
+run_case "via-worker: a token shape in the wasm" via_wasm_token 1 "FAIL token" --via-worker @URL
+run_case "via-worker: a token shape in a header of the wasm" via_wasm_token_head 1 "FAIL token" --via-worker @URL
+# D2 (034 round 1): the edge failing is not the revision failing: exit 6.
+run_case "via-worker: the connection is closed with no HTTP answer" via_close 6 "edge.*Worker.*no HTTP answer" --via-worker @URL
+MAXT=2 run_case "via-worker: no answer in time (curl timeout, 000)" via_hang 6 "edge.*Worker.*no HTTP answer" --via-worker @URL
+serve via_ok; dead_url="$URL"; stop
+run_case "via-worker: connection refused (nothing listens)" via_ok 6 "edge.*Worker.*no HTTP answer" --via-worker "$dead_url"
+for code in 520 521 522 523 524 525 526 527; do
+  run_case "via-worker: Cloudflare answers $code" "via_edge_$code" 6 "edge.*Worker.*$code" --via-worker @URL
+done
+run_case "via-worker: Cloudflare answers 522 on the wasm request" via_edgewasm_522 6 "edge.*Worker.*522" --via-worker @URL
+run_case "via-worker: a 502 is the service's, relayed (exit 1)" via_edge_502 1 "FAIL root" --via-worker @URL
+run_case "via-worker: a 528 is not one of the edge codes (exit 1)" via_edge_528 1 "FAIL root" --via-worker @URL
+run_case "via-worker: the wasm's own 500 stays exit 1" via_wasm_500 1 "FAIL wasm" --via-worker @URL
+run_case "via-worker: Cloudflare challenged the runner" via_challenge 3 "cf-mitigated" --via-worker @URL
+run_case "via-worker: Cloudflare challenged the wasm request" via_challenge_wasm 3 "cf-mitigated" --via-worker @URL
+run_case "via-worker: the Worker's own 500" via_worker500 4 "worker-500" --via-worker @URL
+assert_match "via-worker: the 4 names the remedy" "origin-secret push" "$out"
+run_case "via-worker: the Worker's 500 with a CRLF" via_worker500_crlf 4 "worker-500" --via-worker @URL
+run_case "via-worker: the Worker's 500 padded with whitespace" via_worker500_pad 4 "worker-500" --via-worker @URL
+run_case "via-worker: the Worker's 500, another 'is not configured.' message (origin)" via_worker500_origin 4 "worker-500" --via-worker @URL
+run_case "via-worker: the Worker's 500, another 'is not configured.' message (public origin)" via_worker500_public 4 "worker-500" --via-worker @URL
+run_case "via-worker: the Worker's 500 on the wasm request" via_wasm_worker500 4 "worker-500" --via-worker @URL
+MAXT=2 run_case "via-worker: the server never answers (timeout)" via_hang 6 "FAIL edge" --via-worker @URL
+# ET3 (034 round 2): the edge's exit 6 is --via-worker only; a revision URL
+# that closes the connection is the revision's failure.
+run_case "revision mode: the connection is closed with no HTTP answer (1, never 6)" via_close 1 "FAIL root" revision @URL "$header"
+assert_eq "revision mode: a 500 with the Worker's words is a plain failure (1), never 4" "1" "$(
+  serve root500
+  PATH="$shim:$PATH" bash "$script" revision "$URL" "$header" >/dev/null 2>&1; echo $?
+  stop
+)"
+
 echo "== the Access redirect pattern: one file, read by the script"
 pattern_file="$here/access-redirect-pattern"
 assert_eq "pattern: the file is one line" "1" "$(grep -c '' "$pattern_file" 2>/dev/null)"
@@ -279,6 +411,19 @@ else
 fi
 script="$real_script"
 
+# G1b (034 round 3): --via-worker with no usable pattern is a usage error
+# (64), checked before any request, never a failed check (1, a rollback).
+mkdir -p "$work/nopat-vw"
+cp "$script" "$work/nopat-vw/rollout-check.sh"
+real_script="$script"
+script="$work/nopat-vw/rollout-check.sh"
+run_case "via-worker: the pattern file is missing" via_ok 64 "access-redirect-pattern" --via-worker @URL
+assert_eq "via-worker: a missing pattern file is checked before any request" "0" "$(grep -c '^GET' "$SLOG")"
+: > "$work/nopat-vw/access-redirect-pattern"
+run_case "via-worker: the pattern file is empty" via_ok 64 "access-redirect-pattern" --via-worker @URL
+assert_eq "via-worker: an empty pattern file is checked before any request" "0" "$(grep -c '^GET' "$SLOG")"
+script="$real_script"
+
 echo "== rollout-check.sh: usage"
 check_usage() { # name args...
   local name=$1
@@ -316,6 +461,18 @@ for bad in empty noprefix novalue blankvalue; do
   assert_eq "header file ($bad) against a healthy server: nothing was asked" "" "$(cat "$SLOG")"
 done
 check_usage "access with no URL" --access
+check_usage "via-worker with no URL" --via-worker
+check_usage "via-worker is given a header file" --via-worker http://127.0.0.1:9 "$header"
+check_usage "via-worker is given a second argument" --via-worker http://127.0.0.1:9 extra
+# The secret never reaches this mode, even from the environment.
+serve via_ok
+out="$(ORIGIN_SECRET="$SECRET" bash "$script" --via-worker "$URL" 2>&1)"
+rc=$?
+stop
+assert_eq "usage: via-worker with ORIGIN_SECRET set exits 64" "64" "$rc"
+assert_match "usage: via-worker with ORIGIN_SECRET says usage" "usage" "$out"
+assert_absent "usage: and nothing was asked" "GET" "$(cat "$SLOG")"
+assert_absent "usage: and the secret is not printed" "$SECRET" "$out"
 
 # ------------------------------------------------------------------ Dockerfile
 echo "== app/Dockerfile"
@@ -452,7 +609,13 @@ assert_eq "deploy.yml: steps 1 to 6b in order" "current deploy secret check traf
 for id in deploy secret check traffic; do
   assert_eq "deploy.yml: '$id' runs only when the image is not already served" "steps.current.outputs.running != 'true'" "$(step_field "$id" if 2>/dev/null | sed 's/^\${{ *//; s/ *}}$//')"
 done
-assert_eq "deploy.yml: the host check runs on dev only" "env.ENV == 'dev'" "$(step_field host if 2>/dev/null | sed 's/^\${{ *//; s/ *}}$//')"
+assert_eq "deploy.yml: the host check runs for every env (no if)" "" "$(step_field host if 2>/dev/null)"
+assert_eq "deploy.yml: the host check knows PREVIOUS (for the rollback)" "\${{ steps.current.outputs.serving }}" "$(python3 - "$workflow" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+print(next(s for s in wf["jobs"]["site"]["steps"] if s.get("id") == "host").get("env", {}).get("PREVIOUS", ""))
+PY
+)"
 assert_file_lacks "deploy.yml: no --ssh, no ssh: input on the image build" "$workflow" '^[[:space:]]*ssh:|--ssh'
 assert_file_has "deploy.yml: the ui-lib action step is untouched" "$workflow" '^      - uses: \./learn-pali/\.github/actions/ui-lib$'
 assert_file_has "deploy.yml: the action gets the App id" "$workflow" 'app-id: \$\{\{ secrets\.APP_ID \}\}'
@@ -469,8 +632,24 @@ assert_file_has "deploy.yml: PERMISSION_DENIED is named" "$work/step-secret.sh" 
 assert_file_has "deploy.yml: the secret is masked" "$work/step-secret.sh" '::add-mask::'
 assert_file_has "deploy.yml: the secret file is 0600" "$work/step-secret.sh" 'umask 077'
 assert_file_lacks "deploy.yml: the secret is never put in a shell variable" "$work/step-secret.sh" '(^|[^A-Z_])(VALUE|SECRET)=|\$\(gcloud secrets'
-assert_file_has "deploy.yml: the host check never rolls back" "$work/step-host.sh" '--access'
-assert_file_lacks "deploy.yml: no rollback in the host check" "$work/step-host.sh" 'rollback|update-traffic'
+assert_file_has "deploy.yml: the host check is --via-worker on the host" "$work/step-host.sh" 'rollout-check\.sh --via-worker "https://\$HOST"'
+assert_file_has "deploy.yml: the host check calls --access for an env with Access" "$work/step-host.sh" 'rollout-check\.sh --access "https://\$HOST"'
+assert_file_has "deploy.yml: the host check tries up to 5 times" "$work/step-host.sh" 'for _ in 1 2 3 4 5'
+assert_file_has "deploy.yml: the host check names the remedy of the Worker's 500" "$work/step-host.sh" 'run infra/scripts/origin-secret push \$ENV'
+# The workflow-level map and infra/variables.tf's `envs` defaults say the same
+# (change both together): dev from the default block, prod from the
+# optional() default (prod is not in the default map yet).
+assert_eq "deploy.yml: the access settings (ACCESS_dev, ACCESS_prod) mirror infra/variables.tf" "ACCESS_dev=false ACCESS_prod=false | tf: dev=false prod=false" "$(python3 - "$workflow" "$root/infra/variables.tf" <<'PY'
+import re, sys, yaml
+env = yaml.safe_load(open(sys.argv[1])).get("env", {})
+tf = open(sys.argv[2]).read()
+opt = re.search(r"access\s*=\s*optional\(bool,\s*(true|false)\)", tf).group(1)
+dev = re.search(r'default\s*=\s*\{\s*dev\s*=\s*\{[^}]*?access\s*=\s*(true|false)', tf, re.S)
+prod = re.search(r'^\s*prod\s*=\s*\{[^}]*?access\s*=\s*(true|false)', tf, re.M | re.S)
+print("ACCESS_dev=%s ACCESS_prod=%s | tf: dev=%s prod=%s" % (
+    env.get("ACCESS_dev"), env.get("ACCESS_prod"), dev.group(1) if dev else opt, prod.group(1) if prod else opt))
+PY
+)"
 assert_file_has "deploy.yml: the origin check can fail with exit 5" "$work/step-refused.sh" 'exit 5'
 assert_file_has "deploy.yml: the bare origin check is --refused" "$work/step-refused.sh" '--refused'
 assert_file_has "deploy.yml: the revision is checked with the header file" "$work/step-check.sh" 'rollout-check\.sh revision "\$URL" "\$HEADER_FILE"'
@@ -533,9 +712,21 @@ if [ "$mode" = revision ] && [ -f "$3" ]; then
   echo "header-file $(ls -l "$3" | cut -c1-10) $(cut -c1-16 "$3" | head -n 1)" >> "$STUB/calls"
 fi
 echo "stub rollout-check $mode"
+# rc-<mode>.seq: one exit code per line, consumed one per call (then rc-<mode>).
+if [ -s "$STUB/rc-$mode.seq" ]; then
+  code="$(head -n 1 "$STUB/rc-$mode.seq")"
+  tail -n +2 "$STUB/rc-$mode.seq" > "$STUB/rc-$mode.seq.tmp"
+  mv "$STUB/rc-$mode.seq.tmp" "$STUB/rc-$mode.seq"
+  exit "$code"
+fi
 exit "$(cat "$STUB/rc-$mode" 2>/dev/null || echo 0)"
 SH
-chmod +x "$stub/bin/gcloud" "$proj/scripts/rollout-check.sh"
+# A stub sleep: the retries of the host check wait 3 s in CI, not here.
+cat > "$stub/bin/sleep" <<'SH'
+#!/usr/bin/env bash
+echo "sleep $*" >> "$STUB/calls"
+SH
+chmod +x "$stub/bin/gcloud" "$stub/bin/sleep" "$proj/scripts/rollout-check.sh"
 
 reset_stub() { # image-of-the-serving-revision
   rm -rf "$stub/state"
@@ -563,6 +754,7 @@ step() {
     cd "$proj" || exit 99
     env PATH="$stub/bin:$PATH" STUB="$STUB" GITHUB_OUTPUT="$STUB/out" RUNNER_TEMP="$RUNNER_TEMP" \
       ENV=dev REGION=europe-west1 PROJECT=proj GITHUB_SHA=abc1234def5678 \
+      ACCESS_dev=false ACCESS_prod=false \
       IMAGE_HASH=registry/learn-pali:h-new HOST=learn.dev.palicanon.app "$@" \
       bash -e "$work/step-$id.sh"
   ) 2>&1
@@ -744,26 +936,249 @@ rc=$?
 assert_eq "refused: nothing moved, nothing to put back, still fails" "1" "$rc"
 assert_absent "refused: no traffic call" "update-traffic" "$(calls)"
 
-echo "== deploy.yml: step 6b (the host, Access only, never a rollback)"
+echo "== deploy.yml: step 6b (the public host through the Worker; retries; 4 never rolls back; 1 does)"
+host_step() { step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=true "$@"; }
+count() { grep -c -- "$1" "$STUB/calls"; }
 reset_stub "registry/learn-pali:h-old"
-out="$(step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+out="$(host_step)"
 rc=$?
-assert_eq "host: 302 to Access passes" "0" "$rc"
-assert_match "host: --access on the host" "rollout-check --access https://learn.dev.palicanon.app" "$(calls)"
-for code in 2 4; do
-  reset_stub "registry/learn-pali:h-old"
-  printf '%s' "$code" > "$STUB/rc-access"
-  out="$(step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
-  rc=$?
-  assert_eq "host: exit $code fails the job with that code" "$code" "$rc"
-  assert_absent "host: exit $code does not touch the traffic" "update-traffic" "$(calls)"
-done
+assert_eq "host: a healthy host passes" "0" "$rc"
+assert_match "host: --via-worker on the dev host" "rollout-check --via-worker https://learn.dev.palicanon.app" "$(calls)"
+assert_eq "host: one try when it passes" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: no --access call" "rollout-check --access" "$(calls)"
+assert_absent "host: no traffic call when it passes" "update-traffic" "$(calls)"
+assert_eq "host: the traffic stays on the new revision" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+
 reset_stub "registry/learn-pali:h-old"
-printf '3' > "$STUB/rc-access"
-out="$(step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
+out="$(host_step ENV=prod HOST=learn.palicanon.app)"
+rc=$?
+assert_eq "host: prod is checked too (no Access, no skip)" "0" "$rc"
+assert_match "host: --via-worker on the prod host" "rollout-check --via-worker https://learn.palicanon.app" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '1\n1\n0\n' > "$STUB/rc-via-worker.seq"
+out="$(host_step)"
+rc=$?
+assert_eq "host: exit 1 twice then 0 passes (the edge settles)" "0" "$rc"
+assert_eq "host: three tries" "3" "$(count 'rollout-check --via-worker')"
+assert_eq "host: waits between the tries" "2" "$(count '^sleep 3')"
+assert_absent "host: a late pass moves no traffic" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf '1' > "$STUB/rc-via-worker"
+out="$(host_step)"
+rc=$?
+assert_eq "host: exit 1 five times fails the job with 1" "1" "$rc"
+assert_eq "host: five tries" "5" "$(count 'rollout-check --via-worker')"
+assert_match "host: the traffic goes back to PREV" "update-traffic learn-pali-dev .*--to-revisions=learn-pali-dev-00001-aaa=100" "$(calls)"
+assert_eq "host: PREV serves again" "learn-pali-dev-00001-aaa" "$(cat "$STUB/serving")"
+assert_match "host: and says so" "moved back to learn-pali-dev-00001-aaa" "$out"
+
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf '1' > "$STUB/rc-via-worker"
+touch "$STUB/rollback-fails"
+out="$(host_step)"
+rc=$?
+assert_eq "host: a rollback that does not restore PREV exits 5" "5" "$rc"
+assert_match "host: and says so" "rollback did not restore" "$out"
+
+reset_stub "registry/learn-pali:h-old"
+printf '1' > "$STUB/rc-via-worker"
+out="$(step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=false)"
+rc=$?
+assert_eq "host: nothing moved, nothing to put back, still fails" "1" "$rc"
+assert_absent "host: no traffic call when this run moved none" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '1' > "$STUB/rc-via-worker"
+out="$(step host PREVIOUS= MOVED=true)"
+rc=$?
+assert_eq "host: no previous revision, nothing to put back, still fails" "1" "$rc"
+assert_absent "host: no traffic call without a previous revision" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '4' > "$STUB/rc-via-worker"
+out="$(host_step)"
+rc=$?
+assert_eq "host: exit 4 (the Worker's own 500) fails the job with 4" "4" "$rc"
+assert_eq "host: exit 4 is not retried" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: exit 4 does not touch the traffic" "update-traffic" "$(calls)"
+assert_match "host: exit 4 is an error annotation" "::error::" "$out"
+assert_match "host: exit 4 names the Worker's 500 and the remedy for this env" "Worker answered 500.*origin-secret push dev" "$out"
+out="$(host_step ENV=prod HOST=learn.palicanon.app)"
+assert_match "host: the remedy names prod on prod" "origin-secret push prod" "$out"
+
+reset_stub "registry/learn-pali:h-old"
+printf '3' > "$STUB/rc-via-worker"
+out="$(host_step)"
 rc=$?
 assert_eq "host: exit 3 (a Cloudflare challenge) only warns" "0" "$rc"
 assert_match "host: as a warning" "::warning::" "$out"
+assert_eq "host: exit 3 is not retried" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: exit 3 does not touch the traffic" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '64' > "$STUB/rc-via-worker"
+out="$(host_step)"
+rc=$?
+assert_eq "host: another code (usage) fails the job with it" "64" "$rc"
+assert_eq "host: another code is not retried" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: another code does not touch the traffic" "update-traffic" "$(calls)"
+
+# D2 (034 round 1): exit 6 is the edge or the Worker failing (no answer, a
+# 52x, a 403 through the Worker): the revision is not at fault, so no
+# rollback, no retry, the job fails naming the edge.
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf '6' > "$STUB/rc-via-worker"
+out="$(host_step)"
+rc=$?
+assert_eq "host: exit 6 (the edge or the Worker failed) fails the job with 6" "6" "$rc"
+assert_eq "host: exit 6 is not retried" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: exit 6 does not touch the traffic (no rollback)" "update-traffic" "$(calls)"
+assert_eq "host: exit 6 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_match "host: exit 6 is an error annotation" "::error::" "$out"
+assert_match "host: exit 6 names the edge and the Worker, not the revision" "::error::.*edge.*Worker" "$out"
+assert_match "host: exit 6 names the remedy for this env" "origin-secret push dev" "$out"
+assert_absent "host: exit 6 does not say the traffic moved back" "moved back" "$out"
+
+# E1 (034 round 2): exit 7 is the host sitting behind Access while the
+# workflow's ACCESS_<env> says false: the job fails naming the setting, with
+# no rollback and no retry.
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf '7' > "$STUB/rc-via-worker"
+out="$(host_step)"
+rc=$?
+assert_eq "host: exit 7 (Access in front, ACCESS_dev false) fails the job with 7" "7" "$rc"
+assert_eq "host: exit 7 is not retried" "1" "$(count 'rollout-check --via-worker')"
+assert_absent "host: exit 7 does not touch the traffic (no rollback)" "update-traffic" "$(calls)"
+assert_eq "host: exit 7 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_match "host: exit 7 is an error annotation naming ACCESS_dev" "::error::.*ACCESS_dev" "$out"
+assert_match "host: exit 7 says to match infra" "::error::.*infra" "$out"
+assert_absent "host: exit 7 does not say the traffic moved back" "moved back" "$out"
+
+# ET2 (034 round 2): a new env with no ACCESS_<env> in the workflow env fails
+# naming that variable, before any check and any rollback.
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-staging-00002-bbb' > "$STUB/serving"
+out="$(host_step ENV=staging HOST=learn.staging.palicanon.app)"
+rc=$?
+assert_eq "host: an env with no ACCESS_<env> fails the job" "1" "$rc"
+assert_match "host: and names ACCESS_staging" "::error::.*ACCESS_staging" "$out"
+assert_eq "host: and calls no rollout-check" "0" "$(count 'rollout-check')"
+assert_absent "host: and does not roll back" "update-traffic" "$(calls)"
+
+# D1/T1 (034 round 1): an env whose access setting is true is checked by
+# --access (never --via-worker): a 302 passes, 2 and 4 fail named, 3 warns,
+# and none of them rolls the traffic back (the revision did not fail).
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+out="$(host_step ACCESS_dev=true)"
+rc=$?
+assert_eq "host (access): a 302 to cloudflareaccess.com (--access exit 0) passes" "0" "$rc"
+assert_match "host (access): --access on the dev host" "rollout-check --access https://learn.dev.palicanon.app" "$(calls)"
+assert_absent "host (access): --via-worker is not called" "rollout-check --via-worker" "$(calls)"
+assert_eq "host (access): one try" "1" "$(count 'rollout-check --access')"
+assert_absent "host (access): no traffic call, no rollback" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+out="$(host_step ENV=prod HOST=learn.palicanon.app ACCESS_prod=true)"
+rc=$?
+assert_eq "host (access): prod follows ACCESS_prod" "0" "$rc"
+assert_match "host (access): --access on the prod host" "rollout-check --access https://learn.palicanon.app" "$(calls)"
+reset_stub "registry/learn-pali:h-old"
+out="$(host_step ENV=prod HOST=learn.palicanon.app ACCESS_prod=false ACCESS_dev=true)"
+assert_match "host (access): prod with ACCESS_prod=false is --via-worker even when dev has Access" "rollout-check --via-worker https://learn.palicanon.app" "$(calls)"
+assert_absent "host (access): and not --access" "rollout-check --access" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf '2' > "$STUB/rc-access"
+out="$(host_step ACCESS_dev=true)"
+rc=$?
+assert_eq "host (access): exit 2 (Access missing) fails the job with 2" "2" "$rc"
+assert_match "host (access): exit 2 is an error naming Access" "::error::.*Access" "$out"
+assert_absent "host (access): exit 2 never rolls back" "update-traffic" "$(calls)"
+assert_eq "host (access): exit 2 is not retried" "1" "$(count 'rollout-check --access')"
+assert_eq "host (access): exit 2 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+
+reset_stub "registry/learn-pali:h-old"
+printf '4' > "$STUB/rc-access"
+out="$(host_step ACCESS_dev=true)"
+rc=$?
+assert_eq "host (access): exit 4 (anything else) fails the job with 4" "4" "$rc"
+assert_match "host (access): exit 4 is an error annotation" "::error::" "$out"
+assert_absent "host (access): exit 4 never rolls back" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '3' > "$STUB/rc-access"
+out="$(host_step ACCESS_dev=true)"
+rc=$?
+assert_eq "host (access): exit 3 (a Cloudflare challenge) only warns" "0" "$rc"
+assert_match "host (access): exit 3 as a warning" "::warning::" "$out"
+assert_absent "host (access): exit 3 never rolls back" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+printf '64' > "$STUB/rc-access"
+out="$(host_step ACCESS_dev=true)"
+rc=$?
+assert_eq "host (access): another code (usage) fails the job with it" "64" "$rc"
+assert_absent "host (access): another code never rolls back" "update-traffic" "$(calls)"
+
+reset_stub "registry/learn-pali:h-old"
+out="$(host_step ACCESS_dev=maybe)"
+rc=$?
+assert_eq "host: an access setting that is not true or false fails the job" "1" "$rc"
+assert_match "host: and names the setting" "::error::.*ACCESS_dev" "$out"
+assert_eq "host: and runs no check" "0" "$(count 'rollout-check')"
+
+# ------------------------------------------------------------ ci.yml: job infra
+# (034 round 1, T3): nothing else in CI runs the script tests, the Worker's
+# tests or tofu; the job `infra` runs each, with no ui-lib checkout.
+echo "== ci.yml: the infra job"
+python3 - "$root/.github/workflows/ci.yml" > "$work/infra-asserts" <<'PY'
+import sys, yaml
+wf = yaml.safe_load(open(sys.argv[1]))
+out = []
+def t(name, cond): out.append(("ok" if cond else "FAIL") + "\t" + name)
+job = wf["jobs"].get("infra")
+t("ci.yml: a job 'infra' exists", job is not None)
+job = job or {"steps": []}
+st = job.get("steps", [])
+runs = [str(x.get("run", "")) for x in st]
+uses = [str(x.get("uses", "")) for x in st]
+t("ci.yml: infra runs on ubuntu-latest", job.get("runs-on") == "ubuntu-latest")
+co = [x for x in st if str(x.get("uses", "")).startswith("actions/checkout@")]
+t("ci.yml: infra checks learn-pali out at path learn-pali (defaults.run holds)",
+  len(co) == 1 and co[0].get("with", {}).get("path") == "learn-pali")
+t("ci.yml: infra takes no ui-lib checkout", not any("ui-lib" in u for u in uses))
+ot = [x for x in st if str(x.get("uses", "")).startswith("opentofu/setup-opentofu@")]
+t("ci.yml: infra sets OpenTofu up (opentofu/setup-opentofu@v1)", len(ot) == 1 and ot[0]["uses"] == "opentofu/setup-opentofu@v1")
+ver = str(ot[0].get("with", {}).get("tofu_version", "")) if ot else ""
+import re
+m = re.match(r"^1\.(\d+)\.\d+$", ver)
+t("ci.yml: infra pins a 1.x OpenTofu at least 1.8 (versions.tf's floor), got '%s'" % ver, bool(m) and int(m.group(1)) >= 8)
+node = [x for x in st if str(x.get("uses", "")).startswith("actions/setup-node@")]
+t("ci.yml: infra sets node up (actions/setup-node)", len(node) == 1)
+nv = str(node[0].get("with", {}).get("node-version", "")) if node else ""
+t("ci.yml: infra's node is 22 or later, got '%s'" % nv, nv.split(".")[0].isdigit() and int(nv.split(".")[0]) >= 22)
+for cmd in ("tofu fmt -check -recursive infra",
+            "tofu -chdir=infra init -backend=false",
+            "tofu -chdir=infra validate",
+            "node --test infra/worker/proxy.test.mjs",
+            "bash scripts/rollout-check.test.sh",
+            "bash infra/scripts/origin-secret.test.sh"):
+    t("ci.yml: infra runs `%s`" % cmd, any(cmd in r.split("\n") or r.strip() == cmd for r in runs))
+print("\n".join(out))
+PY
+while IFS=$'\t' read -r verdict name; do
+  if [ "$verdict" = ok ]; then pass "$name"; else flunk "$name"; fi
+done < "$work/infra-asserts"
+assert_eq "the infra asserts ran (not an empty list)" "yes" "$([ "$(grep -c '' "$work/infra-asserts")" -gt 10 ] && echo yes || echo no)"
 
 # ------------------------------------------- the ui-lib credential is the App
 # (task 031, design v7): the composite action mints a 1-hour token for
@@ -822,6 +1237,10 @@ for path in sys.argv[2:4]:
         uses = [s for s in st if s.get("uses") == "./learn-pali/.github/actions/ui-lib"]
         if mine:
             n += 1
+            # the job `infra` runs no cargo: it takes no ui-lib (034 round 1)
+            if job == "infra":
+                t("%s: job %s takes no ui-lib" % (name, job), len(uses) == 0)
+                continue
             t("%s: job %s uses the ui-lib action" % (name, job), len(uses) == 1)
         for u in uses:
             w = u.get("with", {})
@@ -878,8 +1297,8 @@ else
 fi
 SH
 chmod +x "$one/bin/gcloud" "$one/bin/curl"
-origin_check() { # -> $out, $code (origin-secret check dev from the one tree)
-  out="$(env PATH="$one/bin:$PATH" CLOUDFLARE_API_TOKEN=cf-token-for-tests "$one/infra/scripts/origin-secret" check dev 2>&1)"
+origin_check() { # -> $out, $code (origin-secret check dev, ACCESS=1: the Access branch, from the one tree)
+  out="$(env PATH="$one/bin:$PATH" CLOUDFLARE_API_TOKEN=cf-token-for-tests ACCESS=1 "$one/infra/scripts/origin-secret" check dev 2>&1)"
   rc=$?
 }
 real_script="$script"

@@ -22,7 +22,8 @@ terraform {
 
 # Credentials come from the environment: gcloud auth application-default
 # login, and CLOUDFLARE_API_TOKEN (zone DNS and Workers routes, account
-# Workers scripts, Access applications and policies on the zone; the same
+# Workers scripts; the Access permission on the zone is needed only when an
+# env sets `access = true`, none by default; the same
 # token lets scripts/origin-secret write and list the Worker's secret).
 # Nothing is read from a file in this repository.
 provider "google" {

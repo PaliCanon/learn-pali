@@ -1,12 +1,12 @@
 # The second apply, once dev has deployed from CI and been checked:
 #   tofu apply -var-file=prod.tfvars   (copy this file to prod.tfvars)
-# `envs` is replaced as a whole, so dev is listed again (with its access flag).
-# prod has no `access`: it is public (false when omitted).
+# `envs` is replaced as a whole, so dev is listed again. Neither host has
+# Cloudflare Access (`access` is false when omitted): both are public behind
+# the origin guard, and `admin_emails` is not needed.
 envs = {
   dev = {
     host          = "learn.dev.palicanon.app"
     max_instances = 2
-    access        = true
   }
   prod = {
     host          = "learn.palicanon.app"
@@ -14,7 +14,9 @@ envs = {
   }
 }
 
-# Who passes Cloudflare Access on dev. Not stored in the repository: pass
-# it as TF_VAR_admin_emails='["you@example.com"]' or uncomment it in your
-# own prod.tfvars (never commit that file).
+# Only for an env that sets `access = true` (Cloudflare Access): who passes
+# it. Not stored in the repository: pass it as
+# TF_VAR_admin_emails='["you@example.com"]' or uncomment it in your own
+# prod.tfvars (never commit that file). An env with Access and no address
+# is refused.
 # admin_emails = ["you@example.com"]

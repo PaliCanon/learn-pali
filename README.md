@@ -213,8 +213,11 @@ Before the first deploy, the user:
    The deployer holds `roles/run.developer` and Artifact Registry writer
    (checked). The repository is allowed to use the deploy identity (the site's
    `github_repos`, applied 2026-10-09; `infra/README.md`).
-3. Decides the open points: the host names, Cloudflare Access on dev (it is
-   not set up by `infra/`), the maximum instances. Also known: the Cloud Run
-   origin is reachable directly, as the API's is (a follow-up for both).
+3. Decides the open points: the host names, the maximum instances. Decided
+   (034): dev is public behind the origin guard, like search-dev; Cloudflare
+   Access applies only to an env that sets `access` in `infra/`. Also known:
+   the Cloud Run origin answers only the Worker (403 without its secret
+   header, task 031); the one exception is the bootstrap hello the first
+   `tofu apply` leaves, served before the first deploy.
 4. Pushes `main` (dev), checks `https://learn.dev.palicanon.app`, then adds
    prod (`prod.tfvars.example`, a second `tofu apply`) and tags `v0.x.y`.
