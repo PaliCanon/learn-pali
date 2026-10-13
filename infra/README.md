@@ -99,7 +99,7 @@ public in prod.
 
 Nothing here has been applied yet (tasks 021 and 031 wrote it, did not run it).
 
-1. **The Cloudflare token in the keychain** (`palicanon` /
+1. **The Cloudflare token in the keychain** (`lsh` /
    `cloudflare-api-token`, never typed on a command line or printed). One
    token reads and writes the Worker's secret **and** edits Access, accepted
    for dev; scopes: zone DNS, account Workers scripts (Custom Domains
@@ -114,7 +114,7 @@ Nothing here has been applied yet (tasks 021 and 031 wrote it, did not run it).
 
    ```sh
    gcloud auth application-default login
-   export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a palicanon -s cloudflare-api-token -w)
+   export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a lsh -s cloudflare-api-token -w)
    export TF_VAR_admin_emails='["<your address>"]'   # who passes Access on dev
    cd infra
    tofu init
