@@ -4,6 +4,7 @@ ignore = [
     # Unmaintained crates reached only through leptos.
     { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; reached only through leptos — drop when leptos moves off it (ignored 2026-10-05)" },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is unmaintained; reached only through leptos — drop when leptos moves off it (ignored 2026-10-05)" },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained (repository archived); reached only through serde_yaml 0.9 in leptos_i18n_parser, at build time, parsing our own locale files — drop when leptos_i18n moves off serde_yaml (ignored 2026-10-13)" },
 ]
 
 [licenses]
