@@ -79,22 +79,22 @@ the new value for a while), a follow-up task.
 
 ## Order: dev first, prod later
 
-`var.envs` holds **dev only** by default. The first apply therefore stands up
-`learn-pali-dev` and `learn.dev.palicanon.app` (public behind the origin
-guard, no Access) and nothing in prod.
+`var.envs` holds **dev and prod** by default (task 036). The first apply
+stands up `learn-pali-dev` and `learn.dev.palicanon.app` only (the dev
+object is first in the map, but the infrastructure code stands up all envs).
+To stand up prod as well, run `tofu apply` a second time after dev has
+deployed and been checked.
 
 1. **Apply dev** ("Only the user, in order"). The service serves the
    placeholder image; the host answers through the Worker (a 500 until the
    Worker holds its secret, then the placeholder page).
 2. **Deploy dev from CI** (push `main`), and check
    `https://learn.dev.palicanon.app`.
-3. **Then add prod**: copy `prod.tfvars.example` to `prod.tfvars` (git-ignored)
-   and `tofu apply -var-file=prod.tfvars`, or uncomment the `prod` block in
-   `variables.tf`. This creates `learn-pali-prod` and `learn.palicanon.app`
-   on the placeholder; repeat the secret steps with `prod`
-   (`origin-secret create prod`, `push prod`), then the first `v*` tag
-   deploys the real image. Prod has its own secret;
-   it is public too (no Access).
+3. **Then apply prod**: run `tofu apply` again. This creates `learn-pali-prod`
+   and `learn.palicanon.app` on the placeholder; repeat the secret steps with
+   `prod` (`origin-secret create prod`, `push prod`), then the first `v*` tag
+   deploys the real image. Prod has its own secret; it is public too (no Access).
+   (Prod is in the default; `prod.tfvars.example` shows the shape of an override.)
 
 ## Only the user, in order (dev)
 

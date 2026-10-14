@@ -582,6 +582,17 @@ else
   flunk "startup probe: timeout_seconds ($timeout) must be < period_seconds ($period)"
 fi
 
+# -------------------------------------------------------------------- infra/variables.tf
+echo "== infra/variables.tf: prod in the default envs"
+tf_file="$root/infra/variables.tf"
+prod_in_default=$(grep -A2 '^\s*prod\s*=\s*{' "$tf_file" | grep -c 'host.*=.*"learn.palicanon.app"')
+prod_access=$(grep -A3 '^\s*prod\s*=\s*{' "$tf_file" | grep 'access[[:space:]]*=.*false' | grep -c '.')
+if [ "$prod_in_default" -gt 0 ] && [ "$prod_access" -gt 0 ]; then
+  pass "infra/variables.tf: prod is in the default envs with host learn.palicanon.app and access = false"
+else
+  flunk "infra/variables.tf: prod is in the default envs with host learn.palicanon.app and access = false (prod_in_default=$prod_in_default, prod_access=$prod_access)"
+fi
+
 # -------------------------------------------------------------------- deploy.yml
 echo "== deploy.yml"
 if python3 -c 'import sys,yaml; yaml.safe_load(open(sys.argv[1]))' "$workflow" 2>"$work/yaml.err"; then

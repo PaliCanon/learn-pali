@@ -1,18 +1,16 @@
-# The second apply, once dev has deployed from CI and been checked:
-#   tofu apply -var-file=prod.tfvars   (copy this file to prod.tfvars)
-# `envs` is replaced as a whole, so dev is listed again. Neither host has
-# Cloudflare Access (`access` is false when omitted): both are public behind
-# the origin guard, and `admin_emails` is not needed.
-envs = {
-  dev = {
-    host          = "learn.dev.palicanon.app"
-    max_instances = 2
-  }
-  prod = {
-    host          = "learn.palicanon.app"
-    max_instances = 3
-  }
-}
+# An override shape (task 036): prod is now in variables.tf's default, so
+# this file is not needed for the first prod apply. It remains as the shape
+# of an override if either env's settings need to change later.
+# envs = {
+#   dev = {
+#     host          = "learn.dev.palicanon.app"
+#     max_instances = 2
+#   }
+#   prod = {
+#     host          = "learn.palicanon.app"
+#     max_instances = 3
+#   }
+# }
 
 # Only for an env that sets `access = true` (Cloudflare Access): who passes
 # it. Not stored in the repository: pass it as

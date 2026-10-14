@@ -178,7 +178,7 @@ dependencies = [
 
 [[package]]
 name = "build_deck"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "learn_core",
  "rusqlite",
@@ -1121,14 +1121,14 @@ checksum = "20870f649af7073d53e38067b2a84312175d56ea15217e1b15bc83506ec50afb"
 
 [[package]]
 name = "learn_cli"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "learn_core",
 ]
 
 [[package]]
 name = "learn_core"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -1136,7 +1136,7 @@ dependencies = [
 
 [[package]]
 name = "learn_pali"
-version = "0.0.0"
+version = "0.1.0"
 dependencies = [
  "any_spawner",
  "axum",

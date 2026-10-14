@@ -12,7 +12,7 @@ name = "learn-cli"
 path = "src/main.rs"
 
 [dependencies]
-learn_core = { version = "0.0.0", path = "../core" }
+learn_core = { version = "0.1.0", path = "../core" }
 
 [lints]
 workspace = true

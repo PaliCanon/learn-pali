@@ -220,4 +220,4 @@ Before the first deploy, the user:
    header, task 031); the one exception is the bootstrap hello the first
    `tofu apply` leaves, served before the first deploy.
 4. Pushes `main` (dev), checks `https://learn.dev.palicanon.app`, then adds
-   prod (`prod.tfvars.example`, a second `tofu apply`) and tags `v0.x.y`.
+   prod (a second `tofu apply`, prod is in variables.tf's default since 036) and tags `v0.x.y`.

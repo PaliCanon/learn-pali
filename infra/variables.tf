@@ -48,10 +48,13 @@ variable "envs" {
       max_instances = 2
       access        = false
     }
-    # prod = {
-    #   host          = "learn.palicanon.app"
-    #   max_instances = 3
-    # }
+    # Prod lives in this default, not in a git-ignored tfvars: `envs` is
+    # replaced as a whole, so an apply without that file would destroy prod (036).
+    prod = {
+      host          = "learn.palicanon.app"
+      max_instances = 3
+      access        = false
+    }
   }
 }
 

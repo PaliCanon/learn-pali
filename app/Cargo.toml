@@ -31,7 +31,7 @@ subtle = { version = "2", optional = true }
 console_error_panic_hook = { version = "0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 # The learning loop (task 002): deck, state, session; the JSON is its own.
-learn_core = { version = "0.0.0", path = "../core" }
+learn_core = { version = "0.1.0", path = "../core" }
 # The browser glue (store, today, export/import), hydrate only.
 web-sys = { version = "0.3", optional = true, features = [
   "Window",
