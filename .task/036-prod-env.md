@@ -1,6 +1,6 @@
 # 036 prod in the default envs, the workspace at 0.1.0
 
-status: building · rank: 2 · level: simple · type: infra · request: user, 2026-10-14 ("deploy le learn.palicanon.app") · light path
+status: merged · rank: 2 · level: simple · type: infra · request: user, 2026-10-14 ("deploy le learn.palicanon.app") · light path
 
 ## Summary
 Rank: difficulty 1 (uncomment one block, one version string), impact 2 (adds prod; nothing about dev changes) → 2.
@@ -12,3 +12,7 @@ Then (orchestrator): `tofu apply` (creates learn-pali-prod's secret, SA, IAM, Cl
 | --- | --- | --- |
 | Build | done | c510918, e4261d0; red: test failed until prod was in variables.tf; green: rollout-check 840/0, tofu validate ok, cargo tests ok |
 | Check | done | orchestrator: diff read (prod block, access false; versions 0.0.0 → 0.1.0 only, Cargo.lock 4 lines); rollout-check 840/0 per the lane. No visible result |
+| Merge | done | ab041ed on main |
+
+## Retro
+One line (light path): the lane stalled once mid-edit (600 s) and resumed with long commands in the background; nothing to carry beyond the small-steps rule already written.
