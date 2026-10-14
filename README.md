@@ -14,13 +14,35 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 
 ## What is here
 
-| Path | Crate | What |
-| --- | --- | --- |
-| `app/` | `learn_pali` | The site: Leptos SSR + hydrate, on ui-lib; the one page, the progress store, the embedded deck. |
-| `core/` | `learn_core` | The learning loop: deck, facets, Leitner stages, session, state. `serde` only; builds native and for wasm32, so the site can run it. Its rustdoc states the rules. |
-| `cli/` | `learn_cli` (bin `learn-cli`) | The loop at the terminal: `review`, `stats`, `new N`, `advance K`. |
-| `tools/build-deck/` | `build_deck` (bin `build-deck`) | Builds the deck JSON from the Digital Pāḷi Dictionary database; never part of the site's build. |
-| `core/fixtures/` | | `terms.txt` (the 50 terms) and `deck.json` (the deck built from them). |
+| Folder | What it holds |
+| --- | --- |
+| `app/` | Crate `learn_pali`, the site: Leptos SSR + hydrate on ui-lib. |
+| `app/src/` | Server code: the app shell (app.rs), entry point (main.rs), origin guard (origin.rs), progress store (store.rs), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
+| `app/src/pages/` | Page views, the home at `/`. |
+| `app/src/components/` | UI components: progress blocks, new terms picker, review session, term list, site footer. |
+| `app/src/learn/` | Learning session logic: home state, session run, Leitner stages, card summary, word lookups, the Context front's window around the blank, which translation shows. |
+| `app/locales/` | UI translations: en.json, fr.json, vi.json. |
+| `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |
+| `app/public/` | Static assets: favicon and logo. |
+| `app/tests/` | Integration tests: asset load and origin guard. |
+| `app/Dockerfile` | Container image build: cargo leptos build, debian runtime, non-root user, port 8080. |
+| `core/` | Crate `learn_core`, the learning loop library. `serde` only; builds for native and wasm32. |
+| `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math. |
+| `core/fixtures/` | Test fixtures: 50 terms (terms.txt) and the built deck (deck.json). |
+| `core/tests/` | Integration tests. |
+| `cli/` | Crate `learn_cli`, bin `learn-cli`, the learning loop at the terminal. Commands: review, stats, new N, advance K. |
+| `cli/src/` | CLI code: argument parsing, terminal UI, session runner, stats printer, progress store. |
+| `cli/tests/` | CLI tests. |
+| `tools/build-deck/` | Crate `build_deck`, bin `build-deck`, builds the deck JSON from the Digital Pāḷi Dictionary. Never part of the site's build. |
+| `tools/build-deck/src/` | Deck build: DPD parsing, word inflection, form lookup, translation via API, example segment alignment, source tracking. |
+| `tools/build-deck/fixtures/` | Test fixtures for build and translation. |
+| `infra/` | OpenTofu: Cloud Run service, Secret Manager, Cloudflare Worker and custom domain, per environment. |
+| `infra/worker/` | Cloudflare Worker: origin proxy (proxy.js) with node tests. |
+| `infra/scripts/` | Origin secret generation script and its test. |
+| `scripts/` | Repository scripts: deploy health check and rollout, Cloudflare access redirect pattern. |
+| `.github/workflows/` | CI: format, lint, test, doc, MSRV, coverage, deny checks (ci.yml). Deploy: image build, Cloud Run deploy, health check (deploy.yml). |
+| `.github/actions/ui-lib/` | Composite GitHub Action: checks out ui-lib at the pinned Cargo.toml tag with the palicanon-ci app token. |
+| `.task/` | Task definitions and records: one markdown file per task, its design, log and retro. |
 
 A card is a **term** (one DPD headword) with up to four **facets**: Meaning,
 Recall, Forms and Context. A term sits in a Leitner **stage** — Day, Week,
