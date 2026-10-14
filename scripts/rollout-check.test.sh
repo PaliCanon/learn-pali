@@ -582,6 +582,14 @@ else
   flunk "startup probe: timeout_seconds ($timeout) must be < period_seconds ($period)"
 fi
 
+echo "== infra/gcp.tf: ignore_changes includes revision"
+ignore_line=$(grep -A5 'ignore_changes = \[' "$gcp_file" | head -1)
+if echo "$ignore_line" | grep -q 'template\[0\]\.revision'; then
+  pass "gcp.tf: ignore_changes holds template[0].revision"
+else
+  flunk "gcp.tf: ignore_changes holds template[0].revision (line: $ignore_line)"
+fi
+
 # -------------------------------------------------------------------- infra/variables.tf
 echo "== infra/variables.tf: prod in the default envs"
 tf_file="$root/infra/variables.tf"

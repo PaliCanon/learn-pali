@@ -133,7 +133,9 @@ resource "google_cloud_run_v2_service" "app" {
     # tofu over it, so max_instances in variables.tf is the value at
     # creation; changing it afterwards is a `tofu apply -replace` or a
     # gcloud update, written down in infra/README.md.
-    ignore_changes = [template[0].containers[0].image, scaling, client, client_version]
+    # gcloud run deploy names each revision; without ignoring it, every apply
+    # after a deploy creates a new revision with the same image and no traffic.
+    ignore_changes = [template[0].containers[0].image, template[0].revision, scaling, client, client_version]
   }
   depends_on = [
     google_secret_manager_secret_iam_member.app_reads_origin,
