@@ -312,19 +312,29 @@ jobs:
           echo "::error::learn-pali: traffic of $SERVICE moved back to $PREVIOUS"
           exit 1
 
+      # The browser of the host check's hydrate step (rollout-check.sh
+      # --via-worker, task 040), its path handed as CHROME.
+      - name: Set Chrome up
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+
       # 6b. The public host, every env, through Cloudflare. An env without
       #     Access (ACCESS_<env> false, the workflow env above; dev and prod
       #     today, public behind the origin guard like search-front's): through
       #     the Worker, which adds the header (this script sends none and is
-      #     given none): the page, the wasm, no token on the wire. Exit 1 is a
+      #     given none): the page, the wasm, no token on the wire, then the
+      #     page hydrates in headless Chrome (task 040: no panic, <html
+      #     data-hydrated>; Chrome set up by the step before). Exit 1 is a
       #     refusal or a failed content check: a few tries (the new revision
       #     and the edge settle), then the traffic goes back to PREVIOUS and
       #     the job fails. Exit 4 is the Worker itself answering 500 (it lost
       #     its secret) and exit 6 is the edge or the Worker failing (no answer,
       #     a Cloudflare 52x, a 403): the revision is not at fault and a
       #     rollback cures neither, so no rollback, the job fails naming the
-      #     remedy. Exit 3 is Cloudflare challenging the runner: a warning,
-      #     nothing was learned. Exit 7 is the host answering the Access login
+      #     remedy. Exit 3 is Cloudflare challenging the runner (curl or
+      #     Chrome): a warning, nothing was learned, the check was skipped and
+      #     never passed: the orchestrator runs it by hand before any prod tag.
+      #     Exit 7 is the host answering the Access login
       #     redirect while ACCESS_<env> is false: the three copies of the fact
       #     (tofu, the workflow, the host) disagree; no rollback, no retry, the job
       #     fails naming ACCESS_<env>. An env WITH Access (ACCESS_<env> true): the
@@ -337,6 +347,7 @@ jobs:
         env:
           PREVIOUS: ${{ steps.current.outputs.serving }}
           MOVED: ${{ steps.current.outputs.running != 'true' }}
+          CHROME: ${{ steps.chrome.outputs.chrome-path }}
         run: |
           set -euo pipefail
           SERVICE="learn-pali-$ENV"
@@ -391,7 +402,7 @@ jobs:
           if [ "$RC" = 0 ]; then
             echo "learn-pali: https://$HOST answers through the Worker"
           elif [ "$RC" = 3 ]; then
-            echo "::warning::Cloudflare challenged the runner on https://$HOST/: the public-host check did not run"
+            echo "::warning::Cloudflare challenged the runner on https://$HOST/: a public-host check was skipped, never passed; run scripts/rollout-check.sh --via-worker https://$HOST by hand (CHROME set) before any prod tag"
           elif [ "$RC" = 4 ]; then
             echo "::error::the Worker answered 500 — run infra/scripts/origin-secret push $ENV"
             exit "$RC"

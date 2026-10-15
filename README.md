@@ -221,6 +221,10 @@ CI or pushed.
   checks it, then moves the traffic. The checks: `/` answers 200 and names
   PaliLearn; the hashed `.wasm` that `/` references answers 200; the retired
   review route answers 404.
+- On the public host, `scripts/rollout-check.sh --via-worker` also loads `/` in
+  headless Chrome and fails on a hydration panic or a missing `<html
+  data-hydrated>` (task 040); by hand on a Mac (Google Chrome.app is found):
+  `scripts/rollout-check.sh --via-worker https://learn.dev.palicanon.app`.
 
 Before the first deploy, the user:
 

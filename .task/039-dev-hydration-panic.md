@@ -11,3 +11,4 @@ To do (process-bug): reproduce locally against the dev origin with and without t
 | Step | Result | Output |
 | --- | --- | --- |
 | Found | done | www 004 lead, 2026-10-14; the www learn scene falls back to its drawing (www 004 ruling) |
+| Fix | fixed by 040 | the cause is ui-lib 063's (the Cloudflare decoy link first in `<body>`); learn-pali 040 hydrates from ui-lib v0.1.2's root and checks hydration in headless Chrome on the public host (branch fix/hydration-root) |

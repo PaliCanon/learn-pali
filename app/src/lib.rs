@@ -38,10 +38,15 @@ mod git_info;
 #[path = "../../../ui-lib/build/placeholders.rs"]
 mod placeholders;
 
-/// Browser entry point: hydrate the server-rendered page.
+/// Browser entry point: hydrate the server-rendered page from ui-lib's
+/// root (`<div id="pc-app">`, which `app::shell` wraps the app in), not
+/// from `<body>`: Cloudflare puts a decoy link before the app and scripts
+/// after it, and `hydrate_body` panics on the first (task 040, ui-lib
+/// 063). Sets `<html data-hydrated>` once done, which the deploy's
+/// rollout check reads.
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {
     console_error_panic_hook::set_once();
-    leptos::mount::hydrate_body(app::App);
+    palicanon_ui_lib::hydrate(app::App);
 }

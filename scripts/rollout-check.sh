@@ -15,7 +15,20 @@
 #       the public host (dev and prod, task 034): the Worker adds the header,
 #       this script sends none (and refuses to be given the secret, as a
 #       HEADER_FILE or as ORIGIN_SECRET). Same checks as `revision` that need
-#       no secret: `root`, `wasm`, `token`.
+#       no secret: `root`, `wasm`, `token`; then `hydrate` (task 040, ui-lib
+#       063 T3): headless Chrome loads `/` (the site's one page) and the app
+#       must hydrate. Chrome is $CHROME, else the first of google-chrome,
+#       google-chrome-stable, chromium, chromium-browser, chrome in PATH, else
+#       macOS's Google Chrome.app; none is a usage error (64) before any
+#       request. Chrome runs
+#       `--headless=new --enable-logging=stderr --virtual-time-budget=15000
+#       --dump-dom` (plus `--no-sandbox`: Ubuntu 24.04's AppArmor denies the
+#       sandbox to a Chrome outside /opt) under ROLLOUT_CHROME_TIMEOUT seconds
+#       (default 60). A `panicked at` or a `RuntimeError` on its stderr (the
+#       console), or no `data-hydrated` on `<html>` in the dumped DOM (ui-lib's
+#       `hydrate` sets it once done; a timeout or a crash leaves none) is a
+#       failed check (1). Chrome cannot add the origin header: this check is
+#       the public host's only.
 #   scripts/rollout-check.sh --access URL
 #       a public host with Cloudflare Access in front (an env that sets
 #       `access` in infra/variables.tf; none does today, deploy.yml's step 6b
@@ -49,7 +62,10 @@
 #     scripts/access-redirect-pattern) while the workflow's ACCESS_<env> says
 #     false: set it in deploy.yml to match infra, no rollback cures it. Any
 #     other 500, 302 or status is the service's, relayed, and is a failed
-#     check (1); 64 usage, an empty or missing scripts/access-redirect-pattern
+#     check (1). The `hydrate` check exits 3 too when Chrome is served
+#     Cloudflare's challenge page (`_cf_chl_opt`, "Just a moment"): the check
+#     is skipped, never passed, and is run by hand before any prod tag; 64
+#     usage, an empty or missing scripts/access-redirect-pattern or no Chrome
 #     included (checked before any request).
 #   --access: 0 the Access redirect; 2 the host answered 200 (Access is
 #     missing); 3 403 with cf-mitigated (Cloudflare challenged the runner:
@@ -64,6 +80,9 @@ export LC_ALL=C
 access_pattern_file="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/access-redirect-pattern"
 token_pattern='pc_(dev|prod)_[0-9A-Za-z]{43}'
 max_time="${ROLLOUT_MAX_TIME:-60}"
+chrome_time="${ROLLOUT_CHROME_TIMEOUT:-60}"
+# The pages the hydrate check loads: the site has one (`/`, app.rs Routes).
+hydrate_paths=(/)
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 
@@ -73,6 +92,7 @@ usage() {
 }
 
 case "$max_time" in '' | *[!0-9]*) echo "rollout-check: ROLLOUT_MAX_TIME must be whole seconds" >&2; exit 64 ;; esac
+case "$chrome_time" in '' | *[!0-9]*) echo "rollout-check: ROLLOUT_CHROME_TIMEOUT must be whole seconds" >&2; exit 64 ;; esac
 
 mode="${1:-}"
 case "$mode" in
@@ -107,6 +127,29 @@ fi
 if [ "$mode" = --via-worker ] && { [ ! -s "$access_pattern_file" ] || [ ! -r "$access_pattern_file" ]; }; then
   echo "rollout-check: usage: the pattern file $access_pattern_file is missing, empty or unreadable: --via-worker cannot tell an Access redirect from the service's own" >&2
   exit 64
+fi
+
+# --via-worker ends with the hydrate check: its browser is found up front, so
+# a runner without one is a usage error (64), never a failed check (1) that
+# would roll a good revision back.
+chrome=""
+if [ "$mode" = --via-worker ]; then
+  if [ -n "${CHROME:-}" ]; then
+    chrome="$CHROME"
+  else
+    for candidate in google-chrome google-chrome-stable chromium chromium-browser chrome; do
+      if command -v "$candidate" >/dev/null 2>&1; then
+        chrome="$(command -v "$candidate")"
+        break
+      fi
+    done
+    mac_chrome="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+    if [ -z "$chrome" ] && [ -x "$mac_chrome" ]; then chrome="$mac_chrome"; fi
+  fi
+  if [ -z "$chrome" ] || [ -d "$chrome" ] || [ ! -x "$chrome" ]; then
+    echo "rollout-check: usage: --via-worker needs Chrome for the hydrate check: set CHROME to its program, or put google-chrome or chromium in PATH" >&2
+    exit 64
+  fi
 fi
 
 die() { # exit-code check message
@@ -262,7 +305,53 @@ for name in root wasm; do
 done
 echo "rollout-check: token ok"
 
+# limited SECONDS CMD...: CMD, killed after SECONDS (124 from timeout, 142
+# from perl's alarm where there is no timeout: macOS).
+limited() {
+  local seconds=$1
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$seconds" "$@"
+  else
+    perl -e 'alarm shift; exec @ARGV or exit 127' "$seconds" "$@"
+  fi
+}
+
+# check_hydrate PATH: Chrome loads the host's PATH; the app must hydrate
+# (ui-lib's `hydrate` marks <html data-hydrated>) with no panic on the
+# console. Its DOM and console go to files, never through a pipe.
+hydrate_n=0
+check_hydrate() {
+  hydrate_n=$((hydrate_n + 1))
+  local dom="$work/hydrate-$hydrate_n.dom" console="$work/hydrate-$hydrate_n.err" rc=0
+  limited "$chrome_time" "$chrome" --headless=new --no-sandbox --disable-gpu --no-first-run \
+    --no-default-browser-check --user-data-dir="$work/chrome-$hydrate_n" --enable-logging=stderr \
+    --virtual-time-budget=15000 --dump-dom "$url$1" < /dev/null > "$dom" 2> "$console" || rc=$?
+  if grep -aEq 'panicked at|RuntimeError' "$console"; then
+    # Read apart from the message: bash 3.2 (macOS) mis-parses a quote
+    # inside $( ) inside a double-quoted string.
+    local first
+    first="$(grep -aEo -m 1 '(panicked at|RuntimeError)[^"]{0,160}' "$console" | head -n 1)"
+    fail hydrate "$1 panicked in the browser: $first"
+  fi
+  if grep -aEq '<html[^>]*[[:space:]]data-hydrated([=[:space:]/>]|$)' "$dom"; then
+    return 0
+  fi
+  if grep -aEq '_cf_chl_opt|<title>Just a moment' "$dom"; then
+    echo "rollout-check: challenge: Cloudflare challenged the browser on $1; the hydrate check was skipped, not passed: run it by hand before any prod tag" >&2
+    exit 3
+  fi
+  case "$rc" in
+    124 | 142) fail hydrate "Chrome did not finish $1 in $chrome_time s: no data-hydrated on <html>" ;;
+  esac
+  fail hydrate "$1 has no data-hydrated on <html> (Chrome exit $rc): the app did not hydrate"
+}
+
 if [ "$mode" = --via-worker ]; then
+  for path in "${hydrate_paths[@]}"; do
+    check_hydrate "$path"
+  done
+  echo "rollout-check: hydrate ok"
   exit 0
 fi
 
