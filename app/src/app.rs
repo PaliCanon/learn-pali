@@ -10,8 +10,8 @@ use leptos_router::components::{Route, Router, Routes};
 use leptos_router::hooks::use_location;
 use leptos_router::path;
 use palicanon_ui_lib::{
-    AppShell, EnvBadgeInfo, IconName, NavEntry, NavList, NavSection, language_attribute,
-    provide_language, theme_attribute,
+    AppShell, EnvBadgeInfo, HydrationRoot, IconName, NavEntry, NavList, NavSection,
+    language_attribute, provide_language, theme_attribute,
 };
 
 use crate::catalogue::strings;
@@ -39,7 +39,10 @@ pub(crate) const BADGE: EnvBadgeInfo = EnvBadgeInfo {
 /// [`language_attribute`]), so the first paint never flashes the wrong
 /// one. The stylesheet and the scripts are linked by their hashed names
 /// (`hash-files` in `Cargo.toml`), so a new build is never served from
-/// the browser's cache.
+/// the browser's cache. The app sits in ui-lib's [`HydrationRoot`]
+/// (`<div id="pc-app">`), where the browser's entry (`hydrate` in
+/// `lib.rs`) starts: what Cloudflare adds to `<body>` before or after it
+/// (a decoy link first, the beacon after) is never visited (task 040).
 pub fn shell(options: LeptosOptions) -> impl IntoView {
     view! {
         <!DOCTYPE html>
@@ -54,7 +57,9 @@ pub fn shell(options: LeptosOptions) -> impl IntoView {
                 <MetaTags />
             </head>
             <body>
-                <App />
+                <HydrationRoot>
+                    <App />
+                </HydrationRoot>
             </body>
         </html>
     }
@@ -430,6 +435,51 @@ mod tests {
         let open = html_tag(&html);
         assert!(open.contains(r#"lang="en""#), "{open}");
         assert!(!open.contains("data-theme"), "{open}");
+    }
+
+    /// The byte just past the `</div>` that closes the `<div` opened at
+    /// byte `open` of `html` (nested `<div>`s counted).
+    fn div_end(html: &str, open: usize) -> usize {
+        let mut depth = 0usize;
+        let mut at = open;
+        loop {
+            let next_open = html[at..].find("<div").map(|i| at + i);
+            let next_close = html[at..].find("</div>").map(|i| at + i).expect(html);
+            match next_open {
+                Some(o) if o < next_close => {
+                    depth += 1;
+                    at = o + "<div".len();
+                }
+                _ => {
+                    depth -= 1;
+                    at = next_close + "</div>".len();
+                    if depth == 0 {
+                        return at;
+                    }
+                }
+            }
+        }
+    }
+
+    /// The app sits in ui-lib's hydration root, `<div id="pc-app">`, the
+    /// one child of `<body>` the server renders: `palicanon_ui_lib::hydrate`
+    /// starts there, so what Cloudflare puts in `<body>` before or after it
+    /// (the decoy link, the beacon) is never visited (040, ui-lib 063).
+    #[test]
+    fn the_body_holds_the_app_in_the_hydration_root() {
+        let html = render_document("/", None);
+        let start = crate::test_support::position(&html, "<body>") + "<body>".len();
+        let body = &html[start..crate::test_support::position(&html, "</body>")];
+        assert!(body.starts_with(r#"<div id="pc-app">"#), "{body}");
+        assert_eq!(
+            div_end(body, 0),
+            body.len(),
+            "the root closes the body: {body}"
+        );
+        assert_eq!(body.matches(r#"id="pc-app""#).count(), 1, "{body}");
+        // The app inside it: the rail's first entry and the footer.
+        assert!(body.contains(r#"href="https://palicanon.app""#), "{body}");
+        assert!(body.contains("<footer"), "{body}");
     }
 
     /// [`render_layout`] without the hydration markers between elements.
