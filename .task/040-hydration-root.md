@@ -1,6 +1,6 @@
 # 040 hydrate from ui-lib's root past Cloudflare's injected nodes
 
-status: building · rank: 8 · level: hard · type: fix · request: ui-lib 063 (user, 2026-10-15); closes 039 · session: none (the ui-lib session holds the design)
+status: merged · rank: 8 · level: hard · type: fix · request: ui-lib 063 (user, 2026-10-15); closes 039 · session: none (the ui-lib session holds the design)
 
 ## Summary
 Rank: difficulty 5 (the site's hydration entry, its shell, a headless-Chrome check in the deploy's public-host step), impact 8 (learn.dev and learn.palicanon.app are dead in a browser until it ships) → 8, the rank of ui-lib 063 this task is the site side of.
@@ -25,3 +25,6 @@ Rollout (ROLL): this PR → main → dev deploy, T3 on learn.dev; green → tag 
 | Merge | done | 1afee33 on main (squash), pushed: deploy.yml rolls learn.dev with the hydrate check. |
 | Dev check | done | run on main: learn-pali-dev serves h-818e2c140f6cf657; the runner was challenged (exit 3, warning); orchestrator ran the browser check by hand (CDP): no panic, data-hydrated set, the app rendered. |
 | Prod | done | tag v0.1.1, run green: learn-pali-prod serves h-818e2c140f6cf657; runner challenged (exit 3); orchestrator CDP check on https://learn.palicanon.app: data-hydrated true, no panic, the app rendered. |
+
+## Retro
+With ui-lib 063 (retro-discussion d0f1c493b854747, docs 987f948). Follow-up: 042 hashed pkg names (as search-front 019).
