@@ -1,6 +1,6 @@
 # 039 learn.dev.palicanon.app panics at hydration
 
-status: design · rank: 5 · level: standard · type: bug · request: found by www 004's lead, 2026-10-14 · process: ../../docs/workflows/process-bug.mmd
+status: merged (by 040) · rank: 5 · level: standard · type: bug · request: found by www 004's lead, 2026-10-14 · process: ../../docs/workflows/process-bug.mmd
 
 ## Summary
 Rank: difficulty 4 (a hydration panic inside tachys, a Cloudflare injection suspected, to reproduce and pin), impact 6 (the dev site is unusable in a browser: stuck on "Loading your progress…") → 5.
@@ -12,3 +12,4 @@ To do (process-bug): reproduce locally against the dev origin with and without t
 | --- | --- | --- |
 | Found | done | www 004 lead, 2026-10-14; the www learn scene falls back to its drawing (www 004 ruling) |
 | Fix | fixed by 040 | the cause is ui-lib 063's (the Cloudflare decoy link first in `<body>`); learn-pali 040 hydrates from ui-lib v0.1.2's root and checks hydration in headless Chrome on the public host (branch fix/hydration-root) |
+| Fixed | done | by 040 (ui-lib 063): learn.palicanon.app and learn.dev hydrate again, 2026-10-15. |
