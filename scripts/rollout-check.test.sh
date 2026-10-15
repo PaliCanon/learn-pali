@@ -209,6 +209,9 @@ serve() { # scenario -> URL, SLOG, SRV_PID
   serve_n=$((serve_n + 1))
   SLOG="$work/log.$serve_n"
   local pf="$work/port.$serve_n"
+  # A serve inside $( ) does not move the parent's counter: the next one
+  # reuses the number, so a stale port file must not answer for it.
+  rm -f "$pf"
   : > "$SLOG"
   python3 "$work/fake.py" "$1" "$pf" "$SLOG" &
   SRV_PID=$!
@@ -229,6 +232,51 @@ exec "$real_curl" "\$@"
 SH
 chmod +x "$shim/curl"
 
+# A fake Chrome (task 040, T3): records its arguments, then plays the
+# browser's side of a hydration as FAKE_CHROME says. The DOM goes to stdout
+# (--dump-dom), the console to stderr (--enable-logging=stderr).
+fake_chrome="$work/fake-chrome"
+cat > "$fake_chrome" <<SH
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >> "$work/chrome-argv"
+SH
+cat >> "$fake_chrome" <<'SH'
+decoy='<a href="/cdn-cgi/content?id=x" style="display:none"></a>'
+jsd='<script>window.__CF$cv$params={};var s=document.createElement("script");s.src="/cdn-cgi/challenge-platform/scripts/jsd/main.js";</script>'
+app='<div id="pc-app"><main>PaliLearn</main></div>'
+panic='[1015/101010.000:INFO:CONSOLE(1)] "panicked at /cargo/tachys-0.2.19/src/hydration.rs:227:9:\ninternal error: entered unreachable code", source: (1)'
+case "${FAKE_CHROME:-ok}" in
+  ok)
+    echo '[1015/101010.000:INFO:CONSOLE(0)] "Failed to find a valid digest in the integrity attribute", source: (0)' >&2
+    printf '<html lang="en" data-hydrated=""><head></head><body>%s%s%s</body></html>\n' "$decoy" "$app" "$jsd" ;;
+  panic)
+    echo "$panic" >&2
+    printf '<html lang="en"><head></head><body>%s%s</body></html>\n' "$decoy" "$app" ;;
+  panic_marked)
+    echo "$panic" >&2
+    printf '<html lang="en" data-hydrated=""><head></head><body>%s</body></html>\n' "$app" ;;
+  runtime_error)
+    echo '[1015/101010.000:INFO:CONSOLE(0)] "Uncaught RuntimeError: unreachable", source: (0)' >&2
+    printf '<html lang="en" data-hydrated=""><head></head><body>%s</body></html>\n' "$app" ;;
+  unmarked)
+    printf '<html lang="en"><head></head><body>%s%s</body></html>\n' "$decoy" "$app" ;;
+  body_marked)
+    printf '<html lang="en"><head></head><body data-hydrated="">%s</body></html>\n' "$app" ;;
+  lookalike)
+    printf '<html lang="en" data-hydrated-not=""><head></head><body>%s</body></html>\n' "$app" ;;
+  challenge)
+    printf '<html lang="en-US"><head><title>Just a moment...</title></head><body><script>window._cf_chl_opt={cType:"managed"};</script></body></html>\n' ;;
+  crash)
+    echo "[1015/101010.000:FATAL:zygote_host_impl_linux.cc(127)] No usable sandbox!" >&2
+    exit 1 ;;
+  hang) exec sleep 30 ;;
+esac
+SH
+chmod +x "$fake_chrome"
+# Run once now: macOS scans a new executable on its first run, which took
+# over 10 s under a cargo build's load and failed the first case's limit.
+"$fake_chrome" > /dev/null 2>&1
+
 header="$work/header"
 printf 'x-origin-auth: %s\n' "$SECRET" > "$header"
 chmod 600 "$header"
@@ -241,7 +289,9 @@ run_case() {
   local args=() a
   for a in "$@"; do args+=("${a//@URL/$URL}"); done
   : > "$work/curl-argv"
-  out="$(PATH="$shim:$PATH" ROLLOUT_MAX_TIME="${MAXT:-10}" bash "$script" "${args[@]}" 2>&1)"
+  : > "$work/chrome-argv"
+  out="$(PATH="$shim:$PATH" ROLLOUT_MAX_TIME="${MAXT:-10}" CHROME="$fake_chrome" \
+    FAKE_CHROME="${FAKE_CHROME:-ok}" ROLLOUT_CHROME_TIMEOUT="${CHROME_TIME:-30}" bash "$script" "${args[@]}" 2>&1)"
   rc=$?
   stop
   assert_eq "$name: exit code" "$want" "$rc"
@@ -249,6 +299,7 @@ run_case() {
   assert_absent "$name: the secret is not printed" "$SECRET" "$out"
   assert_absent "$name: no token shape is printed" "$TOKEN_HEAD" "$out"
   assert_absent "$name: the secret is in no curl argument" "$SECRET" "$(cat "$work/curl-argv")"
+  assert_absent "$name: the secret is in no Chrome argument" "$SECRET" "$(cat "$work/chrome-argv")"
 }
 
 echo "== rollout-check.sh: revision URL HEADER_FILE"
@@ -370,6 +421,55 @@ assert_eq "revision mode: a 500 with the Worker's words is a plain failure (1), 
   stop
 )"
 
+echo "== rollout-check.sh: --via-worker hydrate (headless Chrome, task 040 T3)"
+run_case "hydrate: the page hydrates past the decoy link" via_ok 0 "hydrate ok" --via-worker @URL
+argv_chrome="$(cat "$work/chrome-argv")"
+assert_eq "hydrate: Chrome is run once, on / (the site's one page)" "1" "$(grep -c '' "$work/chrome-argv")"
+assert_match "hydrate: Chrome is given the host's / last" " $URL/\$" "$argv_chrome"
+for flag in --headless=new --dump-dom --virtual-time-budget=15000 --enable-logging=stderr; do
+  assert_match "hydrate: Chrome runs with $flag" "(^| )$flag( |$)" "$argv_chrome"
+done
+assert_match "hydrate: Chrome uses a profile of its own" "--user-data-dir=" "$argv_chrome"
+assert_match "hydrate: the curl checks ran first" "token ok.*hydrate ok" "$(tr '\n' ' ' <<<"$out")"
+FAKE_CHROME=panic run_case "hydrate: a panic at hydration (the decoy, before the fix)" via_ok 1 "FAIL hydrate.*panicked at" --via-worker @URL
+FAKE_CHROME=panic_marked run_case "hydrate: a panic after the marker is still a failure" via_ok 1 "FAIL hydrate.*panicked at" --via-worker @URL
+FAKE_CHROME=runtime_error run_case "hydrate: an uncaught wasm RuntimeError" via_ok 1 "FAIL hydrate.*RuntimeError" --via-worker @URL
+FAKE_CHROME=unmarked run_case "hydrate: no data-hydrated on <html>" via_ok 1 "FAIL hydrate.*data-hydrated" --via-worker @URL
+FAKE_CHROME=body_marked run_case "hydrate: the marker on <body> is not the marker" via_ok 1 "FAIL hydrate.*data-hydrated" --via-worker @URL
+FAKE_CHROME=lookalike run_case "hydrate: data-hydrated-not is not the marker" via_ok 1 "FAIL hydrate.*data-hydrated" --via-worker @URL
+FAKE_CHROME=crash run_case "hydrate: Chrome dies with no DOM" via_ok 1 "FAIL hydrate.*Chrome exit 1" --via-worker @URL
+FAKE_CHROME=hang CHROME_TIME=2 run_case "hydrate: Chrome does not finish in time" via_ok 1 "FAIL hydrate.*did not finish.*2 s" --via-worker @URL
+FAKE_CHROME=challenge run_case "hydrate: Cloudflare challenged the browser: skipped, never a pass" via_ok 3 "challenge.*skipped" --via-worker @URL
+assert_absent "hydrate: a challenge never says hydrate ok" "hydrate ok" "$out"
+FAKE_CHROME=panic run_case "hydrate: Chrome is not run when a curl check failed" via_root500 1 "FAIL root" --via-worker @URL
+assert_eq "hydrate: no Chrome call after a failed curl check" "0" "$(grep -c '' "$work/chrome-argv")"
+run_case "hydrate: the revision mode runs no Chrome (the origin header)" healthy 0 "guard ok" revision @URL "$header"
+assert_eq "hydrate: no Chrome call in the revision mode" "0" "$(grep -c '' "$work/chrome-argv")"
+# Chrome is found up front: a CHROME that is not a program is a usage error
+# (64) before any request, never a failed check (1, a rollback).
+serve via_ok
+out="$(CHROME="$work/no-such-chrome" bash "$script" --via-worker "$URL" 2>&1)"
+rc=$?
+stop
+assert_eq "hydrate: CHROME is not a program: 64" "64" "$rc"
+assert_match "hydrate: and it says so" "usage.*Chrome" "$out"
+assert_eq "hydrate: and nothing was asked" "0" "$(grep -c '^GET' "$SLOG")"
+serve via_ok
+out="$(ROLLOUT_CHROME_TIMEOUT=soon CHROME="$fake_chrome" bash "$script" --via-worker "$URL" 2>&1)"
+rc=$?
+stop
+assert_eq "hydrate: ROLLOUT_CHROME_TIMEOUT not whole seconds: 64" "64" "$rc"
+# Without CHROME, the browser is looked up in PATH (google-chrome first).
+mkdir -p "$work/chrome-path"
+cp "$fake_chrome" "$work/chrome-path/google-chrome"
+serve via_ok
+: > "$work/chrome-argv"
+out="$(env -u CHROME PATH="$work/chrome-path:$PATH" bash "$script" --via-worker "$URL" 2>&1)"
+rc=$?
+stop
+assert_eq "hydrate: google-chrome found in PATH" "0" "$rc"
+assert_eq "hydrate: and run" "1" "$(grep -c '' "$work/chrome-argv")"
+
 echo "== the Access redirect pattern: one file, read by the script"
 pattern_file="$here/access-redirect-pattern"
 assert_eq "pattern: the file is one line" "1" "$(grep -c '' "$pattern_file" 2>/dev/null)"
@@ -466,7 +566,7 @@ check_usage "via-worker is given a header file" --via-worker http://127.0.0.1:9 
 check_usage "via-worker is given a second argument" --via-worker http://127.0.0.1:9 extra
 # The secret never reaches this mode, even from the environment.
 serve via_ok
-out="$(ORIGIN_SECRET="$SECRET" bash "$script" --via-worker "$URL" 2>&1)"
+out="$(ORIGIN_SECRET="$SECRET" CHROME="$fake_chrome" bash "$script" --via-worker "$URL" 2>&1)"
 rc=$?
 stop
 assert_eq "usage: via-worker with ORIGIN_SECRET set exits 64" "64" "$rc"
@@ -669,6 +769,19 @@ assert_file_has "deploy.yml: the host check is --via-worker on the host" "$work/
 assert_file_has "deploy.yml: the host check calls --access for an env with Access" "$work/step-host.sh" 'rollout-check\.sh --access "https://\$HOST"'
 assert_file_has "deploy.yml: the host check tries up to 5 times" "$work/step-host.sh" 'for _ in 1 2 3 4 5'
 assert_file_has "deploy.yml: the host check names the remedy of the Worker's 500" "$work/step-host.sh" 'run infra/scripts/origin-secret push \$ENV'
+# T3 (040): the host check runs headless Chrome; the workflow sets it up and
+# hands its path, before the host check.
+assert_eq "deploy.yml: Chrome is set up (browser-actions/setup-chrome@v2, id chrome) before the host check, which gets its path as CHROME" \
+  "chrome-before-host uses=browser-actions/setup-chrome@v2 CHROME=\${{ steps.chrome.outputs.chrome-path }}" "$(python3 - "$workflow" <<'PY2'
+import sys, yaml
+st = yaml.safe_load(open(sys.argv[1]))["jobs"]["site"]["steps"]
+ids = [x.get("id") for x in st]
+chrome = next((x for x in st if x.get("id") == "chrome"), {})
+host = next((x for x in st if x.get("id") == "host"), {})
+order = "chrome-before-host" if "chrome" in ids and ids.index("chrome") < ids.index("host") else "chrome-not-before-host"
+print("%s uses=%s CHROME=%s" % (order, chrome.get("uses", ""), host.get("env", {}).get("CHROME", "")))
+PY2
+)"
 # The workflow-level map and infra/variables.tf's `envs` defaults say the same
 # (change both together): dev from the default block, prod from the
 # optional() default (prod is not in the default map yet).
@@ -1050,6 +1163,7 @@ out="$(host_step)"
 rc=$?
 assert_eq "host: exit 3 (a Cloudflare challenge) only warns" "0" "$rc"
 assert_match "host: as a warning" "::warning::" "$out"
+assert_match "host: exit 3 says a check was skipped, to run by hand before a prod tag" "skipped.*by hand.*prod tag" "$out"
 assert_eq "host: exit 3 is not retried" "1" "$(count 'rollout-check --via-worker')"
 assert_absent "host: exit 3 does not touch the traffic" "update-traffic" "$(calls)"
 
