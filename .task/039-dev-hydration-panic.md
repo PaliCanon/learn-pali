@@ -13,3 +13,6 @@ To do (process-bug): reproduce locally against the dev origin with and without t
 | Found | done | www 004 lead, 2026-10-14; the www learn scene falls back to its drawing (www 004 ruling) |
 | Fix | fixed by 040 | the cause is ui-lib 063's (the Cloudflare decoy link first in `<body>`); learn-pali 040 hydrates from ui-lib v0.1.2's root and checks hydration in headless Chrome on the public host (branch fix/hydration-root) |
 | Fixed | done | by 040 (ui-lib 063): learn.palicanon.app and learn.dev hydrate again, 2026-10-15. |
+
+## Retro
+Closed by learn-pali 040 (ui-lib 063): the cause sat upstream (Cloudflare's decoy link first in `<body>`), so the lessons are 063's and 040's retros. Carried from here: a site deployed behind Cloudflare is checked in a real browser (hydration), not only with curl — learn-pali's first deploy (031–036) checked HTTP codes and went live broken; 040 adds the headless check to the rollout.
