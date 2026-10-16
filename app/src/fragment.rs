@@ -141,7 +141,8 @@ pub fn LearnProvider(
 }
 
 /// 'Your progress', the section for the host's Settings (`AppShell`'s
-/// `settings_extra`): Export and Import, with the reason when they are off.
+/// `settings_extra`): Export and Import, with the reason when they are off,
+/// then the sync (its `ProgressActions`) when the host gave a transport.
 ///
 /// # Panics
 /// When there is no [`LearnProvider`] above it.

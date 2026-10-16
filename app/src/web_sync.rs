@@ -2,15 +2,17 @@
 //! the browser, with no server of ours in between ([`web_sync`]).
 //!
 //! - **Sign-in.** Google Identity Services' token client (the script
-//!   [`GIS_SCRIPT`]), injected on the first Sign in or Sync tap only: a
-//!   learner who never syncs loads no Google script. The web client
+//!   [`GIS_SCRIPT`]), loaded when the sync UI shows where a tap may follow
+//!   (`prepare`: Settings opened, or the home's Sync chip shown): a page
+//!   that never opens Settings asks nothing of Google. The web client
 //!   [`CLIENT_ID`] (a build-time constant, `LEARN_PALI_GOOGLE_CLIENT_ID`
 //!   overrides it) asks [`scope`]: `drive.appdata` (the hidden app folder)
-//!   and `email` (to show the account). `requestAccessToken` runs in the
-//!   tap's gesture, with `prompt: ''` and the remembered email as
-//!   `login_hint`. On the very first tap the script loads first; a browser
-//!   that blocks the window then answers [`SyncError::Popup`] and the
-//!   second tap, the script loaded, opens it at once.
+//!   and `email` (to show the account). The Sign in or Sync tap calls
+//!   `requestAccessToken` inside its gesture, with `prompt: ''` and the
+//!   remembered email as `login_hint`, so the browser lets Google's window
+//!   open; a tap before the script is there answers [`SyncError::Network`]
+//!   at once (Retry) and asks for it. A window the browser still blocks
+//!   answers [`SyncError::Popup`].
 //! - **The token** lives in this tab's memory only, with its expiry
 //!   (`expires_in`), never in storage and never sent to our server.
 //!   `localStorage[pc_learn_sync]` keeps only that sync is on and the
