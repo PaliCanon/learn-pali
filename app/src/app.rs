@@ -478,7 +478,10 @@ mod tests {
         );
         assert_eq!(body.matches(r#"id="pc-app""#).count(), 1, "{body}");
         // The app inside it: the rail's first entry and the footer.
-        assert!(body.contains(r#"href="https://search.palicanon.app""#), "{body}");
+        assert!(
+            body.contains(r#"href="https://search.palicanon.app""#),
+            "{body}"
+        );
         assert!(body.contains("<footer"), "{body}");
     }
 
