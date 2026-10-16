@@ -11,7 +11,7 @@ The first public download of the app waits for Learn, Search and the Map (user, 
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ validated"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓ 5 commits"]:::done --> Verify["Verify ✓ 372+9+5+6"]:::done --> Review["Review ✓ 2 rounds; 3rd waived by the user"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ a19bfd6"]:::done --> Retro:::todo
+  Define["Define ✓ validated"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓ 5 commits"]:::done --> Verify["Verify ✓ 372+9+5+6"]:::done --> Review["Review ✓ 2 rounds; 3rd waived by the user"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ a19bfd6"]:::done --> Retro["Retro ✓ validated"]:::done
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -97,3 +97,12 @@ Ruled out: provide `Backend` vs the traits (an internal name, the contract holds
 
 ## Merge
 a19bfd6 (fragment-v0.1.0)
+
+## Retro
+Retro agent: retro-discussion db8170bd0cdd24a, summary 10698; voice gemini 10729 (flash-lite, after a 429). Validated by the orchestrator, 2026-10-16:
+- The design's tests did not name a refused, newer or unreadable write on the web store; two review rounds each found a silent loss → ask-yourself/common/every-write-can-fail.md (docs 72dadb5).
+- Coverage ran under ssr while web.rs is browser-gated → prompts/steps/verify.md: coverage names what it does not count (docs 72dadb5).
+- The sibling-path build include → the clean-checkout build in verify.md (docs 4734c85, from 021's retro).
+- Review round 3 waived by the user; the stale-chooser, missing-chooser and FileReader-error DOM glue has no browser test → follow-up in the learn-pali viewer session.
+- Kept as is: hidden dependencies documented in LearnProvider's rustdoc (the app 003/005 design repeats them); the review tooling issues are in prompts/review.md.
+
