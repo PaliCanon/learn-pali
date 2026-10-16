@@ -23,6 +23,8 @@ flowchart LR
 | Plan | done | one Opus lane (merge in core, the cycle and the web transport in app/, UI, CSP, infra): files coupled through the seam |
 | Build | done | lane:sync (Opus): 46a3571 merge, f1d57ac seam + cycle + UI, a430152 leptosfmt (pre-existing on main), 87cb3cb web transport (web-sync), fcb597e Drive API declared (tofu plan: 1 to import), fb6cced docs. Checks exit 0 but ssr tests 429/1 (a pre-existing test matching the branch name in the badge). Coverage lines 97.71% (main 97.62%). Site served: hydrates, no Google script before a tap |
 | Rulings | done | orchestrator (thread): no site CSP here (none exists: follow-up opened); failed push keeps the merged state locally; Session::advance noted; sign-out after reload cannot revoke: the line says so with a link to Google's connections page; deps accepted; the badge-matching test fixed here |
+| Deploy dev | done | 35217b5 on learn-pali-dev (revision 00036-rex, image h-647d7147ccff4637, Cloud Build from the laptop); rollout-check exit 0 on the tagged URL and via the Worker; hydrated, no panic; rollback: learn-pali-dev-rot-20261016 |
+| Review 1 | fail | reviewer: d13594a812fb14c v1; deep 11170/11183/11196/11209 (real defects: a push after a refused save, a cycle surviving sign-out, the first tap's popup outside the gesture), sage 11230/11245/11259/11272 (thin). Rulings in ### Round 1 |
 
 ## Design
 Viewer: learn-pali-050-progress-sync/design, v6 (v6: the desktop sign-in shows its link, user 2026-10-16; desktop only).
@@ -58,5 +60,20 @@ flowchart TB
 ## Lanes
 
 ## Reviews
+
+### Round 1 — 2026-10-16
+Voices: deep (11170, 11183, 11196, 11209), sage (11230, 11245, 11259, 11272). Rulings (orchestrator), taken in:
+- S1 (deep): `join` reads the save's outcome: a save refused (NewerVersion, Unreadable, Failed) stops the cycle before any push (test).
+- S2 (deep): sign-out cancels a cycle in flight: a generation number taken at start; an answer from an older generation is dropped (no save, no lost_token, no chip); busy/again cleared (tests: sign out during pull, during push).
+- S3 (deep): "changed" compares the states as sets of terms (order-free); a reordered copy neither saves nor fires changed (test).
+- S4 (deep): the first tap's popup must open inside the gesture: the GIS script is loaded when the Settings panel or the home chip first renders (no Google call, no token request), so the tap calls requestAccessToken synchronously; if the script is not loaded yet, the tap answers Network with Retry (test: no Google request before a tap; script load failure → Network).
+- S5 (deep): a pull or push that never answers times out (30 s) to Failed(Network) and frees busy (test).
+- S6 (deep): `token_of` with no expires_in uses 3599 s; `first_file_id` skips an entry without id; `remembered("")` is signed out, not remembered (tests).
+- S7 (deep): the build without web-sync renders no sync UI (sync = None), never a dead Sign in (test).
+- S8 (deep): the Drive location is one module `drive_location` (the appDataFolder constants and the query), as designed.
+- S9 (deep): merge.rs's doc names Session::advance as the one call that lowers the key (CLI only) — ruling 3 of the build.
+- S10 (deep): infra google_project_service.drive names its project; CI's commands run learn_pali's unit tests (verify, fix if not).
+- Design wording (deep, v7): save happens before push (the local copy first); the sync UI sits in ProgressActions inside LearnSettings; a sync during a running session is deferred to the session's end (no Reload banner).
+Ruled out: sage's "join merges a newer or unreadable copy" (tests a_newer_copy_stops_the_sync_and_is_never_written and a_copy_that_does_not_parse_stops_the_sync_with_its_raw_text cover it).
 
 ## Merge
