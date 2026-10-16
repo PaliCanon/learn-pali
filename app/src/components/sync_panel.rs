@@ -8,6 +8,8 @@
 //! shows the account, where the sync stands ('Last synced at `<time>`', 'Not
 //! synced.' with the reason), 'Sync now' ('Retry' after a failure) and
 //! 'Sign out'; a Drive copy that could not be read is offered for download.
+//! Remembered with no token at hand, it also says that Sign out cannot
+//! revoke the access from here, with a link to the Google account.
 //! The chip shows on the home while the account is remembered with no
 //! token at hand: its tap asks Google for one, in the gesture, then syncs.
 
@@ -18,6 +20,10 @@ use palicanon_ui_lib::{Button, Variant};
 use crate::backend::{Backend, SyncAccount, SyncError};
 use crate::catalogue::{Locale, strings};
 use crate::sync::{Refusal, SyncCycle, SyncStatus};
+
+/// Where the learner removes the site's access to their Drive in their
+/// Google account (connected apps).
+pub(crate) const GOOGLE_CONNECTIONS: &str = "https://myaccount.google.com/connections";
 
 /// The name of a Drive copy that could not be read, when downloaded.
 pub(crate) const DRIVE_COPY_NAME: &str = "pc_learn-drive.json";
@@ -36,7 +42,14 @@ pub(crate) fn SyncPanel() -> impl IntoView {
             <div data-sync="" class="flex flex-col gap-3 border-t border-line pt-4">
                 {move || match account.get() {
                     SyncAccount::SignedOut => view! { <SignedOut sync=sync /> }.into_any(),
-                    SyncAccount::Remembered { email } | SyncAccount::SignedIn { email } => {
+                    SyncAccount::Remembered { email } => {
+                        view! {
+                            <SignedIn sync=sync email=email />
+                            <RevokeNote />
+                        }
+                            .into_any()
+                    }
+                    SyncAccount::SignedIn { email } => {
                         view! { <SignedIn sync=sync email=email /> }.into_any()
                     }
                 }}
@@ -94,6 +107,27 @@ fn SignedIn(
                 {move || td_string!(t.locale(), sync_sign_out)}
             </Button>
         </div>
+    }
+}
+
+/// Remembered with no token at hand (the site after a reload): Sign out
+/// cannot revoke the access at Google from here, so the line says where
+/// the learner removes it, their Google account's connected apps.
+#[component]
+fn RevokeNote() -> impl IntoView {
+    let t = strings();
+    view! {
+        <p class="text-sm text-muted">
+            {move || td_string!(t.locale(), sync_revoke_note)} " "
+            <a
+                href=GOOGLE_CONNECTIONS
+                target="_blank"
+                rel="noopener noreferrer"
+                class="underline underline-offset-2 hover:text-heading"
+            >
+                {move || td_string!(t.locale(), sync_revoke_link)}
+            </a> "."
+        </p>
     }
 }
 
@@ -377,6 +411,52 @@ mod tests {
         );
     }
 
+    /// After a reload no token is at hand, so Sign out cannot revoke the
+    /// access at Google: the line says so and links to the Google account.
+    #[test]
+    fn a_remembered_account_says_where_the_access_is_removed() {
+        for (language, note, link) in [
+            (
+                Language::En,
+                "After a reload, Sign out cannot revoke Google Drive access from here.",
+                "Remove it in your Google account",
+            ),
+            (
+                Language::Fr,
+                "Après un rechargement, Se déconnecter ne peut pas révoquer l’accès à Google Drive depuis ici.",
+                "Retirez-le dans votre compte Google",
+            ),
+            (
+                Language::Vi,
+                "Sau khi tải lại trang, Đăng xuất không thể thu hồi quyền truy cập Google Drive từ đây.",
+                "Hãy gỡ quyền này trong tài khoản Google của bạn",
+            ),
+        ] {
+            let account = SyncAccount::Remembered { email: None };
+            let html = panel(account, SyncStatus::Idle, language);
+            assert!(html.contains(note), "{html}");
+            let anchor = crate::test_support::tag_around(&html, &format!(">{link}<"));
+            assert!(anchor.starts_with("<a "), "{anchor}");
+            assert!(
+                anchor.contains(&format!(r#"href="{GOOGLE_CONNECTIONS}""#)),
+                "{anchor}"
+            );
+            assert!(anchor.contains(r#"target="_blank""#), "{anchor}");
+            assert!(anchor.contains(r#"rel="noopener noreferrer""#), "{anchor}");
+        }
+        assert_eq!(
+            GOOGLE_CONNECTIONS,
+            "https://myaccount.google.com/connections"
+        );
+        for account in [SyncAccount::SignedOut, email()] {
+            let html = panel(account.clone(), SyncStatus::Idle, Language::En);
+            assert!(
+                !html.contains("myaccount.google.com"),
+                "{account:?}: {html}"
+            );
+        }
+    }
+
     #[test]
     fn while_syncing_sync_now_is_off() {
         let html = panel(email(), SyncStatus::Syncing, Language::En);
@@ -491,7 +571,7 @@ mod tests {
                 .iter()
                 .filter(|(key, _)| key.starts_with("sync_"))
                 .collect();
-            assert_eq!(sync.len(), 22, "{code}");
+            assert_eq!(sync.len(), 24, "{code}");
             for (key, value) in sync {
                 assert!(!value.as_str().unwrap().contains('—'), "{code} {key}");
             }

@@ -108,6 +108,8 @@
   "sync_refused_newer": "This device’s progress was saved by a newer version.",
   "sync_refused_unreadable": "This device’s progress could not be read.",
   "sync_retry": "Retry",
+  "sync_revoke_link": "Remove it in your Google account",
+  "sync_revoke_note": "After a reload, Sign out cannot revoke Google Drive access from here.",
   "sync_sign_in": "Sync with Google Drive",
   "sync_sign_out": "Sign out",
   "sync_syncing": "Syncing…",

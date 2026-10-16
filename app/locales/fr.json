@@ -108,6 +108,8 @@
   "sync_refused_newer": "La progression de cet appareil a été enregistrée par une version plus récente.",
   "sync_refused_unreadable": "La progression de cet appareil n’a pas pu être lue.",
   "sync_retry": "Réessayer",
+  "sync_revoke_link": "Retirez-le dans votre compte Google",
+  "sync_revoke_note": "Après un rechargement, Se déconnecter ne peut pas révoquer l’accès à Google Drive depuis ici.",
   "sync_sign_in": "Synchroniser avec Google Drive",
   "sync_sign_out": "Se déconnecter",
   "sync_syncing": "Synchronisation…",

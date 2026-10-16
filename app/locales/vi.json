@@ -108,6 +108,8 @@
   "sync_refused_newer": "Tiến độ trên thiết bị này được lưu bởi một phiên bản mới hơn.",
   "sync_refused_unreadable": "Không đọc được tiến độ trên thiết bị này.",
   "sync_retry": "Thử lại",
+  "sync_revoke_link": "Hãy gỡ quyền này trong tài khoản Google của bạn",
+  "sync_revoke_note": "Sau khi tải lại trang, Đăng xuất không thể thu hồi quyền truy cập Google Drive từ đây.",
   "sync_sign_in": "Đồng bộ với Google Drive",
   "sync_sign_out": "Đăng xuất",
   "sync_syncing": "Đang đồng bộ…",
