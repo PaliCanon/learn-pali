@@ -44,6 +44,7 @@ use palicanon_ui_lib::{
     Size, Token, Variant, WordEntry, language_signal,
 };
 
+use crate::backend::Backend;
 use crate::catalogue::Locale;
 use crate::components::new_terms::NewTerms;
 use crate::deck::deck;
@@ -55,7 +56,7 @@ use crate::learn::translation::{translation_for, translator_name};
 use crate::learn::window::{MAX_CHARS, Segment, context_window, source_ref};
 use crate::learn::words::{date_words, label_words, pos_words};
 use crate::seed::browser_seed;
-use crate::store::{Load, load, save};
+use crate::store::Load;
 use crate::today::{browser_today, session_today};
 
 /// The card's box: a definite height (the `RevealCard` contract, so its
@@ -96,23 +97,24 @@ pub(crate) enum Phase {
 /// Reads the store and starts a session on what it holds: the signal of a
 /// run is owned by the page (`owner`), so it outlives the callback that
 /// made it. An empty store is a session with nothing due.
-pub(crate) fn start_phase(owner: &Owner) -> Phase {
-    match load() {
-        Load::Ok(state) => begin(owner, state),
-        Load::Empty => begin(owner, State::empty()),
+pub(crate) fn start_phase(owner: &Owner, backend: Backend) -> Phase {
+    match backend.load() {
+        Load::Ok(state) => begin(owner, backend, state),
+        Load::Empty => begin(owner, backend, State::empty()),
         Load::Invalid { .. } => Phase::Broken(BrokenKind::Invalid),
         Load::NewerVersion { .. } => Phase::Broken(BrokenKind::NewerVersion),
+        Load::Unreadable(_) => Phase::Broken(BrokenKind::Unreadable),
     }
 }
 
 /// A session on `state` for today (never before the state's last day),
 /// saving first the promotions the start itself made.
-fn begin(owner: &Owner, state: State) -> Phase {
+fn begin(owner: &Owner, backend: Backend, state: State) -> Phase {
     let today = session_today(browser_today(), &state);
     match Session::start(deck(), state.clone(), today, browser_seed()) {
         Ok(session) => {
             if session.changed_at_start() {
-                save(&session.snapshot());
+                backend.save(&session.snapshot());
             }
             Phase::Running(owner.with(|| RwSignal::new(ReviewRun::new(session, state))))
         }
@@ -123,8 +125,13 @@ fn begin(owner: &Owner, state: State) -> Phase {
 /// Reads the store and starts a practice ahead of `n` terms (of stage
 /// `only` when given) on it ([`practice_run`]); `None` when there is
 /// nothing to practise (nothing stored, no started term in the batch).
-pub(crate) fn practice_phase(owner: &Owner, n: usize, only: Option<Stage>) -> Option<Phase> {
-    match load() {
+pub(crate) fn practice_phase(
+    owner: &Owner,
+    backend: Backend,
+    n: usize,
+    only: Option<Stage>,
+) -> Option<Phase> {
+    match backend.load() {
         Load::Ok(state) => {
             let today = session_today(browser_today(), &state);
             let run = practice_run(state, today, n, only, browser_seed())?;
@@ -133,6 +140,7 @@ pub(crate) fn practice_phase(owner: &Owner, n: usize, only: Option<Stage>) -> Op
         Load::Empty => None,
         Load::Invalid { .. } => Some(Phase::Broken(BrokenKind::Invalid)),
         Load::NewerVersion { .. } => Some(Phase::Broken(BrokenKind::NewerVersion)),
+        Load::Unreadable(_) => Some(Phase::Broken(BrokenKind::Unreadable)),
     }
 }
 
@@ -172,6 +180,7 @@ pub(crate) fn BrokenNotice(
                     match kind {
                         BrokenKind::Invalid => td_string!(locale, broken_invalid),
                         BrokenKind::NewerVersion => td_string!(locale, broken_newer),
+                        BrokenKind::Unreadable => td_string!(locale, broken_unreadable),
                     }
                 }}
             </p>
@@ -225,6 +234,7 @@ pub fn ReviewView(
     #[prop(into)]
     on_home: Callback<()>,
 ) -> impl IntoView {
+    let backend = Backend::current();
     let stop = Disclosed::new("learn-review-stop", RwSignal::new(false));
     let revealed = StoredValue::new(None::<Signal<bool>>);
     Effect::new(move |_| {
@@ -246,7 +256,7 @@ pub fn ReviewView(
         };
         if let Some(answer) = grade_key(&ev.key(), gate) {
             ev.prevent_default();
-            give(run, answer);
+            give(run, backend, answer);
         }
     };
     view! {
@@ -273,15 +283,15 @@ pub fn ReviewView(
 }
 
 /// Grades the current question and saves the state before the next one.
-fn give(run: RwSignal<ReviewRun>, answer: Answer) {
-    run.update(|run| run.grade(answer, save));
+fn give(run: RwSignal<ReviewRun>, backend: Backend, answer: Answer) {
+    run.update(|run| run.grade(answer, |state| backend.save(state)));
 }
 
 /// Whether a key press comes from a field the learner types in (an input,
 /// a textarea, a select, a `contenteditable`): the browser's, `false` on
 /// the server.
 fn editable_target(ev: &KeyboardEvent) -> bool {
-    #[cfg(feature = "hydrate")]
+    #[cfg(feature = "browser")]
     {
         use wasm_bindgen::JsCast;
         const EDITABLE: &str =
@@ -290,7 +300,7 @@ fn editable_target(ev: &KeyboardEvent) -> bool {
             .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
             .is_some_and(|element| element.closest(EDITABLE).ok().flatten().is_some())
     }
-    #[cfg(not(feature = "hydrate"))]
+    #[cfg(not(feature = "browser"))]
     {
         let _ = ev;
         false
@@ -439,6 +449,7 @@ fn FacetCard(
     revealed: StoredValue<Option<Signal<bool>>>,
 ) -> impl IntoView {
     let language = language_signal();
+    let backend = Backend::current();
     let key = Signal::derive(move || run.with(ReviewRun::key));
     // The card's `revealed`, handed out by `RevealCard` to `actions` (its
     // only channel): a signal, so the front reads it whatever the order
@@ -456,7 +467,7 @@ fn FacetCard(
                     actions=move |is_revealed| {
                         revealed.set_value(Some(is_revealed));
                         handed.set(Some(is_revealed));
-                        grade_buttons(run, paused, is_revealed, locale)
+                        grade_buttons(run, backend, paused, is_revealed, locale)
                     }
                     key=key
                     reveal_label=td_string!(locale, review_show)
@@ -469,6 +480,7 @@ fn FacetCard(
 /// The two grade buttons, greyed until the reveal and while paused.
 fn grade_buttons(
     run: RwSignal<ReviewRun>,
+    backend: Backend,
     paused: Signal<bool>,
     revealed: Signal<bool>,
     locale: Locale,
@@ -481,7 +493,7 @@ fn grade_buttons(
                 size=Size::Lg
                 layout="flex-1"
                 disabled=disabled
-                on_click=move |_| give(run, Answer::Fail)
+                on_click=move |_| give(run, backend, Answer::Fail)
             >
                 {td_string!(locale, grade_didnt)}
             </Button>
@@ -490,7 +502,7 @@ fn grade_buttons(
                 size=Size::Lg
                 layout="flex-1"
                 disabled=disabled
-                on_click=move |_| give(run, Answer::Pass)
+                on_click=move |_| give(run, backend, Answer::Pass)
             >
                 {td_string!(locale, grade_knew)}
             </Button>
@@ -898,9 +910,10 @@ fn Finished(
     on_home: Callback<()>,
 ) -> impl IntoView {
     let language = language_signal();
+    let backend = Backend::current();
     let add = Callback::new(move |count: usize| {
         run.update(|run| {
-            run.add_new(count, save);
+            run.add_new(count, |state| backend.save(state));
         });
     });
     move || {
@@ -1033,6 +1046,7 @@ pub(crate) mod tests {
     fn render_with(language: Language, run: ReviewRun, paused: bool) -> String {
         Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(language);
+            crate::test_support::provide_fakes(Load::Empty);
             let run = RwSignal::new(run);
             let paused = RwSignal::new(paused);
             let none = Callback::new(|()| ());
@@ -1633,6 +1647,7 @@ pub(crate) mod tests {
     fn broken(kind: BrokenKind) -> String {
         Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(Language::En);
+            crate::test_support::provide_fakes(Load::Empty);
             let none = Callback::new(|()| ());
             let paused = Signal::stored(false);
             view! { <SessionView phase=Phase::Broken(kind) paused=paused on_reload=none on_home=none /> }
@@ -1640,11 +1655,51 @@ pub(crate) mod tests {
         })
     }
 
+    /// A store that could not read starts no session and writes nothing:
+    /// the phase is Broken, and the store saw no save.
+    #[test]
+    fn an_unreadable_store_starts_no_session_and_saves_nothing() {
+        Owner::new().with(|| {
+            let (store, _files) =
+                crate::test_support::provide_fakes(Load::Unreadable("denied".into()));
+            let backend = Backend::current();
+            let owner = Owner::current().expect("an owner");
+            assert!(matches!(
+                start_phase(&owner, backend),
+                Phase::Broken(BrokenKind::Unreadable)
+            ));
+            assert!(matches!(
+                practice_phase(&owner, backend, 5, None),
+                Some(Phase::Broken(BrokenKind::Unreadable))
+            ));
+            assert_eq!(store.saved().len(), 0);
+        });
+    }
+
+    /// The store's guard is the contract: neither a save nor the exit
+    /// write reaches the file while its load answered Unreadable.
+    #[test]
+    fn the_stores_guard_keeps_the_file_untouched_while_unreadable() {
+        Owner::new().with(|| {
+            let (store, _files) =
+                crate::test_support::provide_fakes(Load::Unreadable("denied".into()));
+            let backend = Backend::current();
+            backend.save(&State::empty());
+            store.exit_write();
+            assert_eq!(store.written().len(), 0);
+            assert_eq!(backend.load(), Load::Unreadable("denied".into()));
+        });
+    }
+
     #[test]
     fn a_progress_that_cannot_be_used_says_why_with_a_way_home() {
         for (kind, said) in [
             (BrokenKind::Invalid, "could not be read: it is damaged"),
             (BrokenKind::NewerVersion, "saved by a newer version"),
+            (
+                BrokenKind::Unreadable,
+                "could not be read. Nothing was changed",
+            ),
         ] {
             let html = broken(kind);
             assert!(html.contains(said), "{html}");

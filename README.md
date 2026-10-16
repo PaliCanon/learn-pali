@@ -17,14 +17,14 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | Folder | What it holds |
 | --- | --- |
 | `app/` | Crate `learn_pali`, the site: Leptos SSR + hydrate on ui-lib. |
-| `app/src/` | Server code: the app shell (app.rs), entry point (main.rs), origin guard (origin.rs), progress store (store.rs), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
+| `app/src/` | The site's frame (app.rs: the document, the rail, the footer in app/site_footer.rs), entry point (main.rs), origin guard (origin.rs); the Learn fragment (fragment.rs: LearnRoutes, LearnProvider, LearnSettings), the host's plug-ins (backend.rs: the ProgressStore and FileTransfer traits; web.rs: the site's localStorage store and file transfer), the progress decisions (store.rs: Load, classify, validate_import), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
 | `app/src/pages/` | Page views, the home at `/`. |
-| `app/src/components/` | UI components: progress blocks, new terms picker, review session, term list, site footer. |
+| `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list. |
 | `app/src/learn/` | Learning session logic: home state, session run, Leitner stages, card summary, word lookups, the Context front's window around the blank, which translation shows. |
 | `app/locales/` | UI translations: en.json, fr.json, vi.json. |
 | `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |
 | `app/public/` | Static assets: favicon and logo. |
-| `app/tests/` | Integration tests: asset load and origin guard. |
+| `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and the fragment in a real browser (csr.rs, wasm32 only). |
 | `app/Dockerfile` | Container image build: cargo leptos build, debian runtime, non-root user, port 8080. |
 | `core/` | Crate `learn_core`, the learning loop library. `serde` only; builds for native and wasm32. |
 | `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math. |
@@ -68,10 +68,43 @@ leaves the site. The footer's legal pages are the main site's
 The first paint is rendered by the server as a skeleton; the cards and the
 counts appear once the browser has loaded the progress.
 
+### The Learn fragment (the PaliCanon app)
+
+Learn also runs inside the PaliCanon app (Tauri, client side, offline), which
+mounts it under `/learn` in its own shell with Search and the Map. The crate
+exposes it in `learn_pali::fragment`: `LearnRoutes` (one relative route, the
+home, mounted by the parent: the site at the root, the app in a `ParentRoute`
+at `/learn`; the brand link is built from `use_matched()` of that route),
+`LearnProvider` (given the host's `ProgressStore` and `FileTransfer`, both
+required; one per page, above the `Router`) and `LearnSettings` ('Your
+progress' for the host's Settings). No shell, rail, footer or title is in it;
+the rustdoc of the module lists what it needs from its host.
+
+Three build modes, by feature of the `learn_pali` crate:
+
+| Mode | Features | Who |
+| --- | --- | --- |
+| server | `ssr` | the site's server (renders the first paint) |
+| hydrate | `hydrate` (implies `web-store`) | the site's browser build |
+| csr | `csr` alone | the app: no server, no `localStorage` store, the host plugs its own |
+
+`browser` (the DOM glue) is private to the two client modes; `web-store`
+holds the `localStorage` store and the Blob / file input transfer
+(`web_store()`, `web_files()`, `src/web.rs`). The file input is created on
+demand when Import is pressed and removed after the change or the cancel event,
+or by the next pick at the latest (which also makes the earlier chooser inert);
+the page's markup holds none. A chooser that cannot be made, or a file that
+cannot be read, shows its own message. `scripts/csr-without-web-store.sh`
+and `app/tests/cfg_gates.rs` keep `web-store` out of a csr build.
+
 ### The progress store
 
-The progress lives in the browser only, under the `localStorage` key
-`pc_learn` (the learning loop's JSON state, versioned). **Not synced across
+On the site the progress lives in the browser only, under the `localStorage`
+key `pc_learn` (the learning loop's JSON state, versioned); in the app it is
+the host's `ProgressStore` (a file), which says through a status signal when
+it is not saved (the page then shows one strip, 'Your progress is not saved',
+with Export) and answers `Load::Unreadable` when it could not read it (an
+error and a Reload; nothing is ever written over it). **Not synced across
 devices yet**: Settings' 'Your progress' exports it to a file
 (`pc_learn-<YYYY-MM-DD>.json`) and imports one back. An import is validated
 whole and replaces the progress in that browser; a refused file (not a state,
@@ -182,10 +215,16 @@ export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PAT
 cargo fmt --all --check
 cargo clippy -p learn_pali --features ssr --all-targets -- -D warnings
 cargo clippy -p learn_pali --lib --features hydrate --target wasm32-unknown-unknown -- -D warnings
+cargo clippy -p learn_pali --lib --features csr --target wasm32-unknown-unknown -- -D warnings
 cargo clippy -p learn_core -p learn_cli -p build_deck --all-targets -- -D warnings
 cargo clippy -p learn_core --lib --target wasm32-unknown-unknown -- -D warnings
 cargo test -p learn_pali --features ssr
 cargo test -p learn_core -p learn_cli -p build_deck
+# The fragment in the app's mode, in a headless Chrome (wasm-bindgen-cli at
+# Cargo.lock's wasm-bindgen version, a chromedriver matching Chrome):
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
+  cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test csr
+bash scripts/csr-without-web-store.sh   # the csr build holds nothing of the web store
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 cargo leptos build
 cargo deny check advisories bans sources licenses
@@ -193,7 +232,7 @@ cargo deny check advisories bans sources licenses
 
 The same run in CI (`.github/workflows/ci.yml`), plus MSRV (`--locked`, on
 1.88), cargo-deny and coverage (cargo-llvm-cov over the four crates →
-Codecov). The app has `ssr` and `hydrate` features that do not build
+Codecov). The app has `ssr`, `hydrate` and `csr` features that do not build
 together, so there is no `--workspace`; the three other crates have none.
 Functions stay under 50 lines (`clippy.toml`).
 

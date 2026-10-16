@@ -6,18 +6,19 @@
 use leptos::prelude::*;
 use leptos_i18n::td_string;
 use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
-use leptos_router::components::{Route, Router, Routes};
+use leptos_router::components::{Router, Routes};
 use leptos_router::hooks::use_location;
-use leptos_router::path;
 use palicanon_ui_lib::{
     AppShell, EnvBadgeInfo, HydrationRoot, IconName, NavEntry, NavList, NavSection,
     language_attribute, provide_language, theme_attribute,
 };
 
 use crate::catalogue::strings;
-use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
-use crate::components::site_footer::SiteFooter;
-use crate::pages::home::Home;
+use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
+use crate::{web_files, web_store};
+
+mod site_footer;
+use site_footer::SiteFooter;
 
 /// The branch this build came from (`build.rs`, `LEARN_PALI_GIT_BRANCH`):
 /// `main`, `feat/…` — this service's own `env` for [`EnvBadgeInfo`]
@@ -107,26 +108,25 @@ fn nav(current: Signal<String>) -> NavList {
 
 /// The shell around the page: `AppShell`'s rail, theme and languages, its
 /// Settings with 'Your progress' after Appearance (export, import), and
-/// the one route (the home at `/`, which holds the progress and runs the
-/// review in place), the footer in the shell's slot; then the import's
-/// confirmation, outside Settings (opening it closes Settings). The home
-/// follows the imports through the provided `StoreWrites`.
+/// the Learn routes (the home at `/`, which holds the progress and runs the
+/// review in place), the footer in the shell's slot. The site's progress
+/// lives in the browser ([`web_store`], [`web_files`]); the provider
+/// renders the import's confirmation after the shell, outside Settings.
 #[component]
 fn Layout() -> impl IntoView {
     let location = use_location();
-    let progress = ProgressData::new();
-    provide_context(progress.writes());
     view! {
-        <AppShell
-            nav=nav(location.pathname.into())
-            settings_extra=move || view! { <ProgressSection data=progress /> }
-            footer=|| view! { <SiteFooter /> }
-        >
-            <Routes fallback=|| "Not found.">
-                <Route path=path!("/") view=Home />
-            </Routes>
-        </AppShell>
-        <ImportConfirm data=progress />
+        <LearnProvider store=web_store() files=web_files()>
+            <AppShell
+                nav=nav(location.pathname.into())
+                settings_extra=move || view! { <LearnSettings /> }
+                footer=|| view! { <SiteFooter /> }
+            >
+                <Routes fallback=|| "Not found.">
+                    <LearnRoutes />
+                </Routes>
+            </AppShell>
+        </LearnProvider>
     }
 }
 
@@ -323,7 +323,10 @@ mod tests {
         ];
         assert!(order.is_sorted(), "{order:?}: {html}");
         assert_eq!(html.matches(">Export<").count(), 1, "{html}");
-        assert_eq!(html.matches(r#"type="file""#).count(), 1, "{html}");
+        // The file chooser is the host's (`FileTransfer::pick_import`): the
+        // web impl makes its input when Import is pressed, none is in the
+        // markup (048).
+        assert_eq!(html.matches(r#"type="file""#).count(), 0, "{html}");
     }
 
     #[test]

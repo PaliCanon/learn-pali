@@ -40,7 +40,7 @@ use std::process::Command;
 use leptos_i18n_parser::parse_locales::options::{Config, ParseOptions};
 use leptos_i18n_parser::parse_locales::parse_locales;
 
-#[path = "../../ui-lib/build/placeholders.rs"]
+#[path = "build/placeholders.rs"]
 mod placeholders;
 
 /// The default locale, then the others: every `Language` code.

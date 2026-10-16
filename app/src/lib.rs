@@ -12,19 +12,31 @@
 // 010/027). Raised defensively since this service uses `AppShell` too.
 #![recursion_limit = "512"]
 
+// The site's frame (the shell, the rail, the footer, the document): the
+// app builds with `csr` alone and brings its own around `fragment`.
+#[cfg(any(feature = "ssr", feature = "hydrate"))]
 pub mod app;
+pub mod backend;
 mod catalogue;
 mod components;
 mod deck;
+pub mod fragment;
 mod learn;
 #[cfg(feature = "ssr")]
 pub mod origin;
+mod page;
 mod pages;
 mod seed;
 mod store;
 #[cfg(test)]
 mod test_support;
 mod today;
+// The `localStorage` store and the file input of the site: nothing of them
+// is in a `csr` build (the app has its own).
+#[cfg(any(feature = "ssr", feature = "web-store"))]
+mod web;
+#[cfg(any(feature = "ssr", feature = "web-store"))]
+pub use web::{web_files, web_store};
 
 // `build.rs` includes this same file (`#[path]`) for the env badge's pure
 // decisions; declared here too so `cargo test -p learn_pali` covers it.
@@ -35,7 +47,7 @@ mod git_info;
 // here for the tests only, so its refusal is exercised
 // (`catalogue::tests`), not just its absence of a false alarm.
 #[cfg(test)]
-#[path = "../../../ui-lib/build/placeholders.rs"]
+#[path = "../build/placeholders.rs"]
 mod placeholders;
 
 /// Browser entry point: hydrate the server-rendered page from ui-lib's

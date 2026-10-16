@@ -1,34 +1,23 @@
-//! The learner's progress in the browser: `localStorage[pc_learn]` ↔
-//! `learn_core::State` JSON.
+//! The learner's progress as the Learn fragment sees it: what a store
+//! holds ([`Load`]) and the pure decisions on a stored or imported text
+//! ([`classify`], [`validate_import`], [`export_name`]), tested natively.
 //!
-//! The pure decisions, tested natively: [`classify`] (what a stored text
-//! is), [`validate_import`] (an imported file, all or nothing),
-//! [`export_name`]. The browser glue — [`load`], [`save`], [`download`],
-//! [`read_file`], [`on_storage_change`] — exists in every build so the
-//! pages compile without `cfg`; under `ssr` it is a no-op, never called
-//! (the store is read in an Effect, after hydration).
+//! Where the progress lives is the host's choice ([`crate::backend`]): the
+//! site keeps it in `localStorage[pc_learn]` ([`crate::web`]), the app in
+//! a file. The state is `learn_core::State`'s JSON either way.
 //!
-//! The deck is never authoritative over the state: a term the deck does
-//! not know stays (an orphan), listed apart, never counted.
+//! The deck is never authoritative over the state: a term the deck does not
+//! know stays (an orphan), listed apart, never counted.
 
 use learn_core::date::Date;
 use learn_core::progress::{State, StateError};
-use leptos::html;
-use leptos::prelude::NodeRef;
 
 /// The `localStorage` key of the progress.
 pub(crate) const KEY: &str = "pc_learn";
 
-/// What the store holds, read.
-#[cfg_attr(
-    not(any(feature = "hydrate", test)),
-    expect(
-        dead_code,
-        reason = "read by the hydrate glue (and the tests); the server never touches the storage"
-    )
-)]
+/// What a [`ProgressStore`](crate::backend::ProgressStore) holds, read.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Load {
+pub enum Load {
     /// A state this build reads, with at least one entry.
     Ok(State),
     /// Nothing yet: no key, or a state with no entry.
@@ -45,6 +34,12 @@ pub(crate) enum Load {
         /// The stored text, as is.
         raw: String,
     },
+    /// The read itself failed (an I/O error: permissions, a disk), the
+    /// stored progress untouched. Not a file that parses badly (that is
+    /// [`Load::Invalid`]). The home shows an error and a Reload button,
+    /// Settings turns Export and Import off, and nothing is ever saved over
+    /// what could not be read: the store refuses the write.
+    Unreadable(String),
 }
 
 /// Why an imported file was refused; the progress is unchanged.
@@ -60,15 +55,10 @@ pub(crate) enum ImportError {
 
 /// What the stored text `raw` is (`None`: no key). A valid state is
 /// [`Load::Ok`] even with no entry: [`Load::Empty`] is the absence of the
-/// key alone, and the home decides what an empty state shows.
-#[cfg_attr(
-    not(any(feature = "hydrate", test)),
-    expect(
-        dead_code,
-        reason = "read by the hydrate glue (and the tests); the server never touches the storage"
-    )
-)]
-pub(crate) fn classify(raw: Option<&str>) -> Load {
+/// key alone, and the home decides what an empty state shows. Never
+/// [`Load::Unreadable`]: that is a read that failed, not a text. A host's
+/// store that reads a text itself (the app's file) classifies it with this.
+pub fn classify(raw: Option<&str>) -> Load {
     let Some(raw) = raw else {
         return Load::Empty;
     };
@@ -105,165 +95,6 @@ pub(crate) fn validate_import(text: &str) -> Result<State, ImportError> {
 /// The export's file name: `pc_learn-<YYYY-MM-DD>.json`.
 pub(crate) fn export_name(date: Date) -> String {
     format!("{KEY}-{date}.json")
-}
-
-/// Reads the stored progress ([`classify`] of `localStorage[pc_learn]`);
-/// [`Load::Empty`] on the server, and when the browser refuses storage.
-pub(crate) fn load() -> Load {
-    #[cfg(feature = "hydrate")]
-    {
-        browser::load()
-    }
-    #[cfg(not(feature = "hydrate"))]
-    {
-        Load::Empty
-    }
-}
-
-/// Writes `state` to `localStorage[pc_learn]`, synchronously (before the
-/// next screen); nothing on the server. A refused write (private mode, a
-/// full quota) is not reported here: the progress stays in memory.
-pub(crate) fn save(state: &State) {
-    #[cfg(feature = "hydrate")]
-    browser::save(state);
-    #[cfg(not(feature = "hydrate"))]
-    let _ = state;
-}
-
-/// Offers `text` as a file download named `name` (a Blob URL, revoked once
-/// the click is made); nothing on the server.
-pub(crate) fn download(name: &str, text: &str) {
-    #[cfg(feature = "hydrate")]
-    browser::download(name, text);
-    #[cfg(not(feature = "hydrate"))]
-    let _ = (name, text);
-}
-
-/// Reads the file chosen in `input` as text and calls `on_text` with it
-/// (`FileReader`'s onload); a failed read calls it with empty text (onerror),
-/// which the import validation refuses; nothing when no file is chosen, nor
-/// on the server.
-pub(crate) fn read_file(input: NodeRef<html::Input>, on_text: impl FnOnce(String) + 'static) {
-    #[cfg(feature = "hydrate")]
-    browser::read_file(input, on_text);
-    #[cfg(not(feature = "hydrate"))]
-    let _ = (input, on_text);
-}
-
-/// Calls `on_change` when another tab changes `pc_learn` (the `storage`
-/// event; other keys are ignored), for as long as the current reactive
-/// owner lives (the listener is removed in its cleanup); nothing on the
-/// server.
-pub(crate) fn on_storage_change(on_change: impl Fn() + 'static) {
-    #[cfg(feature = "hydrate")]
-    browser::on_storage_change(on_change);
-    #[cfg(not(feature = "hydrate"))]
-    let _ = on_change;
-}
-
-/// The browser side, compiled only for the hydrate build; no native test
-/// (the orchestrator's CDP probe and the user's check cover it).
-#[cfg(feature = "hydrate")]
-mod browser {
-    use super::{KEY, Load, classify};
-    use learn_core::progress::State;
-    use leptos::html;
-    use leptos::prelude::{GetUntracked, NodeRef, on_cleanup, window_event_listener};
-    use std::cell::RefCell;
-    use std::rc::Rc;
-    use wasm_bindgen::JsCast;
-    use web_sys::{Blob, BlobPropertyBag, FileReader, HtmlAnchorElement, Storage, Url};
-
-    /// `window.localStorage`, `None` when the browser refuses it.
-    fn storage() -> Option<Storage> {
-        web_sys::window()?.local_storage().ok().flatten()
-    }
-
-    /// See [`super::load`].
-    pub(super) fn load() -> Load {
-        let raw = storage().and_then(|storage| storage.get_item(KEY).ok().flatten());
-        classify(raw.as_deref())
-    }
-
-    /// See [`super::save`].
-    pub(super) fn save(state: &State) {
-        if let Some(storage) = storage() {
-            // A refused write keeps the progress in memory only.
-            let _ = storage.set_item(KEY, &state.to_json());
-        }
-    }
-
-    /// The Blob URL of `text` (`application/json`).
-    fn json_url(text: &str) -> Option<String> {
-        let parts = js_sys::Array::of1(&text.into());
-        let options = BlobPropertyBag::new();
-        options.set_type("application/json");
-        let blob = Blob::new_with_str_sequence_and_options(&parts, &options).ok()?;
-        Url::create_object_url_with_blob(&blob).ok()
-    }
-
-    /// See [`super::download`].
-    pub(super) fn download(name: &str, text: &str) {
-        let Some(url) = json_url(text) else {
-            return;
-        };
-        let anchor = web_sys::window()
-            .and_then(|window| window.document())
-            .and_then(|document| document.create_element("a").ok())
-            .and_then(|element| element.dyn_into::<HtmlAnchorElement>().ok());
-        if let Some(anchor) = anchor {
-            anchor.set_href(&url);
-            anchor.set_download(name);
-            anchor.click();
-        }
-        let _ = Url::revoke_object_url(&url);
-    }
-
-    /// See [`super::read_file`]. The one-shot onload and onerror closures
-    /// share the callback: whichever fires first takes it, so it runs
-    /// once. A read that fails calls it with empty text, which the import
-    /// validation refuses as `NotAState`: the page says why instead of
-    /// staying silent. Hydrate-only glue, so no native test (F7, review
-    /// #4006).
-    pub(super) fn read_file(input: NodeRef<html::Input>, on_text: impl FnOnce(String) + 'static) {
-        let Some(file) = input
-            .get_untracked()
-            .and_then(|input| input.files())
-            .and_then(|files| files.item(0))
-        else {
-            return;
-        };
-        let Ok(reader) = FileReader::new() else {
-            return;
-        };
-        let callback = Rc::new(RefCell::new(Some(on_text)));
-        let source = reader.clone();
-        let on_loaded = Rc::clone(&callback);
-        let onload = wasm_bindgen::closure::Closure::once_into_js(move || {
-            let text = source.result().ok().and_then(|text| text.as_string());
-            if let Some(on_text) = on_loaded.borrow_mut().take() {
-                on_text(text.unwrap_or_default());
-            }
-        });
-        let onerror = wasm_bindgen::closure::Closure::once_into_js(move || {
-            if let Some(on_text) = callback.borrow_mut().take() {
-                on_text(String::new());
-            }
-        });
-        reader.set_onload(Some(onload.unchecked_ref()));
-        reader.set_onerror(Some(onerror.unchecked_ref()));
-        let _ = reader.read_as_text(&file);
-    }
-
-    /// See [`super::on_storage_change`].
-    pub(super) fn on_storage_change(on_change: impl Fn() + 'static) {
-        let handle = window_event_listener(leptos::ev::storage, move |event| {
-            if event.key().as_deref() == Some(KEY) {
-                on_change();
-            }
-        });
-        on_cleanup(move || handle.remove());
-    }
 }
 
 #[cfg(test)]

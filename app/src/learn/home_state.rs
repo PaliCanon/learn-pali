@@ -15,6 +15,9 @@ pub(crate) enum BrokenKind {
     Invalid,
     /// Saved by a newer version: read-only, never overwritten.
     NewerVersion,
+    /// The store could not read it (an I/O error): an error and a Reload,
+    /// nothing written over it.
+    Unreadable,
 }
 
 /// What the home shows.
@@ -44,6 +47,7 @@ pub(crate) fn home_state(load: &Load, deck: &Deck, today: Date) -> HomeState {
         Load::Empty => HomeState::Empty,
         Load::Invalid { .. } => HomeState::Broken(BrokenKind::Invalid),
         Load::NewerVersion { .. } => HomeState::Broken(BrokenKind::NewerVersion),
+        Load::Unreadable(_) => HomeState::Broken(BrokenKind::Unreadable),
         Load::Ok(state) if state.progress.is_empty() => HomeState::Empty,
         Load::Ok(state) => match due_cards(deck, state, today) {
             0 => HomeState::NothingDue,
@@ -78,7 +82,7 @@ pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
 pub(crate) fn new_left(load: &Load, deck: &Deck) -> usize {
     match load {
         Load::Empty => deck.terms.len(),
-        Load::Invalid { .. } | Load::NewerVersion { .. } => 0,
+        Load::Invalid { .. } | Load::NewerVersion { .. } | Load::Unreadable(_) => 0,
         Load::Ok(state) => deck
             .terms
             .iter()
@@ -129,6 +133,16 @@ mod tests {
             .iter()
             .map(|term| entry(&term.id.0, stage, today() + days))
             .collect()
+    }
+
+    #[test]
+    fn an_unreadable_store_is_broken_and_nothing_may_be_added() {
+        let load = Load::Unreadable("permission denied".into());
+        assert_eq!(
+            home_state(&load, deck(), today()),
+            HomeState::Broken(BrokenKind::Unreadable)
+        );
+        assert_eq!(new_left(&load, deck()), 0);
     }
 
     #[test]

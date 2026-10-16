@@ -15,10 +15,10 @@ use learn_core::progress::State;
 /// `getMonth() + 1`, `getDate()`); `None` when it is not a day on or after
 /// 1970-01-01.
 #[cfg_attr(
-    not(any(feature = "hydrate", test)),
+    not(any(feature = "browser", test)),
     expect(
         dead_code,
-        reason = "read by `browser_today` under hydrate (and the tests); the server has no clock"
+        reason = "read by `browser_today` in the browser builds (and the tests); the server has no clock"
     )
 )]
 pub(crate) fn date_from_ymd(year: i64, month: u32, day: u32) -> Option<Date> {
@@ -39,7 +39,7 @@ pub(crate) fn session_today(browser: Date, state: &State) -> Date {
 /// The browser's local calendar date (`js_sys::Date`: year, month + 1,
 /// day); on the server, 1970-01-01 (never called there).
 pub(crate) fn browser_today() -> Date {
-    #[cfg(feature = "hydrate")]
+    #[cfg(feature = "browser")]
     {
         let now = js_sys::Date::new_0();
         date_from_ymd(
@@ -49,7 +49,7 @@ pub(crate) fn browser_today() -> Date {
         )
         .unwrap_or_else(|| Date::from_days(0))
     }
-    #[cfg(not(feature = "hydrate"))]
+    #[cfg(not(feature = "browser"))]
     {
         Date::from_days(0)
     }
@@ -60,7 +60,7 @@ pub(crate) fn browser_today() -> Date {
 /// for as long as the current reactive owner lives (the listener is removed
 /// in its cleanup); nothing on the server.
 pub(crate) fn on_visible(on_visible: impl Fn() + 'static) {
-    #[cfg(feature = "hydrate")]
+    #[cfg(feature = "browser")]
     {
         use leptos::prelude::{on_cleanup, window_event_listener};
         let handle = window_event_listener(leptos::ev::visibilitychange, move |_| {
@@ -75,7 +75,7 @@ pub(crate) fn on_visible(on_visible: impl Fn() + 'static) {
         });
         on_cleanup(move || handle.remove());
     }
-    #[cfg(not(feature = "hydrate"))]
+    #[cfg(not(feature = "browser"))]
     let _ = on_visible;
 }
 

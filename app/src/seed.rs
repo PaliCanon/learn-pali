@@ -6,11 +6,11 @@
 /// A random `u64` from the browser (`Math.random()` twice, 32 bits each);
 /// on the server, the fixed seed `0` (never called there).
 pub(crate) fn browser_seed() -> u64 {
-    #[cfg(feature = "hydrate")]
+    #[cfg(feature = "browser")]
     {
         (random_u32() << 32) | random_u32()
     }
-    #[cfg(not(feature = "hydrate"))]
+    #[cfg(not(feature = "browser"))]
     {
         0
     }
@@ -18,7 +18,7 @@ pub(crate) fn browser_seed() -> u64 {
 
 /// 32 random bits: `Math.random()` is in `[0, 1)`, so scaled by 2^32 it is
 /// below 2^32.
-#[cfg(feature = "hydrate")]
+#[cfg(feature = "browser")]
 fn random_u32() -> u64 {
     bits_of(js_sys::Math::random())
 }
@@ -26,10 +26,10 @@ fn random_u32() -> u64 {
 /// The 32 bits a unit-interval draw stands for: `unit` in `[0, 1)` scaled
 /// by 2^32 and floored; a value outside the interval is clamped into it.
 #[cfg_attr(
-    not(any(feature = "hydrate", test)),
+    not(any(feature = "browser", test)),
     expect(
         dead_code,
-        reason = "read by `random_u32` under hydrate (and the tests)"
+        reason = "read by `random_u32` in the browser builds (and the tests)"
     )
 )]
 fn bits_of(unit: f64) -> u64 {
@@ -64,7 +64,9 @@ mod tests {
 
     #[test]
     fn the_server_seed_is_fixed() {
-        #[cfg(not(feature = "hydrate"))]
+        // The browser's draw is `Math.random()`, which no native test runs;
+        // `bits_of` above is what is tested of it.
+        #[cfg(not(feature = "browser"))]
         assert_eq!(browser_seed(), 0);
     }
 }

@@ -1,8 +1,9 @@
 # From Lsh0x/rankfusion's ci.yml and ui-lib's, adapted to a Leptos service:
 # every check runs for the server (`ssr`, native) and, for clippy, the
-# browser (`hydrate`, wasm32), the two builds this service makes. No
-# `--all-features`, no `--workspace`: `ssr` and `hydrate` do not build
-# together. The three other crates (`learn_core`, `learn_cli`, `build_deck`)
+# browser (`hydrate`, wasm32), the two builds the site makes, and `csr` alone
+# (wasm32, no `web-store`), the build the PaliCanon app takes the Learn
+# fragment in. No `--all-features`, no `--workspace`: `ssr`, `hydrate` and
+# `csr` do not build together. The three other crates (`learn_core`, `learn_cli`, `build_deck`)
 # have no feature and are named with `-p`; `learn_core` also builds for
 # wasm32 (the site will run it), hence its own clippy entry. `build_deck`
 # compiles a bundled SQLite (C): the runner's `cc` is enough.
@@ -60,6 +61,9 @@ jobs:
             args: -p learn_pali --features ssr --all-targets
           - feature: hydrate
             args: -p learn_pali --features hydrate --lib --target wasm32-unknown-unknown
+          # The app's feature set: the fragment with no web store (048).
+          - feature: csr
+            args: -p learn_pali --features csr --all-targets --target wasm32-unknown-unknown
           - feature: native
             args: -p learn_core -p learn_cli -p build_deck --all-targets
           - feature: core-wasm
@@ -92,6 +96,42 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked -p learn_pali --features ssr
       - run: cargo test --locked -p learn_core -p learn_cli -p build_deck
+
+  # tests/csr.rs (task 048): the Learn fragment in the app's mode, mounted by
+  # ui-lib's `csr::mount`, in a real browser. wasm-bindgen-test-runner drives a
+  # headless Chrome through chromedriver; ubuntu-latest ships Google Chrome and
+  # its matching chromedriver ($CHROMEWEBDRIVER). The runner must be the
+  # wasm-bindgen of Cargo.lock. Also builds `csr` alone, the app's feature set,
+  # and fails when the web store's `localStorage` glue is in it.
+  test-browser:
+    name: test (csr, headless Chrome)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: learn-pali
+      - uses: ./learn-pali/.github/actions/ui-lib
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      # Every run step names its directory: the repository is checked out
+      # into `learn-pali/` (the workflow's `defaults.run` says so too), and a
+      # job that ran at the workspace root would find no Cargo.lock.
+      - id: wasm-bindgen
+        working-directory: learn-pali
+        run: echo "version=$(cargo pkgid --locked wasm-bindgen | sed 's/.*@//')" >> "$GITHUB_OUTPUT"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: wasm-bindgen@${{ steps.wasm-bindgen.outputs.version }}
+      - working-directory: learn-pali
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test csr
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      - working-directory: learn-pali
+        run: bash scripts/csr-without-web-store.sh
 
   docs:
     name: rustdoc

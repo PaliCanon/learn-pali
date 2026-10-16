@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use leptos_i18n::td_string;
 use palicanon_ui_lib::{EnvBadge, Footer, FooterLink};
 
-use crate::app::BADGE;
+use super::BADGE;
 use crate::catalogue::{Strings, strings};
 
 /// The footer, handed to the shell's `footer` slot.
@@ -56,8 +56,8 @@ fn links(t: Strings) -> Vec<FooterLink> {
 mod tests {
     use palicanon_ui_lib::{AppShell, Language};
 
+    use super::BADGE;
     use super::*;
-    use crate::app::BADGE;
 
     fn render() -> String {
         Owner::new().with(|| view! { <SiteFooter /> }.to_html())

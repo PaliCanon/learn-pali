@@ -44,9 +44,11 @@ use palicanon_ui_lib::{
     Button, Dialog, Disclosed, DisclosureButton, Language, Size, Slider, Variant, language_signal,
 };
 
+use crate::backend::Backend;
 use crate::catalogue::{Locale, strings};
 use crate::components::data_block::StoreWrites;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
+use crate::components::save_strip::SaveStrip;
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
 use crate::components::term_list::{
     AddRow, Orphans, StageStrip, StageTerms, next_review, orphan_rows,
@@ -55,7 +57,8 @@ use crate::deck::deck;
 use crate::learn::home_state::{BrokenKind, HomeState, home_state, new_left};
 use crate::learn::stages::stage_counts;
 use crate::learn::words::date_words;
-use crate::store::{self, Load, on_storage_change};
+use crate::page::reload_page;
+use crate::store::{Load, export_name};
 use crate::today::{browser_today, on_visible, session_today};
 
 /// The CTA box of every state: its content at the top, no empty height.
@@ -87,6 +90,9 @@ struct Model {
     new_left: usize,
     counts: [usize; 6],
     saved: Option<Saved>,
+    /// The store's message when it could not read the progress
+    /// ([`Load::Unreadable`]), shown under the error.
+    detail: Option<String>,
 }
 
 impl Default for Model {
@@ -97,6 +103,7 @@ impl Default for Model {
             new_left: 0,
             counts: [0; 6],
             saved: None,
+            detail: None,
         }
     }
 }
@@ -122,6 +129,9 @@ pub(crate) enum HomeAction {
     StartAgain,
     /// Download the stored text as is.
     DownloadRaw,
+    /// Reload the page: the store could not read the progress, and the
+    /// reload runs the host's start and its read again.
+    Reload,
 }
 
 /// What the page shows: the home's own content, or a session in its
@@ -140,13 +150,20 @@ pub(crate) enum Mode {
 /// strip (the page's state); or, once a CTA started one, a session in its
 /// place, left by Stop or 'Back home', which read the store again.
 #[component]
-pub fn Home() -> impl IntoView {
+pub(crate) fn Home(
+    /// Where the home lives, for the brand's link: the matched path of the
+    /// route that shows it (`/learn` in the app, `/` at the root). Required
+    /// and internal: the route view hands it from `use_matched()`, so there
+    /// is no silent default to drift from the route.
+    base: Signal<String>,
+) -> impl IntoView {
     let page = Page::new();
     view! {
         <div
             data-page="home"
             class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] sm:flex-1 sm:justify-center"
         >
+            <SaveStrip />
             {move || {
                 let mode = page.mode.get();
                 let model = match mode {
@@ -157,6 +174,7 @@ pub fn Home() -> impl IntoView {
                     <HomeScreen
                         mode=mode
                         model=model
+                        base=base
                         stage=page.stage
                         batch=page.batch
                         on_action=page.on_action
@@ -198,17 +216,13 @@ impl Page {
     /// tab's change pauses the session instead.
     fn new() -> Self {
         let owner = Owner::current().expect("a component runs under an owner");
+        let backend = Backend::current();
         let (model, mode, paused) = (
             RwSignal::new(Model::default()),
             RwSignal::new(Mode::Home),
             RwSignal::new(false),
         );
-        let refresh = move || {
-            let next = read_model();
-            if model.get_untracked() != next {
-                model.set(next);
-            }
-        };
+        let refresh = refresher(backend, model);
         let at_home = move || matches!(mode.get_untracked(), Mode::Home);
         Effect::new(move |_| refresh());
         on_visible(move || {
@@ -223,7 +237,7 @@ impl Page {
                 paused.set(true);
             }
         });
-        let (start, ahead) = starters(owner, mode, paused, refresh);
+        let (start, ahead) = starters(owner, backend, mode, paused, refresh);
         let home = Callback::new(move |()| {
             refresh();
             mode.set(Mode::Home);
@@ -231,6 +245,7 @@ impl Page {
         let on_action = Callback::new(move |action| {
             perform(
                 action,
+                backend,
                 refresh,
                 || start.run(()),
                 |n, only| ahead.run((n, only)),
@@ -249,11 +264,22 @@ impl Page {
     }
 }
 
+/// Reads the store into `model`, once; a read that changed nothing sets
+/// nothing (no repaint).
+fn refresher(backend: Backend, model: RwSignal<Model>) -> impl Fn() + Copy + Send + Sync {
+    move || {
+        let next = read_model(backend);
+        if model.get_untracked() != next {
+            model.set(next);
+        }
+    }
+}
+
 /// Calls `changed` when the stored progress changed under the page:
-/// another tab wrote it (the `storage` event), or Settings replaced it in
-/// this one ([`StoreWrites`], when the layout provides it).
+/// the store said so (its `on_change`, another tab or a write conflict) or
+/// Settings replaced it in this one; both move [`StoreWrites`], which the
+/// provider gives.
 fn follow_store(changed: impl Fn() + Copy + Send + Sync + 'static) {
-    on_storage_change(changed);
     if let Some(StoreWrites(writes)) = use_context::<StoreWrites>() {
         Effect::watch(move || writes.get(), move |_, _, _| changed(), false);
     }
@@ -264,6 +290,7 @@ fn follow_store(changed: impl Fn() + Copy + Send + Sync + 'static) {
 /// store when there is nothing to practise.
 fn starters(
     owner: Owner,
+    backend: Backend,
     mode: RwSignal<Mode>,
     paused: RwSignal<bool>,
     refresh: impl Fn() + Send + Sync + 'static,
@@ -273,11 +300,13 @@ fn starters(
         mode.set(Mode::Session(phase));
     };
     let review_owner = owner.clone();
-    let start = Callback::new(move |()| open(start_phase(&review_owner)));
-    let ahead = Callback::new(move |(n, only)| match practice_phase(&owner, n, only) {
-        Some(phase) => open(phase),
-        None => refresh(),
-    });
+    let start = Callback::new(move |()| open(start_phase(&review_owner, backend)));
+    let ahead = Callback::new(
+        move |(n, only)| match practice_phase(&owner, backend, n, only) {
+            Some(phase) => open(phase),
+            None => refresh(),
+        },
+    );
     (start, ahead)
 }
 
@@ -289,6 +318,8 @@ fn HomeScreen(
     mode: Mode,
     /// What the home shows (read at home only).
     model: Model,
+    /// Where the home lives: the brand links to it.
+    base: Signal<String>,
     /// The strip's filter.
     stage: RwSignal<Option<Stage>>,
     /// The practice-ahead batch.
@@ -312,6 +343,7 @@ fn HomeScreen(
                 new_left,
                 counts,
                 saved,
+                detail,
             } = model;
             view! {
                 <h1 class="sr-only">{move || td_string!(t.locale(), home_title)}</h1>
@@ -320,6 +352,7 @@ fn HomeScreen(
                     new_left=new_left
                     counts=counts
                     saved=saved
+                    detail=detail
                     stage=stage
                     batch=batch
                     on_action=on_action
@@ -333,14 +366,14 @@ fn HomeScreen(
         }
     };
     view! {
-        <BrandLink in_session=in_session stage=stage on_home=on_home />
+        <BrandLink base=base in_session=in_session stage=stage on_home=on_home />
         {body}
     }
 }
 
 /// Reads the store and the clock into the model.
-fn read_model() -> Model {
-    compute(&store::load(), deck(), browser_today())
+fn read_model(backend: Backend) -> Model {
+    compute(&backend.load(), deck(), browser_today())
 }
 
 /// The model for `load`, the deck and the browser's date: `today` is the
@@ -357,26 +390,25 @@ fn compute(load: &Load, deck: &Deck, browser: Date) -> Model {
         }
         _ => (browser, [0; 6], None),
     };
+    let detail = match load {
+        Load::Unreadable(message) => Some(message.clone()),
+        _ => None,
+    };
     Model {
         state: home_state(load, deck, today),
         new_left: new_left(load, deck),
         counts,
         saved,
+        detail,
     }
 }
 
-/// The state after `action` (new terms), to be saved; `None` when it
+/// The state after starting `count` new terms, to be saved; `None` when it
 /// moved nothing (or the day is before the state's last).
-fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<State> {
+fn grown(count: usize, state: State, deck: &Deck, today: Date) -> Option<State> {
     // Only the terms it adds matter here, not the order of a queue: seed 0.
     let mut session = Session::start(deck, state, today, 0).ok()?;
-    let moved = match action {
-        HomeAction::AddNew(n) => session.request_new(n),
-        HomeAction::Review
-        | HomeAction::PracticeAhead { .. }
-        | HomeAction::StartAgain
-        | HomeAction::DownloadRaw => 0,
-    };
+    let moved = session.request_new(count);
     (moved > 0).then(|| session.snapshot())
 }
 
@@ -385,6 +417,7 @@ fn grown(action: HomeAction, state: State, deck: &Deck, today: Date) -> Option<S
 /// session in place; or, when nothing moved, read the store again.
 fn perform(
     action: HomeAction,
+    backend: Backend,
     refresh: impl Fn(),
     go: impl Fn(),
     ahead: impl Fn(usize, Option<Stage>),
@@ -393,20 +426,27 @@ fn perform(
         HomeAction::Review => go(),
         HomeAction::PracticeAhead { n, only } => ahead(n, only),
         HomeAction::StartAgain => {
-            store::save(&State::empty());
+            // Q3: only a damaged progress may be started again; the button
+            // is offered for no other, and nothing is written over the rest.
+            if matches!(backend.load(), Load::Invalid { .. }) {
+                backend.save(&State::empty());
+            }
             refresh();
         }
-        HomeAction::DownloadRaw => download_raw(),
-        HomeAction::AddNew(_) => {
-            let state = match store::load() {
+        HomeAction::DownloadRaw => download_raw(backend),
+        HomeAction::Reload => reload_page(),
+        HomeAction::AddNew(count) => {
+            let state = match backend.load() {
                 Load::Ok(state) => state,
                 Load::Empty => State::empty(),
-                Load::Invalid { .. } | Load::NewerVersion { .. } => return refresh(),
+                Load::Invalid { .. } | Load::NewerVersion { .. } | Load::Unreadable(_) => {
+                    return refresh();
+                }
             };
             let today = session_today(browser_today(), &state);
-            match grown(action, state, deck(), today) {
+            match grown(count, state, deck(), today) {
                 Some(next) => {
-                    store::save(&next);
+                    backend.save(&next);
                     go();
                 }
                 None => refresh(),
@@ -416,9 +456,9 @@ fn perform(
 }
 
 /// Offers the stored text, as is, as a file.
-fn download_raw() {
-    if let Load::Invalid { raw } | Load::NewerVersion { raw } = store::load() {
-        store::download(&store::export_name(browser_today()), &raw);
+fn download_raw(backend: Backend) {
+    if let Load::Invalid { raw } | Load::NewerVersion { raw } = backend.load() {
+        backend.export(&export_name(browser_today()), &raw);
     }
 }
 
@@ -445,6 +485,10 @@ pub fn HomeView(
     /// the strip without a list.
     #[prop(default = None)]
     saved: Option<Saved>,
+    /// The store's message when it could not read the progress, shown under
+    /// the error of [`BrokenKind::Unreadable`].
+    #[prop(default = None)]
+    detail: Option<String>,
     /// The strip's filter: the list shows that stage only; `None`, every
     /// term. A filter of its own when not given. A practice ahead asks
     /// that stage only.
@@ -485,7 +529,9 @@ pub fn HomeView(
             }
             .into_any()
         }
-        HomeState::Broken(kind) => view! { <BrokenBlock kind=kind act=act /> }.into_any(),
+        HomeState::Broken(kind) => {
+            view! { <BrokenBlock kind=kind detail=detail act=act /> }.into_any()
+        }
     }
 }
 
@@ -799,8 +845,13 @@ fn CompactCta(
 /// import (Q3: a newer one is never overwritten). The CTAs that need the
 /// state are not offered.
 #[component]
-fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
+fn BrokenBlock(
+    kind: BrokenKind,
+    detail: Option<String>,
+    act: Callback<HomeAction>,
+) -> impl IntoView {
     let t = strings();
+    let readable = kind != BrokenKind::Unreadable;
     view! {
         <div data-home-state="broken" class=FRAME>
             <div data-cta-box="" class=CTA_BOX>
@@ -808,27 +859,28 @@ fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
                     {move || match kind {
                         BrokenKind::Invalid => td_string!(t.locale(), broken_invalid),
                         BrokenKind::NewerVersion => td_string!(t.locale(), broken_newer),
+                        BrokenKind::Unreadable => td_string!(t.locale(), broken_unreadable),
                     }}
                 </p>
+                {detail
+                    .map(|detail| {
+                        view! { <p class="max-w-prose text-sm text-muted">{detail}</p> }
+                    })}
                 <div class="flex flex-wrap gap-3">
-                    <Button
-                        variant=Variant::Primary
-                        size=Size::Lg
-                        on_click=move |_| act.run(HomeAction::DownloadRaw)
-                    >
-                        {move || td_string!(t.locale(), broken_download)}
-                    </Button>
-                    {(kind == BrokenKind::Invalid)
-                        .then(|| {
-                            view! {
-                                <Button
-                                    size=Size::Lg
-                                    on_click=move |_| act.run(HomeAction::StartAgain)
-                                >
-                                    {move || td_string!(t.locale(), broken_start_again)}
-                                </Button>
-                            }
-                        })}
+                    {if readable {
+                        view! { <RawAndStartAgain kind=kind act=act /> }.into_any()
+                    } else {
+                        view! {
+                            <Button
+                                variant=Variant::Primary
+                                size=Size::Lg
+                                on_click=move |_| act.run(HomeAction::Reload)
+                            >
+                                {move || td_string!(t.locale(), reload)}
+                            </Button>
+                        }
+                            .into_any()
+                    }}
                 </div>
                 {(kind == BrokenKind::Invalid)
                     .then(|| {
@@ -840,6 +892,31 @@ fn BrokenBlock(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
                     })}
             </div>
         </div>
+    }
+}
+
+/// The Broken banner's buttons for a progress that was read but cannot be
+/// used: 'Download the raw copy', and 'Start again' for a damaged one only
+/// (Q3: a newer one is never overwritten).
+#[component]
+fn RawAndStartAgain(kind: BrokenKind, act: Callback<HomeAction>) -> impl IntoView {
+    let t = strings();
+    view! {
+        <Button
+            variant=Variant::Primary
+            size=Size::Lg
+            on_click=move |_| act.run(HomeAction::DownloadRaw)
+        >
+            {move || td_string!(t.locale(), broken_download)}
+        </Button>
+        {(kind == BrokenKind::Invalid)
+            .then(|| {
+                view! {
+                    <Button size=Size::Lg on_click=move |_| act.run(HomeAction::StartAgain)>
+                        {move || td_string!(t.locale(), broken_start_again)}
+                    </Button>
+                }
+            })}
     }
 }
 
@@ -985,6 +1062,8 @@ fn HomeProgress(
 /// stays for a middle or modified click.
 #[component]
 fn BrandLink(
+    /// Where the home lives: the link's target.
+    base: Signal<String>,
     /// A session is shown.
     in_session: bool,
     /// The strip's filter, cleared by the click.
@@ -1003,7 +1082,7 @@ fn BrandLink(
     };
     view! {
         <a
-            href="/"
+            href=move || base.get()
             on:click=on_click
             class="flex shrink-0 items-center justify-center gap-3 font-serif text-2xl font-semibold text-heading select-none sm:text-[1.75rem]"
         >
@@ -1029,7 +1108,7 @@ fn reset_home(stage: RwSignal<Option<Stage>>) {
 /// Scrolls the term list's region (`[data-term-list]`) to its top; nothing
 /// when it is not on the page, and on the server.
 fn scroll_terms_to_top() {
-    #[cfg(feature = "hydrate")]
+    #[cfg(feature = "browser")]
     {
         let region = web_sys::window()
             .and_then(|window| window.document())
@@ -1061,16 +1140,17 @@ mod tests {
     use crate::components::session::tests::run_on;
     use crate::deck::deck;
     use crate::learn::home_state::BrokenKind;
-    use crate::test_support::{progress_fixture, tag_around};
+    use crate::test_support::{progress_fixture, provide_fakes, tag_around};
 
     /// [`Home`] as the server renders it at `/`, inside the real Router.
     fn render(language: Language) -> String {
         Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(language);
+            provide_fakes(Load::Empty);
             provide_context(RequestUrl::new("/"));
             view! {
                 <Router>
-                    <Home />
+                    <Home base=Signal::stored("/".to_owned()) />
                 </Router>
             }
             .to_html()
@@ -1748,10 +1828,15 @@ mod tests {
     #[test]
     fn perform_runs_the_review_or_the_practice_ahead() {
         use std::cell::RefCell;
+        let backend = Owner::new().with(|| {
+            provide_fakes(Load::Empty);
+            Backend::current()
+        });
         let calls = RefCell::new(Vec::new());
         let run = |action| {
             perform(
                 action,
+                backend,
                 || calls.borrow_mut().push("refresh".to_owned()),
                 || calls.borrow_mut().push("review".to_owned()),
                 |n, only| calls.borrow_mut().push(format!("ahead {n} {only:?}")),
@@ -1873,6 +1958,59 @@ mod tests {
         assert!(html.contains("Download the raw copy"), "{html}");
         assert!(!html.contains("Start again"), "never overwritten: {html}");
         assert!(!html.contains("New terms"), "{html}");
+    }
+
+    /// 'Start again' can never act on a newer file (the store refuses and
+    /// the file wins): no language shows it, for either kind but Invalid.
+    #[test]
+    fn start_again_is_offered_for_a_damaged_progress_only() {
+        for (language, start_again) in [
+            (Language::En, "Start again"),
+            (Language::Fr, "Recommencer"),
+            (Language::Vi, "Bắt đầu lại"),
+        ] {
+            let invalid = view_of(language, HomeState::Broken(BrokenKind::Invalid), 0, [0; 6]);
+            assert!(
+                invalid.contains(&format!(">{start_again}<")),
+                "{language:?}: {invalid}"
+            );
+            for kept in [BrokenKind::NewerVersion, BrokenKind::Unreadable] {
+                let html = view_of(language, HomeState::Broken(kept), 0, [0; 6]);
+                assert!(!html.contains(start_again), "{language:?} {kept:?}: {html}");
+            }
+        }
+    }
+
+    /// Under Unreadable or a newer file, starting the review or a practice
+    /// opens no session: the page's mode is a Broken notice, never a
+    /// running run, and nothing is saved. The test watches the sessions the
+    /// page opens, not only the saves.
+    #[test]
+    fn a_progress_that_must_be_kept_opens_no_session() {
+        for kept in [
+            Load::Unreadable("denied".into()),
+            Load::NewerVersion { raw: "x".into() },
+        ] {
+            Owner::new().with(|| {
+                let (store, _files) = provide_fakes(kept.clone());
+                let owner = Owner::current().expect("an owner");
+                let mode = RwSignal::new(Mode::Home);
+                let (start, ahead) =
+                    starters(owner, Backend::current(), mode, RwSignal::new(false), || ());
+                for open in [
+                    Box::new(|| start.run(())) as Box<dyn Fn()>,
+                    Box::new(|| ahead.run((5, None))),
+                ] {
+                    mode.set(Mode::Home);
+                    open();
+                    assert!(
+                        matches!(mode.get_untracked(), Mode::Session(Phase::Broken(_))),
+                        "{kept:?}: a notice, never a run"
+                    );
+                }
+                assert_eq!(store.saved().len(), 0, "{kept:?}");
+            });
+        }
     }
 
     #[test]
@@ -2247,6 +2385,7 @@ mod tests {
         Owner::new()
             .with(|| {
                 palicanon_ui_lib::provide_language().set(Language::En);
+                provide_fakes(Load::Empty);
                 let mode = if session {
                     let run = RwSignal::new(run_on("kho", &[], Stage::Day));
                     Mode::Session(Phase::Running(run))
@@ -2258,12 +2397,14 @@ mod tests {
                     new_left: 47,
                     counts: [1, 0, 0, 0, 0, 0],
                     saved: None,
+                    detail: None,
                 };
                 let none = Callback::new(|()| ());
                 view! {
                     <HomeScreen
                         mode=mode
                         model=model
+                        base=Signal::stored("/".to_owned())
                         stage=RwSignal::new(None)
                         batch=RwSignal::new(5)
                         on_action=Callback::new(|_| ())
@@ -2275,6 +2416,137 @@ mod tests {
                 .to_html()
             })
             .replace("<!>", "")
+    }
+
+    /// A progress the store could not read: the error and a Reload, no
+    /// raw copy to download and nothing to start again (nothing may be
+    /// written over what could not be read).
+    #[test]
+    fn an_unreadable_progress_shows_an_error_and_reload_only() {
+        for (language, said, reload) in [
+            (
+                Language::En,
+                "Your saved progress could not be read. Nothing was changed. Reload to try again.",
+                ">Reload<",
+            ),
+            (
+                Language::Fr,
+                "Votre progression enregistrée n’a pas pu être lue. Rien n’a été modifié. Rechargez pour réessayer.",
+                ">Recharger<",
+            ),
+            (
+                Language::Vi,
+                "Không đọc được tiến độ đã lưu. Không có gì bị thay đổi. Hãy tải lại để thử lần nữa.",
+                ">Tải lại<",
+            ),
+        ] {
+            let html = view_of(
+                language,
+                HomeState::Broken(BrokenKind::Unreadable),
+                0,
+                [0; 6],
+            );
+            assert!(html.contains(said), "{language:?}: {html}");
+            assert!(html.contains(reload), "{language:?}: {html}");
+            assert!(html.contains(r#"role="alert""#), "{html}");
+            for gone in ["Download the raw copy", "Start again", "Settings"] {
+                assert!(!html.contains(gone), "{gone}: {html}");
+            }
+            assert_eq!(html.matches("<button").count(), 1, "only Reload: {html}");
+        }
+    }
+
+    /// The store's message is not discarded: the error shows it.
+    #[test]
+    fn an_unreadable_progress_shows_the_stores_message() {
+        let html = Owner::new()
+            .with(|| {
+                palicanon_ui_lib::provide_language().set(Language::En);
+                let state = HomeState::Broken(BrokenKind::Unreadable);
+                view! { <HomeView state=state new_left=0 detail=Some("permission denied (os error 13)".to_owned()) /> }
+                    .to_html()
+            })
+            .replace("<!>", "");
+        assert!(html.contains("permission denied (os error 13)"), "{html}");
+        let model = compute(
+            &Load::Unreadable("permission denied (os error 13)".into()),
+            deck(),
+            today(),
+        );
+        assert_eq!(
+            model.detail.as_deref(),
+            Some("permission denied (os error 13)")
+        );
+        assert_eq!(compute(&Load::Empty, deck(), today()).detail, None);
+    }
+
+    /// The fragment never calls `save` over a progress it must keep: not
+    /// for any action of the home, under Unreadable and under a newer file;
+    /// and the store's exit write reaches nothing either. The fake records
+    /// the calls, not just the file.
+    #[test]
+    fn no_action_saves_over_an_unreadable_or_newer_progress() {
+        let actions = [
+            HomeAction::Review,
+            HomeAction::PracticeAhead { n: 5, only: None },
+            HomeAction::AddNew(5),
+            HomeAction::StartAgain,
+            HomeAction::DownloadRaw,
+            HomeAction::Reload,
+        ];
+        for kept in [
+            Load::Unreadable("denied".into()),
+            Load::NewerVersion { raw: "x".into() },
+        ] {
+            for action in &actions {
+                Owner::new().with(|| {
+                    let (store, _files) = provide_fakes(kept.clone());
+                    perform(action.clone(), Backend::current(), || (), || (), |_, _| ());
+                    assert_eq!(store.saved().len(), 0, "{kept:?} {action:?}");
+                    store.exit_write();
+                    assert_eq!(store.written().len(), 0, "{kept:?} {action:?}");
+                });
+            }
+        }
+    }
+
+    /// 'Start again' is the damaged progress's way out (Q3) and nothing
+    /// else's: it saves over an Invalid one.
+    #[test]
+    fn start_again_saves_over_a_damaged_progress_only() {
+        Owner::new().with(|| {
+            let (store, _files) = provide_fakes(Load::Invalid { raw: "x".into() });
+            perform(
+                HomeAction::StartAgain,
+                Backend::current(),
+                || (),
+                || (),
+                |_, _| (),
+            );
+            assert_eq!(store.saved(), [State::empty()]);
+        });
+    }
+
+    /// `on_change` alone flips the home to read-only: the model read after
+    /// the store said so is Broken, with no save in between.
+    #[test]
+    fn a_change_outside_a_save_flips_the_home_to_read_only() {
+        Owner::new().with(|| {
+            let (store, _files) = provide_fakes(Load::Ok(progress_fixture()));
+            let backend = Backend::current();
+            assert!(!matches!(read_model(backend).state, HomeState::Broken(_)));
+            store.changed_to(Load::NewerVersion { raw: "x".into() });
+            assert_eq!(
+                read_model(backend).state,
+                HomeState::Broken(BrokenKind::NewerVersion)
+            );
+            store.changed_to(Load::Unreadable("denied".into()));
+            assert_eq!(
+                read_model(backend).state,
+                HomeState::Broken(BrokenKind::Unreadable)
+            );
+            assert_eq!(store.saved().len(), 0);
+        });
     }
 
     #[test]
@@ -2391,37 +2663,30 @@ mod tests {
 
     #[test]
     fn starting_adds_five_terms_and_stamps_the_day() {
-        let state = grown(HomeAction::AddNew(5), State::empty(), deck(), today()).expect("a state");
+        let state = grown(5, State::empty(), deck(), today()).expect("a state");
         assert_eq!(state.progress.len(), 5);
         assert_eq!(state.last_today, Some(today()));
     }
 
     #[test]
     fn adding_n_terms_keeps_the_ones_already_started() {
-        let first = grown(HomeAction::AddNew(5), State::empty(), deck(), today()).expect("five");
-        let more = grown(HomeAction::AddNew(10), first.clone(), deck(), today()).expect("ten more");
+        let first = grown(5, State::empty(), deck(), today()).expect("five");
+        let more = grown(10, first.clone(), deck(), today()).expect("ten more");
         assert_eq!(more.progress.len(), 15);
         assert_eq!(&more.progress[..5], &first.progress[..]);
     }
 
     #[test]
     fn adding_more_than_what_is_left_adds_what_is_left() {
-        let all = grown(HomeAction::AddNew(60), State::empty(), deck(), today()).expect("all");
+        let all = grown(60, State::empty(), deck(), today()).expect("all");
         assert_eq!(all.progress.len(), 50);
-        assert_eq!(grown(HomeAction::AddNew(5), all, deck(), today()), None);
-    }
-
-    #[test]
-    fn the_other_actions_grow_nothing() {
-        for action in [HomeAction::StartAgain, HomeAction::DownloadRaw] {
-            assert_eq!(grown(action, State::empty(), deck(), today()), None);
-        }
+        assert_eq!(grown(5, all, deck(), today()), None);
     }
 
     #[test]
     fn a_state_dated_after_today_is_not_grown() {
         let mut state = State::empty();
         state.last_today = Some(today() + 1);
-        assert_eq!(grown(HomeAction::AddNew(5), state, deck(), today()), None);
+        assert_eq!(grown(5, state, deck(), today()), None);
     }
 }
