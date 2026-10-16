@@ -28,6 +28,7 @@ mod page;
 mod pages;
 mod seed;
 mod store;
+mod sync;
 #[cfg(test)]
 mod test_support;
 mod today;

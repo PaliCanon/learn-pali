@@ -1,7 +1,9 @@
 //! What a host plugs into the Learn fragment: where the progress lives
 //! ([`ProgressStore`]) and how a file moves in and out ([`FileTransfer`]).
 //! Both are required props of [`LearnProvider`](crate::fragment::LearnProvider):
-//! there is no default and no "missing store" state.
+//! there is no default and no "missing store" state. A host may also plug
+//! where the progress is copied between devices ([`SyncTransport`], task
+//! 050): an optional prop, and without one there is no sync UI.
 //!
 //! The site plugs [`web_store`](crate::web_store) and
 //! [`web_files`](crate::web_files) (`localStorage`, a Blob download, a file
@@ -99,6 +101,75 @@ pub trait FileTransfer {
 /// read (see [`FileTransfer::pick_import`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PickFailed;
+
+/// Who is signed in to the sync, as a [`SyncTransport`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncAccount {
+    /// Nobody: no sync, nothing changes from a device without one.
+    SignedOut,
+    /// Signed in before, with no token at hand (the site after a reload:
+    /// the token lived in the tab's memory only). A tap asks Google for a
+    /// new one in its gesture ([`SyncTransport::sign_in`]), then syncs.
+    Remembered {
+        /// The account's email, kept as a login hint; none when Google did
+        /// not give it.
+        email: Option<String>,
+    },
+    /// A token at hand: a sync can run now.
+    SignedIn {
+        /// The account's email; none when Google did not give it.
+        email: Option<String>,
+    },
+}
+
+/// Why a call of a [`SyncTransport`] failed. Nothing local changes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SyncError {
+    /// No token, or Google refused it (expired, revoked): sign in again.
+    SignedOut,
+    /// The sign-in was closed or refused by the learner.
+    Cancelled,
+    /// The sign-in window could not open (a blocked popup): tap again.
+    Popup,
+    /// Google could not be reached (offline, blocked).
+    Network,
+    /// Google answered with an error: what it said, for the reason line.
+    Drive(String),
+}
+
+/// Where the progress is copied between devices: the learner's Google
+/// Drive on both hosts (the site's transport in [`crate::web_sync`], the
+/// app's over its Rust commands). Called from the UI thread only, like the
+/// store; every call answers through its callback, once (a pull and a push
+/// cross the network). The transport keeps the file's identity between a
+/// pull and the push after it, and logs the Drive file id it resolved.
+pub trait SyncTransport {
+    /// Signs in: asks for a token (called in the learner's gesture: the
+    /// site opens Google's window from it), then calls `on_done` once.
+    /// Signed in, [`account`](Self::account) answers
+    /// [`SyncAccount::SignedIn`].
+    fn sign_in(&self, on_done: Box<dyn FnOnce(Result<(), SyncError>)>);
+
+    /// Signs out: revokes the token at Google (best effort), then forgets
+    /// it and the account. The local progress is kept.
+    fn sign_out(&self);
+
+    /// Who is signed in. The same signal every time it is called; it may
+    /// change after the page is mounted (the site reads its remembered
+    /// account after hydration).
+    fn account(&self) -> Signal<SyncAccount>;
+
+    /// Reads the progress file: `Ok(None)` when there is none yet, else its
+    /// text, as is.
+    fn pull(&self, on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>);
+
+    /// Writes `text` as the progress file (creating it when the last pull
+    /// found none).
+    fn push(&self, text: &str, on_done: Box<dyn FnOnce(Result<(), SyncError>)>);
+}
+
+/// A shared [`SyncTransport`].
+pub type SharedSync = Rc<dyn SyncTransport>;
 
 /// A shared [`ProgressStore`].
 pub type SharedStore = Rc<dyn ProgressStore>;

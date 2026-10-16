@@ -50,6 +50,7 @@ use crate::components::data_block::StoreWrites;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
 use crate::components::save_strip::SaveStrip;
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
+use crate::components::sync_panel::SyncChip;
 use crate::components::term_list::{
     AddRow, Orphans, StageStrip, StageTerms, next_review, orphan_rows,
 };
@@ -59,6 +60,7 @@ use crate::learn::stages::stage_counts;
 use crate::learn::words::date_words;
 use crate::page::reload_page;
 use crate::store::{Load, export_name};
+use crate::sync::SyncCycle;
 use crate::today::{browser_today, on_visible, session_today};
 
 /// The CTA box of every state: its content at the top, no empty height.
@@ -164,6 +166,7 @@ pub(crate) fn Home(
             class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] sm:flex-1 sm:justify-center"
         >
             <SaveStrip />
+            {move || matches!(page.mode.get(), Mode::Home).then(|| view! { <SyncChip /> })}
             {move || {
                 let mode = page.mode.get();
                 let model = match mode {
@@ -238,9 +241,15 @@ impl Page {
             }
         });
         let (start, ahead) = starters(owner, backend, mode, paused, refresh);
+        let sync = SyncCycle::current();
+        // Back home, a cycle when a token is at hand (after the mode: a
+        // merge it saves refreshes the home, never pauses a session).
         let home = Callback::new(move |()| {
             refresh();
             mode.set(Mode::Home);
+            if let Some(sync) = sync {
+                sync.when_ready();
+            }
         });
         let on_action = Callback::new(move |action| {
             perform(

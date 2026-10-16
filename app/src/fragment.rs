@@ -44,10 +44,12 @@ use leptos_router::path;
 use crate::backend::Backend;
 pub use crate::backend::{
     FileTransfer, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles, SharedStore,
+    SharedSync, SyncAccount, SyncError, SyncTransport,
 };
 use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
 use crate::pages::home::Home;
 pub use crate::store::{Load, classify};
+use crate::sync::{SyncCycle, clock_label};
 
 /// The Learn routes, to mount under a parent: one route with an empty
 /// relative path, the home. The site puts it in its `Routes` at the root,
@@ -83,6 +85,11 @@ fn LearnHome() -> impl IntoView {
 /// `children` then the import's confirmation (outside Settings: opening it
 /// closes Settings). One per page.
 ///
+/// Given a `sync` transport (task 050), it provides the sync cycle
+/// (`crate::sync`): Settings shows the sync, the home its chip, and a cycle
+/// runs at load when a token is at hand. A merge the cycle saves runs the
+/// same handler as the store's `on_change`. Without one, nothing changes.
+///
 /// Put it above the `Router` (or build the store inside the router's
 /// children): a router's children closure must be `Send`, and a store, an
 /// `Rc`, is not.
@@ -92,6 +99,10 @@ pub fn LearnProvider(
     store: SharedStore,
     /// How a file moves in and out.
     files: SharedFiles,
+    /// Where the progress is copied between devices; none: no sync, no
+    /// sync UI.
+    #[prop(optional)]
+    sync: Option<SharedSync>,
     /// The host's screens, with [`LearnRoutes`] and [`LearnSettings`]
     /// somewhere inside them.
     children: Children,
@@ -110,10 +121,17 @@ pub fn LearnProvider(
     // The store says the memory changed outside a save: read it again for
     // Settings, and move the writes counter so the home reads it too (it is
     // paused in a session).
-    backend.on_change(move || {
+    let changed = move || {
         data.read();
         data.moved();
-    });
+    };
+    backend.on_change(changed);
+    if let Some(transport) = sync {
+        let cycle = SyncCycle::new(transport, backend, changed, clock_label);
+        provide_context(cycle);
+        // At load, once, on the client: a cycle when a token is at hand.
+        Effect::new(move |_| cycle.when_ready());
+    }
     view! {
         {children()}
         <ImportConfirm data=data />
@@ -228,7 +246,11 @@ mod tests {
     fn with_provider(children: impl FnOnce() -> AnyView + Send + 'static) -> impl IntoView {
         let store: SharedStore = Rc::new(FakeStore::new(Load::Empty));
         let files: SharedFiles = Rc::new(FakeFiles::default());
-        view! { <LearnProvider store=store files=files>{children()}</LearnProvider> }
+        view! {
+            <LearnProvider store=store files=files>
+                {children()}
+            </LearnProvider>
+        }
     }
 
     /// The fragment under a `ParentRoute` at `/learn`, `url` the request.

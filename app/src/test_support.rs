@@ -313,3 +313,179 @@ pub(crate) fn provide_fakes(load: Load) -> (FakeStore, FakeFiles) {
     provide_context(crate::components::data_block::ProgressData::new());
     (store, files)
 }
+
+// ---- The fake sync transport (task 050) ----
+
+use std::cell::Cell;
+
+use crate::backend::{SyncAccount, SyncError, SyncTransport};
+
+/// A `pull` waiting for its answer.
+type PullDone = Box<dyn FnOnce(Result<Option<String>, SyncError>)>;
+/// A `push` or a `sign_in` waiting for its answer.
+type Done = Box<dyn FnOnce(Result<(), SyncError>)>;
+
+/// The state of a [`FakeTransport`].
+struct TransportInner {
+    /// The Drive file's text; none: no file.
+    drive: RefCell<Option<String>>,
+    /// Who is signed in.
+    account: RwSignal<SyncAccount>,
+    /// The pulls waiting for [`FakeTransport::answer_pull`].
+    pulls: RefCell<VecDeque<PullDone>>,
+    /// The pushes waiting for [`FakeTransport::answer_push`], with their text.
+    pushes: RefCell<VecDeque<(String, Done)>>,
+    /// The sign-ins waiting for [`FakeTransport::answer_sign_in`].
+    sign_ins: RefCell<VecDeque<Done>>,
+    /// Every text a push was given, answered or not.
+    pushed: RefCell<Vec<String>>,
+    /// How many pulls were asked.
+    pull_calls: Cell<usize>,
+    /// How many sign-outs were asked.
+    sign_outs: Cell<usize>,
+    /// The failure the next answered pull or push gives instead.
+    failure: RefCell<Option<SyncError>>,
+}
+
+/// A [`SyncTransport`] the tests drive: every call waits until the test
+/// answers it, so a test can act between a pull and its answer. Make it
+/// inside an `Owner` (its account is a signal).
+#[derive(Clone)]
+pub(crate) struct FakeTransport(Rc<TransportInner>);
+
+impl FakeTransport {
+    /// A transport for `account`, with no file on the Drive.
+    pub(crate) fn new(account: SyncAccount) -> Self {
+        FakeTransport(Rc::new(TransportInner {
+            drive: RefCell::new(None),
+            account: RwSignal::new(account),
+            pulls: RefCell::default(),
+            pushes: RefCell::default(),
+            sign_ins: RefCell::default(),
+            pushed: RefCell::default(),
+            pull_calls: Cell::new(0),
+            sign_outs: Cell::new(0),
+            failure: RefCell::new(None),
+        }))
+    }
+
+    /// A signed-in transport (`learner@example.org`).
+    pub(crate) fn signed_in() -> Self {
+        FakeTransport::new(SyncAccount::SignedIn {
+            email: Some("learner@example.org".into()),
+        })
+    }
+
+    /// Puts `text` on the Drive (none: no file).
+    pub(crate) fn set_drive(&self, text: Option<&str>) {
+        *self.0.drive.borrow_mut() = text.map(str::to_owned);
+    }
+
+    /// The Drive file's text.
+    pub(crate) fn drive(&self) -> Option<String> {
+        self.0.drive.borrow().clone()
+    }
+
+    /// The next answered pull or push fails with `error`.
+    pub(crate) fn fail_next(&self, error: SyncError) {
+        *self.0.failure.borrow_mut() = Some(error);
+    }
+
+    /// Answers the oldest waiting pull with the Drive's text (or the
+    /// scripted failure); false when none waits.
+    pub(crate) fn answer_pull(&self) -> bool {
+        let Some(done) = self.0.pulls.borrow_mut().pop_front() else {
+            return false;
+        };
+        match self.0.failure.borrow_mut().take() {
+            Some(error) => done(Err(error)),
+            None => done(Ok(self.drive())),
+        }
+        true
+    }
+
+    /// Answers the oldest waiting push: its text reaches the Drive (or the
+    /// scripted failure, the Drive unchanged); false when none waits.
+    pub(crate) fn answer_push(&self) -> bool {
+        let Some((text, done)) = self.0.pushes.borrow_mut().pop_front() else {
+            return false;
+        };
+        let failure = self.0.failure.borrow_mut().take();
+        if let Some(error) = failure {
+            done(Err(error));
+        } else {
+            *self.0.drive.borrow_mut() = Some(text);
+            done(Ok(()));
+        }
+        true
+    }
+
+    /// Answers every waiting pull and push, and those they start.
+    pub(crate) fn settle(&self) {
+        while self.answer_pull() || self.answer_push() {}
+    }
+
+    /// Answers the oldest waiting sign-in: signed in on success.
+    pub(crate) fn answer_sign_in(&self, result: Result<(), SyncError>) {
+        let done = self
+            .0
+            .sign_ins
+            .borrow_mut()
+            .pop_front()
+            .expect("a sign-in waits");
+        if result.is_ok() {
+            self.0.account.set(SyncAccount::SignedIn {
+                email: Some("learner@example.org".into()),
+            });
+        }
+        done(result);
+    }
+
+    /// Every text a push was given.
+    pub(crate) fn pushed(&self) -> Vec<String> {
+        self.0.pushed.borrow().clone()
+    }
+
+    /// How many pulls were asked.
+    pub(crate) fn pull_calls(&self) -> usize {
+        self.0.pull_calls.get()
+    }
+
+    /// How many sign-ins wait.
+    pub(crate) fn sign_ins_waiting(&self) -> usize {
+        self.0.sign_ins.borrow().len()
+    }
+
+    /// How many sign-outs were asked.
+    pub(crate) fn sign_outs(&self) -> usize {
+        self.0.sign_outs.get()
+    }
+}
+
+impl SyncTransport for FakeTransport {
+    fn sign_in(&self, on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {
+        self.0.sign_ins.borrow_mut().push_back(on_done);
+    }
+
+    fn sign_out(&self) {
+        self.0.sign_outs.set(self.0.sign_outs.get() + 1);
+        self.0.account.set(SyncAccount::SignedOut);
+    }
+
+    fn account(&self) -> Signal<SyncAccount> {
+        self.0.account.into()
+    }
+
+    fn pull(&self, on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {
+        self.0.pull_calls.set(self.0.pull_calls.get() + 1);
+        self.0.pulls.borrow_mut().push_back(on_done);
+    }
+
+    fn push(&self, text: &str, on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {
+        self.0.pushed.borrow_mut().push(text.to_owned());
+        self.0
+            .pushes
+            .borrow_mut()
+            .push_back((text.to_owned(), on_done));
+    }
+}

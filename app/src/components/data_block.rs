@@ -25,6 +25,7 @@ use palicanon_ui_lib::{Button, Dialog, DialogSection, Disclosed, Disclosure, She
 use crate::backend::{Backend, SaveError};
 use crate::catalogue::strings;
 use crate::components::save_strip::failure;
+use crate::components::sync_panel::SyncPanel;
 use crate::store::{ImportError, Load, export_name, validate_import};
 use crate::today::{browser_today, session_today};
 
@@ -170,7 +171,7 @@ pub(crate) fn ProgressSection(
 
 /// The section's content: the two buttons, the reason they are off (a
 /// progress saved by a newer version, or one that could not be read), the
-/// last refusal.
+/// last refusal, then the sync when the host gave one.
 #[component]
 fn ProgressActions(
     /// The state shared with [`ImportConfirm`].
@@ -210,6 +211,7 @@ fn ProgressActions(
             }}
             <ImportStatus error=data.refusal.into() />
             <PickStatus failed=data.pick_failed.into() />
+            <SyncPanel />
         </div>
     }
 }
