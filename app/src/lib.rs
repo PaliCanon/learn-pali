@@ -38,6 +38,12 @@ mod today;
 mod web;
 #[cfg(any(feature = "ssr", feature = "web-store"))]
 pub use web::{web_files, web_store};
+// The site's sync through Google Drive (task 050): nothing of it is in a
+// `csr` build (the app syncs through its own transport).
+#[cfg(any(feature = "ssr", feature = "web-sync"))]
+pub mod web_sync;
+#[cfg(any(feature = "ssr", feature = "web-sync"))]
+pub use web_sync::web_sync;
 
 // `build.rs` includes this same file (`#[path]`) for the env badge's pure
 // decisions; declared here too so `cargo test -p learn_pali` covers it.

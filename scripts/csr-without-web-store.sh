@@ -7,14 +7,16 @@
 # appear. The markers are the names only src/web.rs holds, found in the
 # built rlib: the storage read (`get_item`), the Blob URL
 # (`create_object_url`), the file read (`read_as_text`), the hidden input
-# (`hidden_file_input`) and the store type (`WebStore`).
+# (`hidden_file_input`) and the store type (`WebStore`); and, for the
+# site's Google Drive sync (src/web_sync, task 050), the token client's
+# name (`initTokenClient`).
 #
 # Run from anywhere: scripts/csr-without-web-store.sh. Needs the wasm32 target.
 set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-markers=(get_item create_object_url read_as_text hidden_file_input WebStore)
+markers=(get_item create_object_url read_as_text hidden_file_input WebStore initTokenClient)
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 

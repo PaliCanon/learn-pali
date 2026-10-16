@@ -15,7 +15,7 @@ use palicanon_ui_lib::{
 
 use crate::catalogue::strings;
 use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
-use crate::{web_files, web_store};
+use crate::{web_files, web_store, web_sync};
 
 mod site_footer;
 use site_footer::SiteFooter;
@@ -118,13 +118,14 @@ fn nav(current: Signal<String>) -> NavList {
 /// Settings with 'Your progress' after Appearance (export, import), and
 /// the Learn routes (the home at `/`, which holds the progress and runs the
 /// review in place), the footer in the shell's slot. The site's progress
-/// lives in the browser ([`web_store`], [`web_files`]); the provider
+/// lives in the browser ([`web_store`], [`web_files`]) and syncs through
+/// the learner's Google Drive ([`web_sync`]); the provider
 /// renders the import's confirmation after the shell, outside Settings.
 #[component]
 fn Layout() -> impl IntoView {
     let location = use_location();
     view! {
-        <LearnProvider store=web_store() files=web_files()>
+        <LearnProvider store=web_store() files=web_files() sync=web_sync()>
             <AppShell
                 nav=nav(location.pathname.into())
                 settings_extra=move || view! { <LearnSettings /> }

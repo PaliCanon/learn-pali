@@ -130,6 +130,12 @@ jobs:
         run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test csr
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      # tests/web_sync.rs (task 050): the site's Google Drive transport
+      # against a fake Google (token client, Drive, userinfo), no network.
+      - working-directory: learn-pali
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr,web-sync --target wasm32-unknown-unknown --test web_sync
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
       - working-directory: learn-pali
         run: bash scripts/csr-without-web-store.sh
 
