@@ -91,7 +91,7 @@ fn nav(current: Signal<String>) -> NavList {
                 NavEntry {
                     label: td_string!(t.locale(), nav_search),
                     icon: IconName::Search,
-                    href: "https://palicanon.app",
+                    href: "https://search.palicanon.app",
                 },
                 // `IconName::Grid` stands in until ui-lib has a Learn icon.
                 NavEntry {
@@ -212,7 +212,7 @@ mod tests {
         let tags = anchors(&html);
         let search = tags
             .iter()
-            .position(|t| t.contains(r#"href="https://palicanon.app""#))
+            .position(|t| t.contains(r#"href="https://search.palicanon.app""#))
             .expect(&html);
         let learn = tags
             .iter()
@@ -222,7 +222,7 @@ mod tests {
         // The same two entries, in the same order, in the phone's navigation.
         let again = tags
             .iter()
-            .rposition(|t| t.contains(r#"href="https://palicanon.app""#))
+            .rposition(|t| t.contains(r#"href="https://search.palicanon.app""#))
             .expect(&html);
         assert!(again > learn, "{html}");
     }
@@ -241,7 +241,7 @@ mod tests {
             assert!(anchor_at(&html, at).contains(r#"href="/""#), "{html}");
         }
         for tag in anchors(&html) {
-            if tag.contains(r#"href="https://palicanon.app""#) {
+            if tag.contains(r#"href="https://search.palicanon.app""#) {
                 assert!(!tag.contains("aria-current"), "{tag}");
             }
         }
@@ -478,7 +478,7 @@ mod tests {
         );
         assert_eq!(body.matches(r#"id="pc-app""#).count(), 1, "{body}");
         // The app inside it: the rail's first entry and the footer.
-        assert!(body.contains(r#"href="https://palicanon.app""#), "{body}");
+        assert!(body.contains(r#"href="https://search.palicanon.app""#), "{body}");
         assert!(body.contains("<footer"), "{body}");
     }
 
