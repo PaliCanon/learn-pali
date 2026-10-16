@@ -102,7 +102,7 @@ Applied in part on 2026-10-13 (the secret, the service account, Cloud Run, the
 Worker); the Custom Domain and the secret push are still to do (task 034).
 
 1. **The Cloudflare token in the keychain** (`lsh` /
-   `cloudflare-api-token`, never typed on a command line or printed). One
+   `cloudflare-api-token-palicanon`, never typed on a command line or printed). One
    token reads and writes the Worker's secret; scopes: zone DNS, account
    Workers scripts (Custom Domains included). Access applications and
    policies on the zone are needed only if an env sets `access = true`.
@@ -116,7 +116,7 @@ Worker); the Custom Domain and the secret push are still to do (task 034).
 
    ```sh
    gcloud auth application-default login
-   export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a lsh -s cloudflare-api-token -w)
+   export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a lsh -s cloudflare-api-token-palicanon -w)
    cd infra
    tofu init
    tofu apply \
