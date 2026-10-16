@@ -4,7 +4,7 @@ session: learn-pali-049-proxy-target
 
 Renumbered 049 → 051 on 2026-10-16 before the merge: learn-pali main took 049 for another task (049-rail-map) while this one was in review, and 050 is held by the viewer session learn-pali-050-progress-sync. The viewer session and the worktree keep the old number (a session cannot be renamed); the commit messages before the renumbering say 049.
 
-status: review · rank: 8 · level: hard · type: bug · request: user, 2026-10-16 ("Oui, tâche urgente"), request thread docs/proxy-target discussion d51493764c4e14b · session: learn-pali-049-proxy-target · process: ../../docs/workflows/process-bug.mmd · after: [] · custody: the origin secret learn-pali-origin-secret-dev|prod: Secret Manager and the Worker secret ORIGIN_AUTH; the user rotates it (runbook), no agent reads or moves it
+status: gated (merged locally, not pushed; the deploy runbook with the user, owner: the user and the orchestrator, due 2026-10-16) · rank: 8 · level: hard · type: bug · request: user, 2026-10-16 ("Oui, tâche urgente"), request thread docs/proxy-target discussion d51493764c4e14b · session: learn-pali-049-proxy-target · process: ../../docs/workflows/process-bug.mmd · after: [] · custody: the origin secret learn-pali-origin-secret-dev|prod: Secret Manager and the Worker secret ORIGIN_AUTH; the user rotates it (runbook), no agent reads or moves it
 
 ## Workflow
 ```mermaid
@@ -24,10 +24,10 @@ flowchart LR
   REV["Review round 1 ✓ reviewer + deep"]:::done
   FIXR1["Fix round 1 ✓ T1, T3"]:::done
   LOOK["User check: runbook run, //example.com/ is 400"]:::todo
-  MERGE["Squash merge"]:::todo
+  MERGE["Squash merge ✓ 6c7ce9b (local, not pushed)"]:::done
   RETRO["Retro"]:::todo
   ARCH["Archive"]:::todo
-  REQ --> REPRO --> RED --> FIX --> MUT --> FIX2 --> NONREG --> REV --> FIXR1 --> LOOK --> MERGE --> RETRO --> ARCH
+  REQ --> REPRO --> RED --> FIX --> MUT --> FIX2 --> NONREG --> REV --> FIXR1 --> MERGE --> LOOK --> RETRO --> ARCH
 ```
 
 ## Log
@@ -195,3 +195,4 @@ One reviewer (Opus) for the four branches; voice deep (#10964, #11001). Rulings 
 - ACCEPTED: Δ7 the source-reading test reads text, its regex widened (origin or env.ORIGIN).
 
 ## Merge
+6c7ce9b on main (local squash, 2026-10-16; not pushed — the push waits for the user, after the deploy order). Merge gate (each CI's commands runnable on this Mac): fmt, clippy ssr and core/cli/deck, cargo test ssr 411/0 and core/cli/deck 330/0, rustdoc -D warnings, tofu fmt/init/validate, node 20/20, rollout-check.test.sh and origin-secret.test.sh — all exit 0. Homebrew has no wasm32 target, msrv toolchains or cargo-deny, so those ran under rustup (next sentence); not run at all: the browser tests (no chromedriver), the release bundle and coverage; no file this task touches is Rust. CI parity under the rustup stable 1.99 toolchain with wasm32 (the one palicanon sessions use): clippy x5 (wasm32 included), rustdoc, msrv 1.88 check x2, cargo deny — exit 0.
