@@ -49,7 +49,7 @@ pub use crate::backend::{
 use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
 use crate::pages::home::Home;
 pub use crate::store::{Load, classify};
-use crate::sync::{SyncCycle, clock_label};
+use crate::sync::{SyncCycle, browser_timer, clock_label};
 
 /// The Learn routes, to mount under a parent: one route with an empty
 /// relative path, the home. The site puts it in its `Routes` at the root,
@@ -127,7 +127,7 @@ pub fn LearnProvider(
     };
     backend.on_change(changed);
     if let Some(transport) = sync {
-        let cycle = SyncCycle::new(transport, backend, changed, clock_label);
+        let cycle = SyncCycle::new(transport, backend, changed, clock_label, browser_timer);
         provide_context(cycle);
         // At load, once, on the client: a cycle when a token is at hand.
         Effect::new(move |_| cycle.when_ready());

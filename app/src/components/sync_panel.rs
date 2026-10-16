@@ -292,7 +292,13 @@ mod tests {
                 provide_fakes(Load::Ok(progress_fixture()));
                 if let Some((account, status)) = sync {
                     let transport: SharedSync = Rc::new(FakeTransport::new(account));
-                    let cycle = SyncCycle::new(transport, Backend::current(), || {}, String::new);
+                    let cycle = SyncCycle::new(
+                        transport,
+                        Backend::current(),
+                        || {},
+                        String::new,
+                        |_, _| {},
+                    );
                     cycle.set_status(status);
                     provide_context(cycle);
                 }

@@ -29,6 +29,7 @@
 use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
 use learn_core::deck::TermId;
 use learn_core::merge::merge;
@@ -90,11 +91,24 @@ struct Cycle {
     busy: Cell<bool>,
     /// A cycle was asked while one ran: it runs once after it.
     again: Cell<bool>,
+    /// The current step (a pull or a push waiting for its answer): an
+    /// answer or a timeout counts only while its step is current. A
+    /// sign-out moves it, so the answers of a cycle it cut are dropped.
+    step: Cell<u64>,
     /// The provider's changed-elsewhere handler.
     changed: Box<dyn Fn()>,
     /// The local time, `HH:MM`.
     clock: Box<dyn Fn() -> String>,
+    /// Runs a callback once after a delay (the browser's `setTimeout`).
+    timer: Box<Timer>,
 }
+
+/// Runs a callback once after a delay.
+type Timer = dyn Fn(Duration, Box<dyn FnOnce()>);
+
+/// How long a pull or a push may stay unanswered: then the cycle fails
+/// with [`SyncError::Network`] and is free again.
+pub(crate) const STEP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// The sync of the page, a `Copy` handle in the Leptos context, provided by
 /// [`LearnProvider`](crate::fragment::LearnProvider) when the host gave a
@@ -104,12 +118,14 @@ pub(crate) struct SyncCycle(StoredValue<Rc<Cycle>, LocalStorage>);
 
 impl SyncCycle {
     /// A cycle over `transport` and `backend`; `changed` runs after a
-    /// cycle saved a merge locally, `clock` tells the time of a sync.
+    /// cycle saved a merge locally, `clock` tells the time of a sync,
+    /// `timer` runs a callback once after a delay (the step timeout).
     pub(crate) fn new(
         transport: SharedSync,
         backend: Backend,
         changed: impl Fn() + 'static,
         clock: impl Fn() -> String + 'static,
+        timer: impl Fn(Duration, Box<dyn FnOnce()>) + 'static,
     ) -> Self {
         SyncCycle(StoredValue::new_local(Rc::new(Cycle {
             transport,
@@ -117,8 +133,10 @@ impl SyncCycle {
             status: RwSignal::new(SyncStatus::Idle),
             busy: Cell::new(false),
             again: Cell::new(false),
+            step: Cell::new(0),
             changed: Box::new(changed),
             clock: Box::new(clock),
+            timer: Box::new(timer),
         })))
     }
 
@@ -178,10 +196,14 @@ impl SyncCycle {
     }
 
     /// Sign out: the transport revokes and forgets; the local progress is
-    /// kept, the status back to `Idle`.
+    /// kept, the status back to `Idle`. A cycle in flight is cut: its step
+    /// moves on (a late answer is dropped), and nothing waits after it.
     pub(crate) fn sign_out(self) {
         self.0.with_value(|cycle| {
             cycle.transport.sign_out();
+            cycle.step.set(cycle.step.get() + 1);
+            cycle.busy.set(false);
+            cycle.again.set(false);
             cycle.status.set(SyncStatus::Idle);
         });
     }
@@ -201,9 +223,39 @@ impl Cycle {
         }
         self.busy.set(true);
         self.status.set(SyncStatus::Syncing);
+        let step = self.begin();
         let cycle = Rc::clone(self);
-        self.transport
-            .pull(Box::new(move |pulled| cycle.pulled(pulled)));
+        self.transport.pull(Box::new(move |pulled| {
+            if cycle.take(step) {
+                cycle.pulled(pulled);
+            }
+        }));
+    }
+
+    /// Starts a step: its number, and its timeout armed.
+    fn begin(self: &Rc<Self>) -> u64 {
+        let step = self.step.get() + 1;
+        self.step.set(step);
+        let cycle = Rc::clone(self);
+        (self.timer)(
+            STEP_TIMEOUT,
+            Box::new(move || {
+                if cycle.take(step) {
+                    cycle.finish(SyncStatus::Failed(SyncError::Network));
+                }
+            }),
+        );
+        step
+    }
+
+    /// Whether `step` is still current; it is then answered (the next
+    /// answer or timeout of it is dropped).
+    fn take(&self, step: u64) -> bool {
+        let current = self.step.get() == step;
+        if current {
+            self.step.set(step + 1);
+        }
+        current
     }
 
     /// This device's progress as the cycle may sync it, or why not.
@@ -276,10 +328,14 @@ impl Cycle {
         if drive.as_ref().is_some_and(|drive| same(drive, &merged)) {
             return self.finish(SyncStatus::Synced { at: (self.clock)() });
         }
+        let step = self.begin();
         let cycle = Rc::clone(self);
         self.transport.push(
             &merged.to_json(),
             Box::new(move |pushed| {
+                if !cycle.take(step) {
+                    return;
+                }
                 let status = match pushed {
                     Ok(()) => SyncStatus::Synced {
                         at: (cycle.clock)(),
@@ -318,6 +374,15 @@ fn same(a: &State, b: &State) -> bool {
         && entries(a) == entries(b)
 }
 
+/// Runs `callback` once after `delay` (the browser's `setTimeout`); never
+/// on the server, which never syncs.
+pub(crate) fn browser_timer(delay: Duration, callback: Box<dyn FnOnce()>) {
+    #[cfg(feature = "browser")]
+    leptos::prelude::set_timeout(callback, delay);
+    #[cfg(not(feature = "browser"))]
+    let _ = (delay, callback);
+}
+
 /// The local time, `HH:MM` (the browser's clock); empty on the server,
 /// which never syncs.
 pub(crate) fn clock_label() -> String {
@@ -334,7 +399,7 @@ pub(crate) fn clock_label() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
     use learn_core::deck::TermId;
@@ -349,19 +414,45 @@ mod tests {
         FakeFiles, FakeStore, FakeTransport, Outcome, backend_of, progress_fixture, today,
     };
 
+    /// The timers a cycle armed, waiting to be fired by the test.
+    type Timers = Rc<RefCell<Vec<(Duration, Box<dyn FnOnce()>)>>>;
+
     /// A cycle over `store` and `transport`; the count of the changed
     /// handler's calls.
     fn cycle(store: &FakeStore, transport: &FakeTransport) -> (SyncCycle, Rc<Cell<usize>>) {
+        let (sync, changed, _) = timed_cycle(store, transport);
+        (sync, changed)
+    }
+
+    /// [`cycle`], and the timers it arms.
+    fn timed_cycle(
+        store: &FakeStore,
+        transport: &FakeTransport,
+    ) -> (SyncCycle, Rc<Cell<usize>>, Timers) {
         let changed = Rc::new(Cell::new(0));
         let seen = Rc::clone(&changed);
+        let timers: Timers = Rc::default();
+        let armed = Rc::clone(&timers);
         let shared: SharedSync = Rc::new(transport.clone());
         let sync = SyncCycle::new(
             shared,
             backend_of(store, &FakeFiles::default()),
             move || seen.set(seen.get() + 1),
             || "10:42".to_owned(),
+            move |delay, callback| armed.borrow_mut().push((delay, callback)),
         );
-        (sync, changed)
+        (sync, changed, timers)
+    }
+
+    /// Fires every armed timer (they all ran out); their delays.
+    fn fire(timers: &Timers) -> Vec<Duration> {
+        let due: Vec<_> = timers.borrow_mut().drain(..).collect();
+        due.into_iter()
+            .map(|(delay, callback)| {
+                callback();
+                delay
+            })
+            .collect()
     }
 
     /// The fixture with one more term, `extra`, started today.
@@ -712,6 +803,91 @@ mod tests {
             transport.settle();
             assert_eq!(transport.pull_calls(), 2, "and no more");
             assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    /// A sign-out during a pull: its answer, when it comes, is dropped
+    /// (nothing saved, nothing pushed, the home not told) and the cycle is
+    /// free at once.
+    #[test]
+    fn a_pull_answered_after_a_sign_out_is_dropped() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(with_term(progress_fixture(), "here 1")));
+            let transport = FakeTransport::signed_in();
+            transport.set_drive(Some(&lapsed(progress_fixture()).to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            sync.sign_out();
+            assert!(transport.answer_pull());
+            assert_eq!(store.saved(), vec![]);
+            assert_eq!(changed.get(), 0);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+            assert_eq!(sync.status().get_untracked(), SyncStatus::Idle);
+            sync.run();
+            assert_eq!(transport.pull_calls(), 2, "free again");
+        });
+    }
+
+    /// A sign-out during a push: its answer is dropped too (no 'Synced').
+    #[test]
+    fn a_push_answered_after_a_sign_out_is_dropped() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _) = cycle(&store, &transport);
+            sync.run();
+            sync.run();
+            assert!(transport.answer_pull());
+            sync.sign_out();
+            assert!(transport.answer_push());
+            assert_eq!(sync.status().get_untracked(), SyncStatus::Idle);
+            assert_eq!(transport.pull_calls(), 1, "the asked one is forgotten too");
+        });
+    }
+
+    /// A pull that never answers fails after 30 s, frees the cycle, and
+    /// its late answer is dropped.
+    #[test]
+    fn a_pull_that_never_answers_times_out() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _, timers) = timed_cycle(&store, &transport);
+            sync.run();
+            assert_eq!(fire(&timers), vec![STEP_TIMEOUT]);
+            assert_eq!(STEP_TIMEOUT, Duration::from_secs(30));
+            assert_eq!(
+                sync.status().get_untracked(),
+                SyncStatus::Failed(SyncError::Network)
+            );
+            sync.run();
+            assert_eq!(transport.pull_calls(), 2, "free again");
+            assert!(transport.answer_pull(), "the late answer of the first");
+            assert_eq!(transport.pushed(), Vec::<String>::new(), "dropped");
+            assert_eq!(sync.status().get_untracked(), SyncStatus::Syncing);
+        });
+    }
+
+    /// A push that never answers fails the same way; an answered step's
+    /// timer, when it runs out, changes nothing.
+    #[test]
+    fn a_push_that_never_answers_times_out() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _, timers) = timed_cycle(&store, &transport);
+            sync.run();
+            assert!(transport.answer_pull());
+            assert_eq!(fire(&timers).len(), 2, "the pull's and the push's");
+            assert_eq!(
+                sync.status().get_untracked(),
+                SyncStatus::Failed(SyncError::Network)
+            );
+            assert!(transport.answer_push(), "late");
+            assert_eq!(
+                sync.status().get_untracked(),
+                SyncStatus::Failed(SyncError::Network)
+            );
         });
     }
 
