@@ -11,7 +11,10 @@
 //! wins, and `merge` is commutative, associative and idempotent: a lost
 //! write heals at the loser's next sync. Passes made under a lower key are
 //! dropped on purpose (a fail or a climb clears `passed` on one device
-//! too). `last_today` moves every device's day forward to the latest one
+//! too). One call lowers a key: [`Session::advance`](crate::session::Session::advance)
+//! (study ahead) moves `due` back to today. Only the CLI calls it, and the
+//! CLI does not sync; a synced host that called it would see the
+//! advance undone (with its partial passes) by the next merge. `last_today` moves every device's day forward to the latest one
 //! seen, as an import does.
 //!
 //! The order of the result is `b`'s terms, then `a`'s other terms in `a`'s
