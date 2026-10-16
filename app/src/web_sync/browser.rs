@@ -218,7 +218,11 @@ impl Inner {
                 let bearer = token.access.clone();
                 *self.token.borrow_mut() = Some(token);
                 let email = email_of(&self.account.get_untracked());
-                storage_set(email.as_deref().unwrap_or_default());
+                // An empty value is no account: the email is written once
+                // known (here, or when userinfo answers).
+                if let Some(email) = &email {
+                    storage_set(email);
+                }
                 self.account.set(SyncAccount::SignedIn { email });
                 self.answer(Ok(()));
                 let inner = Rc::clone(self);

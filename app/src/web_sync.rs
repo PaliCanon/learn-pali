@@ -74,14 +74,12 @@ pub const GIS_SCRIPT: &str = "https://accounts.google.com/gsi/client";
 /// The `localStorage` key that keeps the sync on, its value the email.
 pub(crate) const REMEMBER_KEY: &str = "pc_learn_sync";
 
-/// The account `localStorage[pc_learn_sync]` remembers: none, or the
-/// email (empty: unknown).
+/// The account `localStorage[pc_learn_sync]` remembers: its email; no
+/// value, or an empty one, is no account (signed out).
 pub(crate) fn remembered(value: Option<String>) -> SyncAccount {
     match value {
-        None => SyncAccount::SignedOut,
-        Some(email) => SyncAccount::Remembered {
-            email: Some(email).filter(|email| !email.is_empty()),
-        },
+        Some(email) if !email.is_empty() => SyncAccount::Remembered { email: Some(email) },
+        _ => SyncAccount::SignedOut,
     }
 }
 
@@ -117,7 +115,8 @@ pub(crate) fn checked(status: u16, body: &str) -> Result<(), SyncError> {
     }
 }
 
-/// The first file id of a list answer; none when the folder has no file.
+/// The first file id of a list answer (an entry without one is skipped);
+/// none when the folder has no file.
 ///
 /// # Errors
 /// [`SyncError::Drive`] when the answer is not a list.
@@ -128,8 +127,8 @@ pub(crate) fn first_file_id(body: &str) -> Result<Option<String>, SyncError> {
         .as_array()
         .ok_or_else(|| SyncError::Drive("unexpected list answer".to_owned()))?;
     Ok(files
-        .first()
-        .and_then(|file| file["id"].as_str())
+        .iter()
+        .find_map(|file| file["id"].as_str())
         .map(str::to_owned))
 }
 
@@ -167,6 +166,10 @@ impl Token {
     }
 }
 
+/// A token's life when Google's answer does not say (`expires_in`), in
+/// seconds: Google's usual hour, less a second.
+const DEFAULT_EXPIRES_IN: f64 = 3599.0;
+
 /// The token of a token client's answer (its `access_token`,
 /// `expires_in` in seconds, `error`), received at `now`.
 ///
@@ -181,7 +184,7 @@ pub(crate) fn token_of(
     match (access, error) {
         (Some(access), None) if !access.is_empty() => Ok(Token {
             access,
-            expires_at: now + (expires_in.unwrap_or(0.0) - 60.0).max(0.0) * 1000.0,
+            expires_at: now + (expires_in.unwrap_or(DEFAULT_EXPIRES_IN) - 60.0).max(0.0) * 1000.0,
         }),
         _ => Err(SyncError::Cancelled),
     }
@@ -261,7 +264,8 @@ mod tests {
         assert_eq!(remembered(None), SyncAccount::SignedOut);
         assert_eq!(
             remembered(Some(String::new())),
-            SyncAccount::Remembered { email: None }
+            SyncAccount::SignedOut,
+            "an empty value is no account"
         );
         assert_eq!(
             remembered(Some("a@b.c".into())),
@@ -294,6 +298,12 @@ mod tests {
     fn a_list_gives_the_first_file_or_none() {
         assert_eq!(first_file_id(r#"{"files":[]}"#), Ok(None));
         assert_eq!(
+            first_file_id(r#"{"files":[{"name":"x"},{"id":"f2"}]}"#),
+            Ok(Some("f2".into())),
+            "an entry without an id is skipped"
+        );
+        assert_eq!(first_file_id(r#"{"files":[{"name":"x"}]}"#), Ok(None));
+        assert_eq!(
             first_file_id(r#"{"files":[{"id":"old"},{"id":"new"}]}"#),
             Ok(Some("old".into()))
         );
@@ -314,6 +324,8 @@ mod tests {
         assert_eq!(token.expires_at, 1000.0 + 3540.0 * 1000.0);
         assert!(token.valid(1000.0));
         assert!(!token.valid(token.expires_at));
+        let default = token_of(Some("t".into()), None, None, 0.0).unwrap();
+        assert_eq!(default.expires_at, 3539.0 * 1000.0, "no expires_in: 3599 s");
         for (access, error) in [
             (None, None),
             (Some(String::new()), None),
