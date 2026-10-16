@@ -27,10 +27,12 @@
 //! One cycle at a time: a request during one runs once, after it.
 
 use std::cell::Cell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
+use learn_core::deck::TermId;
 use learn_core::merge::merge;
-use learn_core::progress::{State, StateError};
+use learn_core::progress::{Progress, State, StateError};
 use leptos::prelude::*;
 
 use crate::backend::{Backend, SaveError, SaveStatus, SharedSync, SyncAccount, SyncError};
@@ -246,11 +248,11 @@ impl Cycle {
         let merged = drive
             .as_ref()
             .map_or_else(|| local.clone(), |drive| merge(&local, drive));
-        if merged != local {
+        if !same(&merged, &local) {
             self.backend.save(&merged);
             (self.changed)();
         }
-        if drive.as_ref() == Some(&merged) {
+        if drive.as_ref().is_some_and(|drive| same(drive, &merged)) {
             return self.finish(SyncStatus::Synced { at: (self.clock)() });
         }
         let cycle = Rc::clone(self);
@@ -276,6 +278,23 @@ impl Cycle {
             self.run();
         }
     }
+}
+
+/// Whether `a` and `b` hold the same progress, whatever the order of their
+/// terms: the same version and `last_today`, and the same entry for every
+/// term. A copy in another order is neither saved nor pushed.
+fn same(a: &State, b: &State) -> bool {
+    let entries = |state: &State| -> HashMap<TermId, Progress> {
+        state
+            .progress
+            .iter()
+            .map(|entry| (entry.term.clone(), entry.clone()))
+            .collect()
+    };
+    a.version == b.version
+        && a.last_today == b.last_today
+        && a.progress.len() == b.progress.len()
+        && entries(a) == entries(b)
 }
 
 /// The local time, `HH:MM` (the browser's clock); empty on the server,
@@ -384,6 +403,26 @@ mod tests {
             assert_eq!(transport.pushed(), Vec::<String>::new());
             assert_eq!(store.saved(), vec![]);
             assert_eq!(changed.get(), 0);
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    /// The same progress in another order is the same progress: nothing
+    /// is saved, the home is not told, nothing is pushed.
+    #[test]
+    fn a_reordered_copy_neither_saves_nor_fires_changed() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let mut reordered = progress_fixture();
+            reordered.progress.reverse();
+            transport.set_drive(Some(&reordered.to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            transport.settle();
+            assert_eq!(store.saved(), vec![]);
+            assert_eq!(changed.get(), 0);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
             assert_eq!(sync.status().get_untracked(), synced());
         });
     }
