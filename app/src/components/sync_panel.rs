@@ -5,7 +5,7 @@
 //!
 //! Signed out, the panel offers 'Sync with Google Drive' and says what is
 //! stored where. Signed in (or remembered, the site after a reload), it
-//! shows the account, where the sync stands ('Last synced at <time>', 'Not
+//! shows the account, where the sync stands ('Last synced at `<time>`', 'Not
 //! synced.' with the reason), 'Sync now' ('Retry' after a failure) and
 //! 'Sign out'; a Drive copy that could not be read is offered for download.
 //! The chip shows on the home while the account is remembered with no

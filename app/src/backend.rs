@@ -138,7 +138,7 @@ pub enum SyncError {
 }
 
 /// Where the progress is copied between devices: the learner's Google
-/// Drive on both hosts (the site's transport in [`crate::web_sync`], the
+/// Drive on both hosts (the site's transport is `web_sync()`, the
 /// app's over its Rust commands). Called from the UI thread only, like the
 /// store; every call answers through its callback, once (a pull and a push
 /// cross the network). The transport keeps the file's identity between a
