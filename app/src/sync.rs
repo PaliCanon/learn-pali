@@ -12,19 +12,29 @@
 //! - a copy that does not parse: the sync stops, nothing is written, its
 //!   raw text is kept for Export;
 //! - else the local progress is read NOW (the store's memory, the saves
-//!   made during the pull included), merged with the copy
-//!   ([`learn_core::merge::merge`]), saved locally when the merge changed
-//!   it (then the provider's changed-elsewhere handler runs, as for the
-//!   store's `on_change`), and pushed when it differs from the copy. The
-//!   load, the merge and the save run in that one callback, with no wait
-//!   between: no other answer can come in the middle.
+//!   made during the pull included) and merged with the copy
+//!   ([`learn_core::merge::merge`]). When the merge changed it (compared as
+//!   a set of terms: another order is no change), it is saved FIRST, the
+//!   local copy before the Drive's (then the provider's changed-elsewhere
+//!   handler runs, as for the store's `on_change`); a save the store
+//!   refuses (a newer file, an unreadable store, a refused write) stops
+//!   the cycle there, nothing pushed. Then the merge is pushed when it
+//!   differs from the copy. The load, the merge and the save run in that
+//!   one callback, with no wait between: no other answer can come in the
+//!   middle.
 //!
 //! A failed pull changes nothing local. A failed push leaves the merge
 //! saved locally (it holds everything both sides had): the next cycle
 //! pushes it. No compare-and-set: the merge is a join, so a raced write is
 //! healed at the next sync of either device.
 //!
-//! One cycle at a time: a request during one runs once, after it.
+//! One cycle at a time: a request during one runs once, after it. A pull
+//! or a push unanswered after [`STEP_TIMEOUT`] fails with `Network` and
+//! frees the cycle. A sign-out cuts the cycle in flight: its late answers
+//! are dropped. A review session holds the sync ([`SyncCycle::hold`]): a
+//! cycle asked during it, or a copy that arrives during it, waits for the
+//! session's end ([`SyncCycle::release`], back home), so nothing is merged
+//! under the learner and no Reload banner is shown.
 
 use std::cell::Cell;
 use std::collections::HashMap;
@@ -95,6 +105,10 @@ struct Cycle {
     /// answer or a timeout counts only while its step is current. A
     /// sign-out moves it, so the answers of a cycle it cut are dropped.
     step: Cell<u64>,
+    /// A session runs: a cycle asked now waits for its end.
+    held: Cell<bool>,
+    /// A cycle was asked during the session.
+    pending: Cell<bool>,
     /// The provider's changed-elsewhere handler.
     changed: Box<dyn Fn()>,
     /// The local time, `HH:MM`.
@@ -134,6 +148,8 @@ impl SyncCycle {
             busy: Cell::new(false),
             again: Cell::new(false),
             step: Cell::new(0),
+            held: Cell::new(false),
+            pending: Cell::new(false),
             changed: Box::new(changed),
             clock: Box::new(clock),
             timer: Box::new(timer),
@@ -173,6 +189,25 @@ impl SyncCycle {
         }
     }
 
+    /// A session started: a cycle asked from now on waits for its end.
+    pub(crate) fn hold(self) {
+        self.0.with_value(|cycle| cycle.held.set(true));
+    }
+
+    /// The session ended (back home): the cycle asked during it runs now;
+    /// with none asked, a cycle runs when a token is at hand.
+    pub(crate) fn release(self) {
+        let asked = self.0.with_value(|cycle| {
+            cycle.held.set(false);
+            cycle.pending.replace(false)
+        });
+        if asked {
+            self.run();
+        } else {
+            self.when_ready();
+        }
+    }
+
     /// Sign in, then a cycle; a failed sign-in is the status' reason.
     pub(crate) fn sign_in(self) {
         let cycle = self.0.get_value();
@@ -204,6 +239,7 @@ impl SyncCycle {
             cycle.step.set(cycle.step.get() + 1);
             cycle.busy.set(false);
             cycle.again.set(false);
+            cycle.pending.set(false);
             cycle.status.set(SyncStatus::Idle);
         });
     }
@@ -213,6 +249,10 @@ impl Cycle {
     /// Starts a cycle, unless one runs (then it runs once after) or this
     /// device's progress must not be synced.
     fn run(self: &Rc<Self>) {
+        if self.held.get() {
+            self.pending.set(true);
+            return;
+        }
         if self.busy.get() {
             self.again.set(true);
             return;
@@ -311,6 +351,15 @@ impl Cycle {
     /// when it changed the local, pushes it when it differs from the copy:
     /// all in this one call, no wait between the load and the save.
     fn join(self: &Rc<Self>, drive: Option<State>) {
+        if self.held.get() {
+            // A session started during the pull: nothing is merged under
+            // the learner; the cycle runs again at the session's end.
+            self.pending.set(true);
+            self.busy.set(false);
+            self.again.set(false);
+            self.status.set(SyncStatus::Idle);
+            return;
+        }
         let local = match self.local() {
             Ok(local) => local,
             Err(refusal) => return self.finish(SyncStatus::Refused(refusal)),
@@ -888,6 +937,66 @@ mod tests {
                 sync.status().get_untracked(),
                 SyncStatus::Failed(SyncError::Network)
             );
+        });
+    }
+
+    /// During a session a cycle waits for its end: nothing is pulled,
+    /// nothing saved under the learner (no Reload banner); back home it
+    /// runs once.
+    #[test]
+    fn a_cycle_asked_during_a_session_runs_at_its_end() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::new(SyncAccount::Remembered { email: None });
+            let (sync, _) = cycle(&store, &transport);
+            sync.hold();
+            sync.run();
+            sync.run();
+            assert_eq!(transport.pull_calls(), 0, "deferred");
+            sync.release();
+            assert_eq!(transport.pull_calls(), 1, "once, at the session's end");
+            transport.settle();
+            sync.release();
+            assert_eq!(transport.pull_calls(), 1, "no token at hand: nothing more");
+        });
+    }
+
+    /// A session that starts while a pull is on its way: the copy is not
+    /// merged into the progress under the learner; it is synced again at
+    /// the session's end.
+    #[test]
+    fn a_pull_answered_during_a_session_is_deferred() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            transport.set_drive(Some(&lapsed(progress_fixture()).to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            sync.hold();
+            assert!(transport.answer_pull());
+            assert_eq!(store.saved(), vec![], "nothing saved during the session");
+            assert_eq!(changed.get(), 0, "no Reload banner");
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+            sync.release();
+            assert_eq!(transport.pull_calls(), 2);
+            transport.settle();
+            assert_eq!(store.saved(), vec![lapsed(progress_fixture())]);
+        });
+    }
+
+    /// A cycle asked during a session and a sign-out before its end: the
+    /// end runs nothing.
+    #[test]
+    fn a_sign_out_forgets_the_deferred_cycle() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _) = cycle(&store, &transport);
+            sync.hold();
+            sync.run();
+            sync.sign_out();
+            sync.release();
+            assert_eq!(transport.pull_calls(), 0);
         });
     }
 

@@ -240,17 +240,9 @@ impl Page {
                 paused.set(true);
             }
         });
-        let (start, ahead) = starters(owner, backend, mode, paused, refresh);
         let sync = SyncCycle::current();
-        // Back home, a cycle when a token is at hand (after the mode: a
-        // merge it saves refreshes the home, never pauses a session).
-        let home = Callback::new(move |()| {
-            refresh();
-            mode.set(Mode::Home);
-            if let Some(sync) = sync {
-                sync.when_ready();
-            }
-        });
+        let (start, ahead) = starters(owner, backend, (mode, paused, sync), refresh);
+        let home = back_home(refresh, mode, sync);
         let on_action = Callback::new(move |action| {
             perform(
                 action,
@@ -294,18 +286,40 @@ fn follow_store(changed: impl Fn() + Copy + Send + Sync + 'static) {
     }
 }
 
+/// Back to the home's content: the store read again, then the sync
+/// released (the cycle asked during the session runs, else one when a
+/// token is at hand; after the mode, so a merge it saves refreshes the
+/// home).
+fn back_home(
+    refresh: impl Fn() + Send + Sync + 'static,
+    mode: RwSignal<Mode>,
+    sync: Option<SyncCycle>,
+) -> Callback<()> {
+    Callback::new(move |()| {
+        refresh();
+        mode.set(Mode::Home);
+        if let Some(sync) = sync {
+            sync.release();
+        }
+    })
+}
+
 /// The two ways into a session in place: `start`, the review on the stored
 /// state; `ahead`, a practice ahead of `(n, only)`, or a fresh read of the
 /// store when there is nothing to practise.
 fn starters(
     owner: Owner,
     backend: Backend,
-    mode: RwSignal<Mode>,
-    paused: RwSignal<bool>,
+    (mode, paused, sync): (RwSignal<Mode>, RwSignal<bool>, Option<SyncCycle>),
     refresh: impl Fn() + Send + Sync + 'static,
 ) -> (Callback<()>, Callback<(usize, Option<Stage>)>) {
+    // A session holds the sync: a cycle asked during it waits for its end,
+    // so nothing is merged under the learner.
     let open = move |phase| {
         paused.set(false);
+        if let Some(sync) = sync {
+            sync.hold();
+        }
         mode.set(Mode::Session(phase));
     };
     let review_owner = owner.clone();
@@ -2004,8 +2018,12 @@ mod tests {
                 let (store, _files) = provide_fakes(kept.clone());
                 let owner = Owner::current().expect("an owner");
                 let mode = RwSignal::new(Mode::Home);
-                let (start, ahead) =
-                    starters(owner, Backend::current(), mode, RwSignal::new(false), || ());
+                let (start, ahead) = starters(
+                    owner,
+                    Backend::current(),
+                    (mode, RwSignal::new(false), None),
+                    || (),
+                );
                 for open in [
                     Box::new(|| start.run(())) as Box<dyn Fn()>,
                     Box::new(|| ahead.run((5, None))),
@@ -2020,6 +2038,35 @@ mod tests {
                 assert_eq!(store.saved().len(), 0, "{kept:?}");
             });
         }
+    }
+
+    /// A session holds the sync (a cycle asked during it waits), and back
+    /// home releases it: the asked cycle runs then.
+    #[test]
+    fn a_session_holds_the_sync_until_back_home() {
+        use crate::test_support::FakeTransport;
+        Owner::new().with(|| {
+            let (_store, _files) = provide_fakes(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let sync = SyncCycle::new(
+                std::rc::Rc::new(transport.clone()),
+                Backend::current(),
+                || (),
+                String::new,
+                |_, _| (),
+            );
+            let owner = Owner::current().expect("an owner");
+            let mode = RwSignal::new(Mode::Home);
+            let paused = RwSignal::new(false);
+            let (start, _) = starters(owner, Backend::current(), (mode, paused, Some(sync)), || ());
+            start.run(());
+            assert!(matches!(mode.get_untracked(), Mode::Session(_)));
+            sync.run();
+            assert_eq!(transport.pull_calls(), 0, "held during the session");
+            back_home(|| (), mode, Some(sync)).run(());
+            assert!(matches!(mode.get_untracked(), Mode::Home));
+            assert_eq!(transport.pull_calls(), 1, "released back home");
+        });
     }
 
     #[test]
