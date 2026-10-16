@@ -20,6 +20,7 @@ import {
 }
 
 resource "google_project_service" "drive" {
+  project            = var.gcp_project
   service            = "drive.googleapis.com"
   disable_on_destroy = false
 }
