@@ -47,6 +47,8 @@ pub(crate) enum Refusal {
     Newer,
     /// It is damaged or not a progress.
     Invalid,
+    /// The store could not write the merge (a refused write).
+    NotSaved,
 }
 
 /// Where the sync stands in this tab.
@@ -221,6 +223,22 @@ impl Cycle {
         }
     }
 
+    /// Why the store did not take the save of `merged`, read from its
+    /// status and its memory right after it; none when it took it.
+    fn refused(&self, merged: &State) -> Option<Refusal> {
+        match self.backend.status().get_untracked() {
+            SaveStatus::Failed(SaveError::NewerVersion { .. }) => return Some(Refusal::Newer),
+            SaveStatus::Failed(SaveError::Transient) => return Some(Refusal::NotSaved),
+            SaveStatus::Saved | SaveStatus::Pending => {}
+        }
+        match self.backend.load() {
+            Load::Ok(state) if same(&state, merged) => None,
+            Load::Unreadable(_) => Some(Refusal::Unreadable),
+            Load::NewerVersion { .. } => Some(Refusal::Newer),
+            Load::Ok(_) | Load::Empty | Load::Invalid { .. } => Some(Refusal::NotSaved),
+        }
+    }
+
     /// The pull's answer.
     fn pulled(self: &Rc<Self>, pulled: Result<Option<String>, SyncError>) {
         let drive = match pulled {
@@ -251,6 +269,9 @@ impl Cycle {
         if !same(&merged, &local) {
             self.backend.save(&merged);
             (self.changed)();
+            if let Some(refusal) = self.refused(&merged) {
+                return self.finish(SyncStatus::Refused(refusal));
+            }
         }
         if drive.as_ref().is_some_and(|drive| same(drive, &merged)) {
             return self.finish(SyncStatus::Synced { at: (self.clock)() });
@@ -325,7 +346,7 @@ mod tests {
         ProgressStore, SaveError, SaveStatus, SharedSync, SyncAccount, SyncError,
     };
     use crate::test_support::{
-        FakeFiles, FakeStore, FakeTransport, backend_of, progress_fixture, today,
+        FakeFiles, FakeStore, FakeTransport, Outcome, backend_of, progress_fixture, today,
     };
 
     /// A cycle over `store` and `transport`; the count of the changed
@@ -409,6 +430,37 @@ mod tests {
 
     /// The same progress in another order is the same progress: nothing
     /// is saved, the home is not told, nothing is pushed.
+    /// The merge is saved before anything is pushed (the local copy
+    /// first): a save the store refuses stops the cycle, nothing pushed.
+    #[test]
+    fn a_refused_save_stops_the_cycle_before_any_push() {
+        for (outcome, refusal) in [
+            (Outcome::Newer, Refusal::Newer),
+            (Outcome::Unreadable, Refusal::Unreadable),
+            (Outcome::Transient, Refusal::NotSaved),
+        ] {
+            Owner::new().with(|| {
+                let local = with_term(progress_fixture(), "here 1");
+                let store = FakeStore::new(Load::Ok(local));
+                store.script(&[outcome]);
+                let transport = FakeTransport::signed_in();
+                let drive = lapsed(progress_fixture());
+                transport.set_drive(Some(&drive.to_json()));
+                let (sync, _) = cycle(&store, &transport);
+                sync.run();
+                transport.settle();
+                assert_eq!(store.saved().len(), 1, "{outcome:?}: the save was tried");
+                assert_eq!(transport.pushed(), Vec::<String>::new(), "{outcome:?}");
+                assert_eq!(transport.drive(), Some(drive.to_json()), "{outcome:?}");
+                assert_eq!(
+                    sync.status().get_untracked(),
+                    SyncStatus::Refused(refusal),
+                    "{outcome:?}"
+                );
+            });
+        }
+    }
+
     #[test]
     fn a_reordered_copy_neither_saves_nor_fires_changed() {
         Owner::new().with(|| {

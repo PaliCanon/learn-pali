@@ -106,6 +106,7 @@
   "sync_now": "Synchroniser",
   "sync_refused_invalid": "La progression de cet appareil est endommagée.",
   "sync_refused_newer": "La progression de cet appareil a été enregistrée par une version plus récente.",
+  "sync_refused_not_saved": "Cet appareil n’a pas pu enregistrer la progression.",
   "sync_refused_unreadable": "La progression de cet appareil n’a pas pu être lue.",
   "sync_retry": "Réessayer",
   "sync_revoke_link": "Retirez-le dans votre compte Google",

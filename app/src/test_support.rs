@@ -96,6 +96,9 @@ pub(crate) enum Outcome {
     /// file's, the status is `Failed(NewerVersion { unsaved })`, then
     /// `on_change` is called, all in one synchronous run.
     Newer,
+    /// The store can no longer read what it holds: the write is refused,
+    /// the load answers `Unreadable` (the status stays as it was).
+    Unreadable,
 }
 
 /// The state of a [`FakeStore`].
@@ -205,6 +208,9 @@ impl ProgressStore for FakeStore {
             }
             Some(Outcome::Transient) => {
                 self.0.status.set(SaveStatus::Failed(SaveError::Transient));
+            }
+            Some(Outcome::Unreadable) => {
+                *self.0.load.borrow_mut() = Load::Unreadable("denied".into());
             }
             Some(Outcome::Newer) => {
                 *self.0.load.borrow_mut() = Load::NewerVersion {

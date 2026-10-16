@@ -210,6 +210,7 @@ fn refusal_reason(locale: Locale, refusal: Refusal) -> &'static str {
         Refusal::Unreadable => td_string!(locale, sync_refused_unreadable),
         Refusal::Newer => td_string!(locale, sync_refused_newer),
         Refusal::Invalid => td_string!(locale, sync_refused_invalid),
+        Refusal::NotSaved => td_string!(locale, sync_refused_not_saved),
     }
 }
 
@@ -502,6 +503,10 @@ mod tests {
                 "This device’s progress was saved by a newer version.",
             ),
             (Refusal::Invalid, "This device’s progress is damaged."),
+            (
+                Refusal::NotSaved,
+                "This device could not save the progress.",
+            ),
         ] {
             let html = panel(email(), SyncStatus::Refused(refusal), Language::En);
             assert!(html.contains("Not synced."), "{refusal:?}: {html}");
@@ -571,7 +576,7 @@ mod tests {
                 .iter()
                 .filter(|(key, _)| key.starts_with("sync_"))
                 .collect();
-            assert_eq!(sync.len(), 24, "{code}");
+            assert_eq!(sync.len(), 25, "{code}");
             for (key, value) in sync {
                 assert!(!value.as_str().unwrap().contains('—'), "{code} {key}");
             }

@@ -106,6 +106,7 @@
   "sync_now": "Sync now",
   "sync_refused_invalid": "This device’s progress is damaged.",
   "sync_refused_newer": "This device’s progress was saved by a newer version.",
+  "sync_refused_not_saved": "This device could not save the progress.",
   "sync_refused_unreadable": "This device’s progress could not be read.",
   "sync_retry": "Retry",
   "sync_revoke_link": "Remove it in your Google account",

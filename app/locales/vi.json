@@ -106,6 +106,7 @@
   "sync_now": "Đồng bộ ngay",
   "sync_refused_invalid": "Tiến độ trên thiết bị này bị hỏng.",
   "sync_refused_newer": "Tiến độ trên thiết bị này được lưu bởi một phiên bản mới hơn.",
+  "sync_refused_not_saved": "Thiết bị này không lưu được tiến độ.",
   "sync_refused_unreadable": "Không đọc được tiến độ trên thiết bị này.",
   "sync_retry": "Thử lại",
   "sync_revoke_link": "Hãy gỡ quyền này trong tài khoản Google của bạn",
