@@ -21,7 +21,7 @@
 use futures::channel::oneshot;
 use js_sys::{Function, Promise};
 use learn_pali::fragment::{SharedSync, SyncAccount, SyncError};
-use learn_pali::web_sync::{CLIENT_ID, GIS_SCRIPT, SCOPE};
+use learn_pali::web_sync::{CLIENT_ID, GIS_SCRIPT, scope};
 use leptos::prelude::GetUntracked;
 use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -161,7 +161,7 @@ async fn first_sign_in(sync: &SharedSync) {
     );
     assert_eq!(
         js_string("return window.__drive.config.scope").as_deref(),
-        Some(SCOPE)
+        Some(scope().as_str())
     );
     assert_eq!(
         js_string("return window.__drive.overrides.prompt").as_deref(),

@@ -5,7 +5,7 @@
 //!   [`GIS_SCRIPT`]), injected on the first Sign in or Sync tap only: a
 //!   learner who never syncs loads no Google script. The web client
 //!   [`CLIENT_ID`] (a build-time constant, `LEARN_PALI_GOOGLE_CLIENT_ID`
-//!   overrides it) asks [`SCOPE`]: `drive.appdata` (the hidden app folder)
+//!   overrides it) asks [`scope`]: `drive.appdata` (the hidden app folder)
 //!   and `email` (to show the account). `requestAccessToken` runs in the
 //!   tap's gesture, with `prompt: ''` and the remembered email as
 //!   `login_hint`. On the very first tap the script loads first; a browser
@@ -17,8 +17,8 @@
 //!   email (the hint): after a reload the account is
 //!   [`SyncAccount::Remembered`] and the home shows its Sync chip. It is
 //!   read after hydration, so the first paint matches the server's.
-//! - **The file** is `pc_learn.json` in the Drive's `appDataFolder`
-//!   ([`FILE_NAME`]): listed (the oldest one if two devices raced to create
+//! - **The file** is where [`drive_location`] says (today `pc_learn.json`
+//!   in the Drive's `appDataFolder`): listed (the oldest one if two devices raced to create
 //!   it), read (`alt=media`), created (one multipart upload: never an empty
 //!   file) or updated (a media upload), all with `fetch` and a Bearer
 //!   header. The file id it resolved is logged to the console, for the
@@ -53,6 +53,7 @@
 )]
 
 use crate::backend::{SharedSync, SyncAccount, SyncError};
+use crate::drive_location;
 
 /// The web OAuth client of project `palicanon-app`; the build's
 /// `LEARN_PALI_GOOGLE_CLIENT_ID` replaces it.
@@ -61,21 +62,17 @@ pub const CLIENT_ID: &str = match option_env!("LEARN_PALI_GOOGLE_CLIENT_ID") {
     None => "873594463453-ag83cvs5t5uqa6uvir9n4p9igbmdans7.apps.googleusercontent.com",
 };
 
-/// What the token is asked for: the Drive's hidden app folder, and the
-/// email to show the account.
-pub const SCOPE: &str = "https://www.googleapis.com/auth/drive.appdata email";
+/// What the token is asked for: where the progress lives
+/// ([`drive_location::SCOPE`]) and `email`, to show the account.
+pub fn scope() -> String {
+    format!("{} email", drive_location::SCOPE)
+}
 
 /// Google Identity Services' script.
 pub const GIS_SCRIPT: &str = "https://accounts.google.com/gsi/client";
 
-/// The progress file's name in the app folder.
-pub const FILE_NAME: &str = "pc_learn.json";
-
 /// The `localStorage` key that keeps the sync on, its value the email.
 pub(crate) const REMEMBER_KEY: &str = "pc_learn_sync";
-
-/// The multipart boundary of a creation; never in a progress's JSON.
-const BOUNDARY: &str = "pc_learn_sync_050_boundary";
 
 /// The account `localStorage[pc_learn_sync]` remembers: none, or the
 /// email (empty: unknown).
@@ -96,42 +93,8 @@ pub(crate) fn email_of(account: &SyncAccount) -> Option<String> {
     }
 }
 
-/// The URL listing the progress file in the app folder, the oldest first.
-pub(crate) fn list_url() -> String {
-    format!(
-        "https://www.googleapis.com/drive/v3/files?spaces=appDataFolder\
-         &q=name%3D%27{FILE_NAME}%27%20and%20trashed%3Dfalse\
-         &orderBy=createdTime&fields=files(id)"
-    )
-}
-
-/// The URL reading the file `id`'s content.
-pub(crate) fn read_url(id: &str) -> String {
-    format!("https://www.googleapis.com/drive/v3/files/{id}?alt=media")
-}
-
-/// The URL replacing the file `id`'s content.
-pub(crate) fn update_url(id: &str) -> String {
-    format!("https://www.googleapis.com/upload/drive/v3/files/{id}?uploadType=media")
-}
-
-/// The URL creating the file, metadata and content in one request.
-pub(crate) const CREATE_URL: &str =
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
-
 /// The account's email, from Google's userinfo.
 pub(crate) const USERINFO_URL: &str = "https://www.googleapis.com/oauth2/v3/userinfo";
-
-/// The creation's `Content-Type` and body: the file's metadata (its name,
-/// in the app folder) and `text`, in one multipart upload.
-pub(crate) fn create_body(text: &str) -> (String, String) {
-    let metadata = serde_json::json!({ "name": FILE_NAME, "parents": ["appDataFolder"] });
-    let body = format!(
-        "--{BOUNDARY}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n\
-         --{BOUNDARY}\r\nContent-Type: application/json\r\n\r\n{text}\r\n--{BOUNDARY}--"
-    );
-    (format!("multipart/related; boundary={BOUNDARY}"), body)
-}
 
 /// The answer of a call: `Ok` for a 2xx, [`SyncError::SignedOut`] for a
 /// 401 (the token is refused), else Google's message.
@@ -284,8 +247,12 @@ mod tests {
             CLIENT_ID,
             "873594463453-ag83cvs5t5uqa6uvir9n4p9igbmdans7.apps.googleusercontent.com"
         );
-        assert_eq!(SCOPE, "https://www.googleapis.com/auth/drive.appdata email");
+        assert_eq!(
+            scope(),
+            "https://www.googleapis.com/auth/drive.appdata email"
+        );
         assert_eq!(GIS_SCRIPT, "https://accounts.google.com/gsi/client");
+        assert!(USERINFO_URL.starts_with("https://www.googleapis.com/"));
     }
 
     #[test]
@@ -309,40 +276,6 @@ mod tests {
             }),
             Some("a@b.c".into())
         );
-    }
-
-    #[test]
-    fn the_urls_name_the_app_folder_and_the_file() {
-        let list = list_url();
-        assert!(list.starts_with("https://www.googleapis.com/drive/v3/files?"));
-        assert!(list.contains("spaces=appDataFolder"), "{list}");
-        assert!(list.contains("name%3D%27pc_learn.json%27"), "{list}");
-        assert!(list.contains("orderBy=createdTime"), "{list}");
-        assert_eq!(
-            read_url("f1"),
-            "https://www.googleapis.com/drive/v3/files/f1?alt=media"
-        );
-        assert_eq!(
-            update_url("f1"),
-            "https://www.googleapis.com/upload/drive/v3/files/f1?uploadType=media"
-        );
-        for url in [list.as_str(), CREATE_URL, USERINFO_URL] {
-            assert!(url.starts_with("https://www.googleapis.com/"), "{url}");
-        }
-    }
-
-    #[test]
-    fn a_creation_carries_the_name_the_folder_and_the_text() {
-        let (content_type, body) = create_body(r#"{"version":1}"#);
-        assert_eq!(
-            content_type,
-            format!("multipart/related; boundary={BOUNDARY}")
-        );
-        assert!(body.contains(r#""name":"pc_learn.json""#), "{body}");
-        assert!(body.contains(r#""parents":["appDataFolder"]"#), "{body}");
-        assert!(body.contains("\r\n\r\n{\"version\":1}\r\n"), "{body}");
-        assert!(body.ends_with(&format!("--{BOUNDARY}--")), "{body}");
-        assert_eq!(body.matches(&format!("--{BOUNDARY}\r\n")).count(), 2);
     }
 
     #[test]

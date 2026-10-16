@@ -13,11 +13,11 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Headers, Request, RequestInit, Response};
 
 use super::{
-    CLIENT_ID, CREATE_URL, GIS_SCRIPT, REMEMBER_KEY, SCOPE, Token, USERINFO_URL, checked,
-    create_body, created_id, email_of, first_file_id, list_url, read_url, remembered,
-    sign_in_error, token_of, update_url, userinfo_email,
+    CLIENT_ID, GIS_SCRIPT, REMEMBER_KEY, Token, USERINFO_URL, checked, created_id, email_of,
+    first_file_id, remembered, scope, sign_in_error, token_of, userinfo_email,
 };
 use crate::backend::{SharedSync, SyncAccount, SyncError, SyncTransport};
+use crate::drive_location::{CREATE_URL, create_body, list_url, read_url, update_url};
 
 /// A sign-in, a push: what waits for their answer.
 type Done = Box<dyn FnOnce(Result<(), SyncError>)>;
@@ -185,7 +185,7 @@ impl Inner {
         let init = function(&oauth2()?, "initTokenClient")?;
         let config = Object::new();
         set(&config, "client_id", &CLIENT_ID.into());
-        set(&config, "scope", &SCOPE.into());
+        set(&config, "scope", &scope().into());
         let inner = Rc::clone(self);
         let callback = Closure::<dyn Fn(JsValue)>::new(move |answer: JsValue| {
             inner.token_answer(&answer);
