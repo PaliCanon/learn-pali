@@ -6,6 +6,24 @@ data "google_service_account" "deployer" {
 # The Secret Manager API is enabled by the API's infra (`google_project_service`
 # there); a project-wide switch is not declared twice.
 
+# ---------------------------------------------------------------- Drive API
+
+# The progress sync (task 050) calls the Drive API from the learner's
+# browser, with the learner's own token (scope drive.appdata): the project
+# must have the API on. It was enabled by hand on 2026-10-16; the import
+# adopts it, so the first plan shows an import and no change. Never
+# disabled on destroy: the PaliCanon app's sync uses it too. The OAuth
+# clients and the consent screen are console-only (no tofu resource).
+import {
+  to = google_project_service.drive
+  id = "${var.gcp_project}/drive.googleapis.com"
+}
+
+resource "google_project_service" "drive" {
+  service            = "drive.googleapis.com"
+  disable_on_destroy = false
+}
+
 # ---------------------------------------------------------------- secrets
 
 # The origin secret: the value the Worker sends as `x-origin-auth` and the
