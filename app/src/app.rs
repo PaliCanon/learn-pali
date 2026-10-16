@@ -81,8 +81,9 @@ pub fn App() -> impl IntoView {
     }
 }
 
-/// The rail's entries: the services, Search (the main site) then Learn
-/// (this one, the current entry on `/`).
+/// The rail's entries: the services, Search (the main site), Learn (this
+/// one, the current entry on `/`), then Map. The same three, in the same
+/// order and with the same hrefs, as search-front's and vizualisation's rails.
 fn nav(current: Signal<String>) -> NavList {
     let t = strings();
     let sections = Signal::derive(move || {
@@ -99,6 +100,13 @@ fn nav(current: Signal<String>) -> NavList {
                     label: td_string!(t.locale(), nav_learn),
                     icon: IconName::Grid,
                     href: "/",
+                },
+                // `IconName::Motion` stands in until ui-lib has a Map icon, as in
+                // vizualisation.
+                NavEntry {
+                    label: td_string!(t.locale(), nav_map),
+                    icon: IconName::Motion,
+                    href: "https://map.palicanon.app",
                 },
             ],
         }]
@@ -207,7 +215,7 @@ mod tests {
     }
 
     #[test]
-    fn the_rail_lists_search_then_learn() {
+    fn the_rail_lists_search_then_learn_then_map() {
         let html = render_layout(Language::En, "/");
         let tags = anchors(&html);
         let search = tags
@@ -218,7 +226,14 @@ mod tests {
             .iter()
             .position(|t| t.contains(r#"href="/""#))
             .expect(&html);
-        assert!(search < learn, "Search first, Learn second: {html}");
+        let map = tags
+            .iter()
+            .position(|t| t.contains(r#"href="https://map.palicanon.app""#))
+            .expect(&html);
+        assert!(
+            search < learn && learn < map,
+            "Search first, Learn second, Map third: {html}"
+        );
         // The same two entries, in the same order, in the phone's navigation.
         let again = tags
             .iter()
@@ -241,7 +256,9 @@ mod tests {
             assert!(anchor_at(&html, at).contains(r#"href="/""#), "{html}");
         }
         for tag in anchors(&html) {
-            if tag.contains(r#"href="https://search.palicanon.app""#) {
+            if tag.contains(r#"href="https://search.palicanon.app""#)
+                || tag.contains(r#"href="https://map.palicanon.app""#)
+            {
                 assert!(!tag.contains("aria-current"), "{tag}");
             }
         }
@@ -255,14 +272,15 @@ mod tests {
 
     #[test]
     fn the_entries_are_labelled_in_every_language() {
-        for (language, search, learn) in [
-            (Language::En, "Search", "Learn"),
-            (Language::Fr, "Recherche", "Apprendre"),
-            (Language::Vi, "Tìm kiếm", "Học"),
+        for (language, search, learn, map) in [
+            (Language::En, "Search", "Learn", "Map"),
+            (Language::Fr, "Recherche", "Apprendre", "Carte"),
+            (Language::Vi, "Tìm kiếm", "Học", "Bản đồ"),
         ] {
             let html = render_layout(language, "/");
             assert!(html.contains(&format!(">{search}</span>")), "{html}");
             assert!(html.contains(&format!(">{learn}</span>")), "{html}");
+            assert!(html.contains(&format!(">{map}</span>")), "{html}");
         }
     }
 
