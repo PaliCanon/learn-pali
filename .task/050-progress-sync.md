@@ -21,6 +21,8 @@ flowchart LR
 | --- | --- | --- |
 | Define | done | orchestrator + consensus (2 rounds, deep and sage; gemini 503/429), v5 with the user's choices (2026-10-16); research in the discussion (11095, 11096); ids {"design": "ddbf202d4e27c42", "discussion": "d3180a4ca3fe44e", "process": "d687855a263ca4e"} |
 | Plan | done | one Opus lane (merge in core, the cycle and the web transport in app/, UI, CSP, infra): files coupled through the seam |
+| Build | done | lane:sync (Opus): 46a3571 merge, f1d57ac seam + cycle + UI, a430152 leptosfmt (pre-existing on main), 87cb3cb web transport (web-sync), fcb597e Drive API declared (tofu plan: 1 to import), fb6cced docs. Checks exit 0 but ssr tests 429/1 (a pre-existing test matching the branch name in the badge). Coverage lines 97.71% (main 97.62%). Site served: hydrates, no Google script before a tap |
+| Rulings | done | orchestrator (thread): no site CSP here (none exists: follow-up opened); failed push keeps the merged state locally; Session::advance noted; sign-out after reload cannot revoke: the line says so with a link to Google's connections page; deps accepted; the badge-matching test fixed here |
 
 ## Design
 Viewer: learn-pali-050-progress-sync/design, v6 (v6: the desktop sign-in shows its link, user 2026-10-16; desktop only).
