@@ -2472,8 +2472,14 @@ mod tests {
             .with(|| {
                 palicanon_ui_lib::provide_language().set(Language::En);
                 let state = HomeState::Broken(BrokenKind::Unreadable);
-                view! { <HomeView state=state new_left=0 detail=Some("permission denied (os error 13)".to_owned()) /> }
-                    .to_html()
+                view! {
+                    <HomeView
+                        state=state
+                        new_left=0
+                        detail=Some("permission denied (os error 13)".to_owned())
+                    />
+                }
+                .to_html()
             })
             .replace("<!>", "");
         assert!(html.contains("permission denied (os error 13)"), "{html}");
