@@ -1,6 +1,6 @@
 # 048 Learn runs inside the PaliCanon app
 
-status: review · rank: 7 · level: standard · type: feature · request: app-001-palicanon-app T3 (user, 2026-10-16: "On a dit une app avec le search, learn et la map"; "Attendre les trois") · session: learn-pali-048-app-fragment · after: [] · ui-lib: v0.3.0
+status: merged · rank: 7 · level: standard · type: feature · request: app-001-palicanon-app T3 (user, 2026-10-16: "On a dit une app avec le search, learn et la map"; "Attendre les trois") · session: learn-pali-048-app-fragment · after: [] · ui-lib: v0.3.0
 
 ## Summary
 Rank (rank.md): difficulty 6 (a new build mode, the shell split from the screens, a store abstraction across two hosts), impact 6 (the site's every page and the app's Learn) → 6.
@@ -11,7 +11,7 @@ The first public download of the app waits for Learn, Search and the Map (user, 
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ validated"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓ 5 commits"]:::done --> Verify["Verify ✓ 372+9+5+6"]:::done --> Review["Review ✓ 2 rounds; 3rd waived by the user"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ validated"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓ 5 commits"]:::done --> Verify["Verify ✓ 372+9+5+6"]:::done --> Review["Review ✓ 2 rounds; 3rd waived by the user"]:::done --> Check["Check ✓ orchestrator"]:::done --> Merge["Merge ✓ a19bfd6"]:::done --> Retro:::todo
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -50,6 +50,7 @@ This is the second round; a third is the last before the user.
 | Build (vendor) | done | 243b11a: placeholders.rs vendored into app/build (until ui-lib 068), so the crate builds from a git checkout; build and tests exit 0 |
 | Rule (user) | — | 2026-10-16: «Fusionner sans dernier tour» — merged without review round 3; the round runs after the merge on main and its findings become a follow-up task |
 | Check | done | orchestrator: the Fix 2 local list (all exit 0, coverage 97.62%) plus 243b11a's build and tests; the only visible site change is the on-demand file input (checked on learn.dev when Actions run again) |
+| Merge | done | a19bfd6 on main (squash), pushed; tag fragment-v0.1.0 for the PaliCanon app (a v* tag would deploy prod) |
 
 ## Design
 Viewer: learn-pali-048-app-fragment/design (d5caaeabfda6d43), v6 — v4 validated by the user 2026-10-16; v5, v6 = wordings ruled on the build and review 2.
@@ -95,3 +96,4 @@ Voices: deep (9612, 9628, 9642, 9657, 9674), sage (9691, 9704, 9720, 9752, 9777)
 Ruled out: provide `Backend` vs the traits (an internal name, the contract holds); two BrokenKind names (deep B3: they are one enum's variants across two modules — the lane checks and merges them only if they are truly duplicate); the duplicated guards in data_block and AddNew (defence in the UI on top of the store's, kept); coalesced saves and the clock edge (the app's store, T5a); a missing-provider panic test (documented panic).
 
 ## Merge
+a19bfd6 (fragment-v0.1.0)
