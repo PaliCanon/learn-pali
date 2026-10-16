@@ -373,12 +373,27 @@ mod tests {
         assert!(!html.contains("data-page"), "{html}");
     }
 
-    /// The one page leads to neither `/progress` nor `/review`.
+    /// The one page leads to neither `/progress` nor `/review`. Read on its
+    /// link targets (`href`, `action`), never on its text: the footer's
+    /// badge prints the branch, and a branch may be named `…/progress-…`.
     #[test]
     fn the_page_links_to_no_removed_path() {
         let html = render_layout(Language::En, "/");
-        assert!(!html.contains("/progress"), "{html}");
-        assert!(!html.contains("/review"), "{html}");
+        let targets: Vec<&str> = ["href=\"", "action=\""]
+            .iter()
+            .flat_map(|attribute| html.split(attribute).skip(1))
+            .map(|rest| &rest[..rest.find('"').expect("a closed attribute")])
+            .collect();
+        assert!(targets.contains(&"/"), "the links are read: {targets:?}");
+        for target in &targets {
+            let path = target.split(['?', '#']).next().unwrap_or_default();
+            for removed in ["/progress", "/review"] {
+                assert!(
+                    path != removed && !path.starts_with(&format!("{removed}/")),
+                    "{target}: {html}"
+                );
+            }
+        }
     }
 
     /// The one route renders in every language, its marker present.
