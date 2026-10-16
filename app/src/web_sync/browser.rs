@@ -2,7 +2,7 @@
 //! client, `fetch` to the Drive, `localStorage[pc_learn_sync]`. Tested in
 //! a headless Chrome against a fake Google (`tests/web_sync.rs`).
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use js_sys::{Function, Object, Reflect};
@@ -38,6 +38,9 @@ struct Inner {
     waiting: RefCell<Option<Done>>,
     /// What waits for the script to load.
     loading: RefCell<Vec<Loaded>>,
+    /// Moved by each sign-out: a call's answer from an older generation
+    /// never touches the token or the account (a late 401 of a cut pull).
+    generation: Cell<u64>,
 }
 
 /// The web transport over [`Inner`].
@@ -54,6 +57,7 @@ pub(super) fn transport() -> SharedSync {
         client: RefCell::new(None),
         waiting: RefCell::new(None),
         loading: RefCell::new(Vec::new()),
+        generation: Cell::new(0),
     });
     let account = inner.account;
     request_animation_frame(move || {
@@ -87,6 +91,7 @@ impl SyncTransport for WebSync {
             );
         }
         *self.0.file_id.borrow_mut() = None;
+        self.0.generation.set(self.0.generation.get() + 1);
         storage_remove();
         self.0.account.set(SyncAccount::SignedOut);
     }
@@ -102,9 +107,10 @@ impl SyncTransport for WebSync {
             return;
         };
         let inner = Rc::clone(&self.0);
+        let generation = self.0.generation.get();
         wasm_bindgen_futures::spawn_local(async move {
             let pulled = inner.pull(&bearer).await;
-            if pulled == Err(SyncError::SignedOut) {
+            if pulled == Err(SyncError::SignedOut) && inner.generation.get() == generation {
                 inner.lost_token();
             }
             on_done(pulled);
@@ -119,9 +125,10 @@ impl SyncTransport for WebSync {
         };
         let inner = Rc::clone(&self.0);
         let text = text.to_owned();
+        let generation = self.0.generation.get();
         wasm_bindgen_futures::spawn_local(async move {
             let pushed = inner.push(&bearer, &text).await;
-            if pushed == Err(SyncError::SignedOut) {
+            if pushed == Err(SyncError::SignedOut) && inner.generation.get() == generation {
                 inner.lost_token();
             }
             on_done(pushed);

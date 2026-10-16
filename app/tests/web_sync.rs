@@ -45,6 +45,7 @@ window.fetch = async (request) => {
   d.calls.push({ method, url, auth: request.headers.get('Authorization'), body,
                  type: request.headers.get('Content-Type') });
   const json = (status, value) => new Response(JSON.stringify(value), { status });
+  if (d.delayMs) await new Promise((resolve) => setTimeout(resolve, d.delayMs));
   if (d.fail401) return json(401, { error: { message: 'expired' } });
   if (url === 'https://www.googleapis.com/oauth2/v3/userinfo')
     return json(200, { sub: '1', email: 'learner@example.org' });
@@ -240,6 +241,34 @@ async fn refused_then_signed_in_again(sync: &SharedSync) {
     );
 }
 
+/// A sign-out while a pull is on its way: the pull's late 401 neither
+/// brings the account back as remembered (no Sync chip after a sign-out)
+/// nor, after a new sign-in, drops the new token.
+async fn sign_out_cuts_a_pull(sync: &SharedSync) {
+    assert_eq!(sign_in(sync).await, Ok(()));
+    ticks().await;
+    js("window.__drive.fail401 = true; window.__drive.delayMs = 120;");
+    let (tx, rx) = oneshot::channel();
+    sync.pull(Box::new(move |result| {
+        let _ = tx.send(result);
+    }));
+    sync.sign_out();
+    assert_eq!(sync.account().get_untracked(), SyncAccount::SignedOut);
+    assert_eq!(
+        js_string("return localStorage.getItem('pc_learn_sync')"),
+        None
+    );
+    assert_eq!(sign_in(sync).await, Ok(()), "signed in again, a new token");
+    let _ = rx.await.expect("the old pull answers");
+    assert!(
+        matches!(sync.account().get_untracked(), SyncAccount::SignedIn { .. }),
+        "the old pull's 401 does not drop the new token"
+    );
+    js("window.__drive.fail401 = false; window.__drive.delayMs = 0;");
+    assert!(pull(sync).await.is_ok(), "the new token works");
+    sync.sign_out();
+}
+
 #[wasm_bindgen_test]
 async fn the_web_transport_signs_in_syncs_and_signs_out_against_a_fake_google() {
     js("localStorage.removeItem('pc_learn_sync'); delete window.google;");
@@ -268,6 +297,8 @@ async fn the_web_transport_signs_in_syncs_and_signs_out_against_a_fake_google() 
         None
     );
     assert_eq!(sync.account().get_untracked(), SyncAccount::SignedOut);
+
+    sign_out_cuts_a_pull(&sync).await;
 
     // A reload: the account is read back as remembered, with no token.
     js("localStorage.setItem('pc_learn_sync', 'learner@example.org')");
