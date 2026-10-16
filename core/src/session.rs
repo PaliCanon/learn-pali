@@ -1390,4 +1390,107 @@ mod tests {
             }
         }
     }
+
+    // ---- The sync's invariant (task 050): the merge key is monotone ----
+
+    /// `after` is never behind `before` for any term `before` holds: the
+    /// merge key (`merge::key`) is not lower, and at an equal key `passed`
+    /// has not shrunk. A change of the key or of a transition that breaks
+    /// the sync's join breaks this test.
+    fn never_behind(before: &State, after: &State) -> Result<(), String> {
+        for old in &before.progress {
+            let Some(new) = after.get(&old.term) else {
+                return Err(format!("{} disappeared", old.term));
+            };
+            let (old_key, new_key) = (crate::merge::key(old), crate::merge::key(new));
+            if new_key < old_key || (new_key == old_key && !new.passed.is_superset(&old.passed)) {
+                return Err(format!("{old:?} became {new:?}"));
+            }
+        }
+        Ok(())
+    }
+
+    /// A random state over the terms `n1`, `i1`, `n2`, `i2`: some started,
+    /// at any stage, some facets passed, due around [`TODAY`].
+    fn random_state(draw: &mut impl FnMut(u64) -> u64) -> State {
+        let mut progress = Vec::new();
+        for term in ["n1", "i1", "n2", "i2"] {
+            if draw(4) == 0 {
+                continue;
+            }
+            let mut passed = FacetSet::empty();
+            for facet in Facet::ALL {
+                if draw(3) == 0 {
+                    passed.insert(facet);
+                }
+            }
+            progress.push(Progress {
+                term: id(term),
+                stage: Stage::ALL[usize::try_from(draw(6)).unwrap()],
+                passed,
+                due: day(TODAY - 2 + u32::try_from(draw(4)).unwrap()),
+                lapses: u32::try_from(draw(3)).unwrap(),
+            });
+        }
+        state_of(progress)
+    }
+
+    /// Every transition a learner can make in the app (the start's
+    /// promotion, a pass, a climb, a fail, new terms), with random answers
+    /// over random states, never moves a term behind. `advance` (the CLI's
+    /// study ahead, never synced) moves `due` back and is not one of them.
+    #[test]
+    fn no_session_transition_lowers_the_key_or_shrinks_passed() {
+        let deck = deck_of(vec![
+            noun("n1", 1),
+            indeclinable("i1", 2),
+            noun("n2", 3),
+            indeclinable("i2", 4),
+            noun("n3", 5),
+        ]);
+        let mut bits: u64 = 0x5EED;
+        let mut draw = |bound: u64| {
+            bits ^= bits << 13;
+            bits ^= bits >> 7;
+            bits ^= bits << 17;
+            bits % bound
+        };
+        for _ in 0..400 {
+            let input = random_state(&mut draw);
+            let mut session = start(&deck, input.clone(), TODAY);
+            let mut before = session.snapshot();
+            never_behind(&input, &before).unwrap();
+            session.request_new(usize::try_from(draw(3)).unwrap());
+            while let Some(question) = session.next().cloned() {
+                let after = session.snapshot();
+                never_behind(&before, &after).unwrap();
+                before = after;
+                let answer = if draw(3) == 0 {
+                    Answer::Fail
+                } else {
+                    Answer::Pass
+                };
+                session
+                    .answer(&question.term, question.facet, answer)
+                    .unwrap();
+            }
+            never_behind(&before, &session.snapshot()).unwrap();
+        }
+    }
+
+    /// The test above sees a broken transition: a fail that would keep the
+    /// lapses (only the stage back to Day) is a lower key.
+    #[test]
+    fn a_fail_without_a_lapse_would_be_behind() {
+        let old = entry("kho", Stage::Month, day(TODAY));
+        let mut new = old.clone();
+        new.stage = Stage::Day;
+        new.due = day(TODAY) + 1;
+        assert!(never_behind(&state_of(vec![old.clone()]), &state_of(vec![new])).is_err());
+        let mut fewer = old.clone();
+        fewer.passed = FacetSet::empty();
+        let mut more = old;
+        more.passed.insert(Facet::Meaning);
+        assert!(never_behind(&state_of(vec![more]), &state_of(vec![fewer])).is_err());
+    }
 }

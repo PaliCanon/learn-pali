@@ -66,6 +66,12 @@ impl FacetSet {
         FacetSet(self.0 & other.0)
     }
 
+    /// The facets in either set.
+    #[must_use]
+    pub fn union(&self, other: &FacetSet) -> FacetSet {
+        FacetSet(self.0 | other.0)
+    }
+
     /// The facets of `self` that are not in `other`.
     #[must_use]
     pub fn difference(&self, other: &FacetSet) -> FacetSet {
@@ -225,6 +231,14 @@ mod tests {
         assert_eq!(some.intersection(&set(&[Facet::Recall])), FacetSet::empty());
         assert_eq!(all.difference(&some), set(&[Facet::Recall, Facet::Context]));
         assert_eq!(some.difference(&all), FacetSet::empty());
+        let recall = set(&[Facet::Recall]);
+        assert_eq!(
+            some.union(&recall),
+            set(&[Facet::Meaning, Facet::Recall, Facet::Forms])
+        );
+        assert_eq!(recall.union(&some), some.union(&recall));
+        assert_eq!(some.union(&some), some);
+        assert_eq!(some.union(&FacetSet::empty()), some);
     }
 
     #[test]
