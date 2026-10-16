@@ -166,6 +166,12 @@ pub trait SyncTransport {
     /// Writes `text` as the progress file (creating it when the last pull
     /// found none).
     fn push(&self, text: &str, on_done: Box<dyn FnOnce(Result<(), SyncError>)>);
+
+    /// Gets ready for a sign-in that may follow (the sync UI is shown): the
+    /// site loads Google's script now, so the tap that follows opens
+    /// Google's window inside its gesture. No Google call, no token asked.
+    /// Nothing by default.
+    fn prepare(&self) {}
 }
 
 /// A shared [`SyncTransport`].

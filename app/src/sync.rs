@@ -198,6 +198,12 @@ impl SyncCycle {
         self.0.with_value(|cycle| cycle.mounted.set(true));
     }
 
+    /// The sync UI shows where a tap may follow: the transport gets ready
+    /// (the site loads Google's script), no Google call, no token asked.
+    pub(crate) fn prepare(self) {
+        self.0.with_value(|cycle| cycle.transport.prepare());
+    }
+
     /// Runs a cycle now (or once after the running one).
     pub(crate) fn run(self) {
         self.0.get_value().run();

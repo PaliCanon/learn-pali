@@ -18,7 +18,7 @@
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
-use palicanon_ui_lib::{Button, Variant};
+use palicanon_ui_lib::{Button, ShellState, Variant};
 
 use crate::backend::{Backend, SyncAccount, SyncError};
 use crate::catalogue::{Locale, strings};
@@ -31,6 +31,13 @@ pub(crate) const GOOGLE_CONNECTIONS: &str = "https://myaccount.google.com/connec
 /// The name of a Drive copy that could not be read, when downloaded.
 pub(crate) const DRIVE_COPY_NAME: &str = "pc_learn-drive.json";
 
+/// Whether the panel readies Google's script now: once the cycle is
+/// mounted, and while Settings is open (`settings_open`; none: a host
+/// without the shell's Settings, where the panel shows at once).
+pub(crate) fn ready_now(mounted: bool, settings_open: Option<bool>) -> bool {
+    mounted && settings_open.unwrap_or(true)
+}
+
 /// Hands the Drive copy `raw` to the host's file transfer, as is.
 pub(crate) fn download_drive_copy(backend: Backend, raw: &str) {
     backend.export(DRIVE_COPY_NAME, raw);
@@ -40,6 +47,17 @@ pub(crate) fn download_drive_copy(backend: Backend, raw: &str) {
 #[component]
 pub(crate) fn SyncPanel() -> impl IntoView {
     let sync = SyncCycle::current();
+    let settings_open = use_context::<ShellState>().map(|shell| shell.settings_open);
+    // Settings shown: Google's script is readied, so the Sign in tap opens
+    // Google's window inside its gesture (S4). Not before: a page load that
+    // never opens Settings asks nothing of Google.
+    Effect::new(move |_| {
+        if let Some(sync) = sync
+            && ready_now(sync.mounted(), settings_open.map(|open| open.get()))
+        {
+            sync.prepare();
+        }
+    });
     move || {
         let sync = sync.filter(|sync| sync.mounted())?;
         let account = sync.account();
@@ -253,6 +271,8 @@ pub(crate) fn SyncChip() -> impl IntoView {
     move || {
         let sync = sync.filter(|sync| sync.mounted())?;
         matches!(sync.account().get(), SyncAccount::Remembered { .. }).then(|| {
+            // The chip shown: Google's script is readied for its tap.
+            Effect::new(move |_| sync.prepare());
             view! {
                 <div class="flex justify-center">
                     <Button variant=Variant::Chip on_click=move |_| sync.sync_now()>
@@ -348,6 +368,17 @@ mod tests {
             })
             .replace("<!>", "");
         assert_eq!(html, "", "{html}");
+    }
+
+    /// Google's script is readied once mounted, and only while Settings is
+    /// open (a host with no shell: at once); never on the server's paint.
+    #[test]
+    fn the_panel_readies_google_only_while_settings_is_open() {
+        assert!(ready_now(true, Some(true)));
+        assert!(ready_now(true, None), "no shell: the panel shows at once");
+        assert!(!ready_now(true, Some(false)), "Settings closed");
+        assert!(!ready_now(false, Some(true)), "not mounted");
+        assert!(!ready_now(false, None));
     }
 
     #[test]

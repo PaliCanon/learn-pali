@@ -21,8 +21,6 @@ use crate::drive_location::{CREATE_URL, create_body, list_url, read_url, update_
 
 /// A sign-in, a push: what waits for their answer.
 type Done = Box<dyn FnOnce(Result<(), SyncError>)>;
-/// What waits for Google's script: called with whether it loaded.
-type Loaded = Box<dyn FnOnce(bool)>;
 
 /// The transport's state, shared with Google's callbacks.
 struct Inner {
@@ -36,8 +34,9 @@ struct Inner {
     client: RefCell<Option<JsValue>>,
     /// The sign-in waiting for Google's answer.
     waiting: RefCell<Option<Done>>,
-    /// What waits for the script to load.
-    loading: RefCell<Vec<Loaded>>,
+    /// Google's script while it loads (none: not asked, loaded, or failed
+    /// and removed, so the next readying asks it again).
+    loading: RefCell<Option<web_sys::HtmlScriptElement>>,
     /// Moved by each sign-out: a call's answer from an older generation
     /// never touches the token or the account (a late 401 of a cut pull).
     generation: Cell<u64>,
@@ -56,7 +55,7 @@ pub(super) fn transport() -> SharedSync {
         file_id: RefCell::new(None),
         client: RefCell::new(None),
         waiting: RefCell::new(None),
-        loading: RefCell::new(Vec::new()),
+        loading: RefCell::new(None),
         generation: Cell::new(0),
     });
     let account = inner.account;
@@ -69,15 +68,21 @@ pub(super) fn transport() -> SharedSync {
 }
 
 impl SyncTransport for WebSync {
+    /// Inside the tap: Google's window opens at once when the script is
+    /// there (readied when the sync UI showed); else the answer is Network
+    /// at once (Retry) and the script is asked, never a window opened later
+    /// outside the gesture, which a browser blocks.
     fn sign_in(&self, on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {
-        let inner = Rc::clone(&self.0);
-        with_gis(&self.0, move |loaded| {
-            if loaded {
-                inner.request(on_done);
-            } else {
-                on_done(Err(SyncError::Network));
-            }
-        });
+        if oauth2().is_some() {
+            self.0.request(on_done);
+        } else {
+            ready_gis(&self.0);
+            on_done(Err(SyncError::Network));
+        }
+    }
+
+    fn prepare(&self) {
+        ready_gis(&self.0);
     }
 
     fn sign_out(&self) {
@@ -316,50 +321,42 @@ async fn fetch(
     Ok((response.status(), text.as_string().unwrap_or_default()))
 }
 
-/// Calls `then(true)` once Google's script is there: at once when it is,
-/// else after injecting it (once; `then(false)` when it cannot load).
-fn with_gis(inner: &Rc<Inner>, then: impl FnOnce(bool) + 'static) {
-    if oauth2().is_some() {
-        then(true);
+/// Asks for Google's script unless it is there or loading: injected once;
+/// a script that fails to load is removed, so the next readying asks again.
+/// No Google call, no token asked.
+fn ready_gis(inner: &Rc<Inner>) {
+    if oauth2().is_some() || inner.loading.borrow().is_some() {
         return;
     }
-    let first = inner.loading.borrow().is_empty();
-    inner.loading.borrow_mut().push(Box::new(then));
-    if first && !inject_script(inner) {
-        loaded(inner, false);
-    }
-}
-
-/// Every waiter of the script, answered.
-fn loaded(inner: &Rc<Inner>, ok: bool) {
-    let waiting: Vec<_> = inner.loading.borrow_mut().drain(..).collect();
-    for then in waiting {
-        then(ok && oauth2().is_some());
-    }
-}
-
-/// Puts `<script src=GIS_SCRIPT async>` in the head; false when it cannot.
-fn inject_script(inner: &Rc<Inner>) -> bool {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
-        return false;
+        return;
     };
     let Some(script) = document
         .create_element("script")
         .ok()
         .and_then(|element| element.dyn_into::<web_sys::HtmlScriptElement>().ok())
     else {
-        return false;
+        return;
     };
     script.set_src(GIS_SCRIPT);
     script.set_async(true);
     let (for_load, for_error) = (Rc::clone(inner), Rc::clone(inner));
-    let onload = Closure::once_into_js(move || loaded(&for_load, true));
-    let onerror = Closure::once_into_js(move || loaded(&for_error, false));
+    let onload = Closure::once_into_js(move || {
+        for_load.loading.borrow_mut().take();
+    });
+    let onerror = Closure::once_into_js(move || {
+        if let Some(failed) = for_error.loading.borrow_mut().take() {
+            failed.remove();
+        }
+    });
     let _ = script.add_event_listener_with_callback("load", onload.unchecked_ref());
     let _ = script.add_event_listener_with_callback("error", onerror.unchecked_ref());
-    document
+    if document
         .head()
         .is_some_and(|head| head.append_child(&script).is_ok())
+    {
+        *inner.loading.borrow_mut() = Some(script);
+    }
 }
 
 /// `google.accounts.oauth2`, once the script defined it.

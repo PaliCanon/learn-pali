@@ -18,6 +18,9 @@
 
 #![cfg(all(target_arch = "wasm32", feature = "web-sync"))]
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use futures::channel::oneshot;
 use js_sys::{Function, Promise};
 use learn_pali::fragment::{SharedSync, SyncAccount, SyncError};
@@ -139,23 +142,66 @@ fn email() -> Option<String> {
     Some("learner@example.org".to_owned())
 }
 
-/// The first sign-in injects Google's script, then signs in once it
-/// loads; the token never reaches `localStorage`.
+/// The GIS scripts in the page.
+fn scripts() -> Option<f64> {
+    js(&format!(
+        "return document.head.querySelectorAll('script[src=\"{GIS_SCRIPT}\"]').length"
+    ))
+    .as_f64()
+}
+
+/// Taps Sign in: the answer if it came inside the call.
+fn sign_in_now(sync: &SharedSync) -> Option<Result<(), SyncError>> {
+    let answer = Rc::new(RefCell::new(None));
+    let seen = Rc::clone(&answer);
+    sync.sign_in(Box::new(move |result| *seen.borrow_mut() = Some(result)));
+    answer.take()
+}
+
+/// Nothing is asked of Google before a tap. A tap before the script is
+/// there answers Network at once (Retry) and asks for the script; a script
+/// that fails is asked again when the UI readies it; once it is there, the
+/// tap opens Google's window inside the call (its gesture). The token
+/// never reaches `localStorage`.
 async fn first_sign_in(sync: &SharedSync) {
-    let (tx, rx) = oneshot::channel();
-    sync.sign_in(Box::new(move |result| {
-        let _ = tx.send(result);
-    }));
-    let script = js_string(&format!(
-        "const s = document.head.querySelector('script[src=\"{GIS_SCRIPT}\"]'); \
-         return s ? 'injected' : 'missing'"
+    assert_eq!(scripts(), Some(0.0), "no Google script before a tap");
+    assert_eq!(js("return window.__drive.calls.length").as_f64(), Some(0.0));
+    assert_eq!(sign_in_now(sync), Some(Err(SyncError::Network)), "at once");
+    assert_eq!(scripts(), Some(1.0), "the script is asked");
+    js(&format!(
+        "document.head.querySelector('script[src=\"{GIS_SCRIPT}\"]').dispatchEvent(new Event('error'))"
     ));
-    assert_eq!(script.as_deref(), Some("injected"));
+    assert_eq!(scripts(), Some(0.0), "the failed script is removed");
+    assert_eq!(
+        sign_in_now(sync),
+        Some(Err(SyncError::Network)),
+        "still none"
+    );
+    assert_eq!(scripts(), Some(1.0), "the tap asked it again");
+    js(&format!(
+        "document.head.querySelector('script[src=\"{GIS_SCRIPT}\"]').dispatchEvent(new Event('error'))"
+    ));
+    assert_eq!(scripts(), Some(0.0));
+    sync.prepare();
+    sync.prepare();
+    assert_eq!(scripts(), Some(1.0), "readied again, once");
+    let asked = js("return window.__drive.overrides !== undefined");
+    assert_eq!(asked.as_bool(), Some(false), "readying asks no token");
     js(FAKE_GIS);
     js(&format!(
         "document.head.querySelector('script[src=\"{GIS_SCRIPT}\"]').dispatchEvent(new Event('load'))"
     ));
-    assert_eq!(rx.await.expect("answered"), Ok(()));
+    let answer = Rc::new(RefCell::new(None));
+    let seen = Rc::clone(&answer);
+    sync.sign_in(Box::new(move |result| *seen.borrow_mut() = Some(result)));
+    let asked = js("return window.__drive.overrides !== undefined");
+    assert_eq!(
+        asked.as_bool(),
+        Some(true),
+        "the window opens inside the tap"
+    );
+    ticks().await;
+    assert_eq!(answer.take(), Some(Ok(())));
     assert_eq!(
         js_string("return window.__drive.config.client_id").as_deref(),
         Some(CLIENT_ID)
