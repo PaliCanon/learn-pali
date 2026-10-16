@@ -107,6 +107,8 @@ struct Cycle {
     step: Cell<u64>,
     /// A session runs: a cycle asked now waits for its end.
     held: Cell<bool>,
+    /// Mounted on the client: the sync UI shows.
+    mounted: RwSignal<bool>,
     /// A cycle was asked during the session.
     pending: Cell<bool>,
     /// The provider's changed-elsewhere handler.
@@ -149,6 +151,7 @@ impl SyncCycle {
             again: Cell::new(false),
             step: Cell::new(0),
             held: Cell::new(false),
+            mounted: RwSignal::new(false),
             pending: Cell::new(false),
             changed: Box::new(changed),
             clock: Box::new(clock),
@@ -175,6 +178,24 @@ impl SyncCycle {
     /// Who is signed in.
     pub(crate) fn account(self) -> Signal<SyncAccount> {
         self.0.with_value(|cycle| cycle.transport.account())
+    }
+
+    /// Mounted on the client (the provider's Effect): the sync UI shows,
+    /// and a cycle runs when a token is at hand (at load).
+    pub(crate) fn mount(self) {
+        self.0.with_value(|cycle| cycle.mounted.set(true));
+        self.when_ready();
+    }
+
+    /// Whether the sync UI shows: mounted on the client. Tracked.
+    pub(crate) fn mounted(self) -> bool {
+        self.0.with_value(|cycle| cycle.mounted.get())
+    }
+
+    /// Marks the cycle mounted without a cycle (the render tests).
+    #[cfg(test)]
+    pub(crate) fn set_mounted(self) {
+        self.0.with_value(|cycle| cycle.mounted.set(true));
     }
 
     /// Runs a cycle now (or once after the running one).

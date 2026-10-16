@@ -39,8 +39,8 @@
 //! The decisions on Google's answers are pure functions, tested natively;
 //! the browser glue is compiled with `web-sync` (which `hydrate` enables)
 //! and tested in a headless Chrome against a fake Google
-//! (`tests/web_sync.rs`). On the server, [`web_sync`] is a transport that
-//! is always signed out (never called there).
+//! (`tests/web_sync.rs`). On the server (no `web-sync`), [`web_sync`] is
+//! none: the first paint shows no sync UI.
 
 // The decisions below serve the browser's glue (`web-sync`) and the tests;
 // the server builds them and calls only `web_sync`, its signed-out stub.
@@ -199,41 +199,18 @@ pub(crate) fn sign_in_error(kind: Option<&str>) -> SyncError {
 }
 
 /// The site's sync transport: Google Drive from the browser (see the
-/// module documentation); always signed out on the server.
+/// module documentation). None in a build without `web-sync` (the
+/// server): no transport, so no sync UI, never a Sign in that does
+/// nothing.
 #[must_use]
-pub fn web_sync() -> SharedSync {
-    browser::transport()
-}
-
-/// The server's transport: signed out, never called.
-#[cfg(not(feature = "web-sync"))]
-mod browser {
-    use std::rc::Rc;
-
-    use leptos::prelude::*;
-
-    use crate::backend::{SharedSync, SyncAccount, SyncError, SyncTransport};
-
-    /// Signed out; every call does nothing.
-    struct Server;
-
-    impl SyncTransport for Server {
-        fn sign_in(&self, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {}
-
-        fn sign_out(&self) {}
-
-        fn account(&self) -> Signal<SyncAccount> {
-            Signal::stored(SyncAccount::SignedOut)
-        }
-
-        fn pull(&self, _on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {}
-
-        fn push(&self, _text: &str, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {}
+pub fn web_sync() -> Option<SharedSync> {
+    #[cfg(feature = "web-sync")]
+    {
+        Some(browser::transport())
     }
-
-    /// The server's transport.
-    pub(super) fn transport() -> SharedSync {
-        Rc::new(Server)
+    #[cfg(not(feature = "web-sync"))]
+    {
+        None
     }
 }
 
@@ -346,15 +323,8 @@ mod tests {
     }
 
     #[test]
-    fn the_server_transport_is_signed_out_and_inert() {
-        use leptos::prelude::{GetUntracked, Owner};
-        Owner::new().with(|| {
-            let sync = web_sync();
-            assert_eq!(sync.account().get_untracked(), SyncAccount::SignedOut);
-            sync.sign_in(Box::new(|_| panic!("no sign-in on the server")));
-            sync.pull(Box::new(|_| panic!("no pull on the server")));
-            sync.push("{}", Box::new(|_| panic!("no push on the server")));
-            sync.sign_out();
-        });
+    #[cfg(not(feature = "web-sync"))]
+    fn a_build_without_web_sync_has_no_transport() {
+        assert!(web_sync().is_none());
     }
 }

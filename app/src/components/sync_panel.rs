@@ -1,7 +1,10 @@
-//! The sync's UI (task 050): [`SyncPanel`] in Settings' 'Your progress',
-//! and [`SyncChip`] on the home. Both render nothing when the host gave no
-//! transport ([`SyncCycle::current`] is none): nothing changes from a
-//! device without sync.
+//! The sync's UI (task 050): [`SyncPanel`] in Settings' 'Your progress'
+//! (in `ProgressActions`, inside `LearnSettings`), and [`SyncChip`] on the
+//! home. Both render nothing when the host gave no transport
+//! ([`SyncCycle::current`] is none: nothing changes from a device without
+//! sync), and nothing before the cycle is mounted on the client: the
+//! site's server, built without `web-sync`, has no transport and paints
+//! the same.
 //!
 //! Signed out, the panel offers 'Sync with Google Drive' and says what is
 //! stored where. Signed in (or remembered, the site after a reload), it
@@ -36,9 +39,11 @@ pub(crate) fn download_drive_copy(backend: Backend, raw: &str) {
 /// The sync's part of 'Your progress'; nothing without a transport.
 #[component]
 pub(crate) fn SyncPanel() -> impl IntoView {
-    SyncCycle::current().map(|sync| {
+    let sync = SyncCycle::current();
+    move || {
+        let sync = sync.filter(|sync| sync.mounted())?;
         let account = sync.account();
-        view! {
+        Some(view! {
             <div data-sync="" class="flex flex-col gap-3 border-t border-line pt-4">
                 {move || match account.get() {
                     SyncAccount::SignedOut => view! { <SignedOut sync=sync /> }.into_any(),
@@ -54,8 +59,8 @@ pub(crate) fn SyncPanel() -> impl IntoView {
                     }
                 }}
             </div>
-        }
-    })
+        })
+    }
 }
 
 /// Signed out: 'Sync with Google Drive', and what is stored where.
@@ -244,20 +249,19 @@ fn DriveUnreadable(
 #[component]
 pub(crate) fn SyncChip() -> impl IntoView {
     let t = strings();
-    SyncCycle::current().map(|sync| {
-        let account = sync.account();
-        move || {
-            matches!(account.get(), SyncAccount::Remembered { .. }).then(|| {
-                view! {
-                    <div class="flex justify-center">
-                        <Button variant=Variant::Chip on_click=move |_| sync.sync_now()>
-                            {move || td_string!(t.locale(), sync_chip)}
-                        </Button>
-                    </div>
-                }
-            })
-        }
-    })
+    let sync = SyncCycle::current();
+    move || {
+        let sync = sync.filter(|sync| sync.mounted())?;
+        matches!(sync.account().get(), SyncAccount::Remembered { .. }).then(|| {
+            view! {
+                <div class="flex justify-center">
+                    <Button variant=Variant::Chip on_click=move |_| sync.sync_now()>
+                        {move || td_string!(t.locale(), sync_chip)}
+                    </Button>
+                </div>
+            }
+        })
+    }
 }
 
 /// These tests render markup on the server: they need `ssr`.
@@ -300,6 +304,7 @@ mod tests {
                         |_, _| {},
                     );
                     cycle.set_status(status);
+                    cycle.set_mounted();
                     provide_context(cycle);
                 }
                 view().to_html()
@@ -319,6 +324,30 @@ mod tests {
         render(Some((account, SyncStatus::Idle)), Language::En, || {
             view! { <SyncChip /> }
         })
+    }
+
+    /// Before the provider is mounted on the client (the server's paint,
+    /// the first hydration pass) the panel and the chip render nothing, so
+    /// the server, which has no transport, paints the same.
+    #[test]
+    fn nothing_is_rendered_before_the_cycle_is_mounted() {
+        let html = Owner::new()
+            .with(|| {
+                palicanon_ui_lib::provide_language().set(Language::En);
+                provide_fakes(Load::Ok(progress_fixture()));
+                let account = SyncAccount::Remembered { email: None };
+                let transport: SharedSync = Rc::new(FakeTransport::new(account));
+                let cycle =
+                    SyncCycle::new(transport, Backend::current(), || {}, String::new, |_, _| {});
+                provide_context(cycle);
+                view! {
+                    <SyncPanel />
+                    <SyncChip />
+                }
+                .to_html()
+            })
+            .replace("<!>", "");
+        assert_eq!(html, "", "{html}");
     }
 
     #[test]

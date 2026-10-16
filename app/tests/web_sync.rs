@@ -273,7 +273,7 @@ async fn sign_out_cuts_a_pull(sync: &SharedSync) {
 async fn the_web_transport_signs_in_syncs_and_signs_out_against_a_fake_google() {
     js("localStorage.removeItem('pc_learn_sync'); delete window.google;");
     js(FAKE_FETCH);
-    let sync = learn_pali::web_sync();
+    let sync = learn_pali::web_sync().expect("web-sync: a transport");
     ticks().await;
     assert_eq!(sync.account().get_untracked(), SyncAccount::SignedOut);
     assert_eq!(pull(&sync).await, Err(SyncError::SignedOut), "no token yet");
@@ -302,7 +302,7 @@ async fn the_web_transport_signs_in_syncs_and_signs_out_against_a_fake_google() 
 
     // A reload: the account is read back as remembered, with no token.
     js("localStorage.setItem('pc_learn_sync', 'learner@example.org')");
-    let reloaded = learn_pali::web_sync();
+    let reloaded = learn_pali::web_sync().expect("web-sync: a transport");
     assert_eq!(
         reloaded.account().get_untracked(),
         SyncAccount::SignedOut,

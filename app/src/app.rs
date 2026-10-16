@@ -396,6 +396,21 @@ mod tests {
         }
     }
 
+    /// The server is built without `web-sync`: it has no sync transport,
+    /// so its first paint shows no sync UI (never a Sign in that does
+    /// nothing); the browser shows it once hydrated.
+    #[test]
+    fn the_server_renders_no_sync_ui() {
+        let html = render_layout(Language::En, "/");
+        assert!(
+            html.contains(">Your progress</h3>"),
+            "Settings is there: {html}"
+        );
+        assert!(!html.contains("Sync with Google Drive"), "{html}");
+        assert!(!html.contains("data-sync"), "{html}");
+        assert!(!html.contains(">Sync<"), "no chip: {html}");
+    }
+
     /// The one route renders in every language, its marker present.
     #[test]
     fn the_home_renders_in_every_language() {

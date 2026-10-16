@@ -101,7 +101,7 @@ pub fn LearnProvider(
     files: SharedFiles,
     /// Where the progress is copied between devices; none: no sync, no
     /// sync UI.
-    #[prop(optional)]
+    #[prop(optional_no_strip)]
     sync: Option<SharedSync>,
     /// The host's screens, with [`LearnRoutes`] and [`LearnSettings`]
     /// somewhere inside them.
@@ -129,8 +129,10 @@ pub fn LearnProvider(
     if let Some(transport) = sync {
         let cycle = SyncCycle::new(transport, backend, changed, clock_label, browser_timer);
         provide_context(cycle);
-        // At load, once, on the client: a cycle when a token is at hand.
-        Effect::new(move |_| cycle.when_ready());
+        // Mounted, on the client only: the sync UI shows (the server's
+        // paint, with no transport, shows none), and a cycle runs when a
+        // token is at hand.
+        Effect::new(move |_| cycle.mount());
     }
     view! {
         {children()}
