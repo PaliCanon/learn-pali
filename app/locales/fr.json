@@ -89,6 +89,8 @@
   "summary_nothing_due": "Rien à revoir aujourd’hui",
   "summary_practice_done": "Entraînement terminé",
   "summary_title": "Séance terminée",
+  "suttacentral_read": "Lire sur SuttaCentral",
+  "suttacentral_read_english": "Lire sur SuttaCentral (en anglais)",
   "sync_account": "Google Drive : {{ email }}",
   "sync_account_unknown": "Connecté à Google Drive",
   "sync_chip": "Synchroniser",

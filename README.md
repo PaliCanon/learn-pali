@@ -19,7 +19,7 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `app/` | Crate `learn_pali`, the site: Leptos SSR + hydrate on ui-lib. |
 | `app/src/` | The site's frame (app.rs: the document, the rail, the footer in app/site_footer.rs), entry point (main.rs), origin guard (origin.rs); the Learn fragment (fragment.rs: LearnRoutes, LearnProvider, LearnSettings), the host's plug-ins (backend.rs: the ProgressStore and FileTransfer traits; web.rs: the site's localStorage store and file transfer), the progress decisions (store.rs: Load, classify, validate_import), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
 | `app/src/pages/` | Page views, the home at `/`. |
-| `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list. |
+| `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list, the SuttaCentral badge of a passage (passage_badge.rs). |
 | `app/src/learn/` | Learning session logic: home state, session run, Leitner stages, card summary, word lookups, the Context front's window around the blank, which translation shows. |
 | `app/locales/` | UI translations: en.json, fr.json, vi.json. |
 | `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |
@@ -27,8 +27,8 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and the fragment in a real browser (csr.rs, wasm32 only). |
 | `app/Dockerfile` | Container image build: cargo leptos build, debian runtime, non-root user, port 8080. |
 | `core/` | Crate `learn_core`, the learning loop library. `serde` only; builds for native and wasm32. |
-| `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math. |
-| `core/fixtures/` | Test fixtures: 50 terms (terms.txt) and the built deck (deck.json). |
+| `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math, the SuttaCentral link of a passage by language (suttacentral.rs). |
+| `core/fixtures/` | Test fixtures: 50 terms (terms.txt), the built deck (deck.json) and the checked SuttaCentral uids and translators of its sources (suttacentral.tsv). |
 | `core/tests/` | Integration tests. |
 | `cli/` | Crate `learn_cli`, bin `learn-cli`, the learning loop at the terminal. Commands: review, stats, new N, advance K. |
 | `cli/src/` | CLI code: argument parsing, terminal UI, session runner, stats printer, progress store. |

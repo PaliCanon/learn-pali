@@ -5,6 +5,7 @@
 
 pub mod data_block;
 pub mod new_terms;
+pub mod passage_badge;
 pub mod save_strip;
 pub mod session;
 pub mod sync_panel;

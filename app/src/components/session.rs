@@ -47,6 +47,7 @@ use palicanon_ui_lib::{
 use crate::backend::Backend;
 use crate::catalogue::Locale;
 use crate::components::new_terms::NewTerms;
+use crate::components::passage_badge::passage_badge;
 use crate::deck::deck;
 use crate::learn::home_state::BrokenKind;
 use crate::learn::key::{GradeGate, grade_key};
@@ -624,7 +625,9 @@ fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl
     let origin = example.map(|example| {
         view! {
             <p class="text-sm text-muted">
-                {source_ref(&example.source)} " · " <Pali>{example.sutta.clone()}</Pali>
+                {passage_badge(example, language)
+                    .unwrap_or_else(|| source_ref(&example.source).into_any())} " · "
+                <Pali>{example.sutta.clone()}</Pali>
             </p>
         }
     });
@@ -827,6 +830,7 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
         let body = view! {
             <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale)}</p>
             {translation_view(example, language)}
+            {passage_badge(example, language).map(|badge| view! { <p class="mt-2">{badge}</p> })}
         };
         captioned(td_string!(locale, reveal_example), body)
     });
@@ -1219,6 +1223,35 @@ pub(crate) mod tests {
         assert!(text.contains("Context"), "{text}");
         assert!(!front.contains("<mark"), "the answer is not shown: {front}");
         assert!(front.contains(r#"lang="pi""#), "{front}");
+    }
+
+    #[test]
+    fn the_context_front_links_its_reference_to_suttacentral_in_the_page_language() {
+        let en = front_with(Language::En, kho(Facet::Context), false);
+        assert!(
+            en.contains(r#"href="https://suttacentral.net/an6.61/en/sujato""#),
+            "{en}"
+        );
+        assert!(en.contains(r#"target="_blank""#), "{en}");
+        assert!(text_of(&en).contains("AN 6.61 · majjhesuttaṃ"), "{en}");
+        let fr = front_with(Language::Fr, kho(Facet::Context), false);
+        assert!(
+            fr.contains(r#"title="Lire sur SuttaCentral (en anglais)""#),
+            "{fr}"
+        );
+        let vi = front_with(Language::Vi, kho(Facet::Context), false);
+        assert!(vi.contains("suttacentral.net/an6.61/vi/minh_chau"), "{vi}");
+    }
+
+    #[test]
+    fn the_example_of_a_reveal_carries_the_same_link() {
+        let html = render(rupa(Facet::Meaning, Stage::Day));
+        let (_, reveal) = split(&html);
+        assert!(
+            reveal.contains(r#"href="https://suttacentral.net/"#),
+            "{reveal}"
+        );
+        assert!(reveal.contains(r#"rel="noopener""#), "{reveal}");
     }
 
     // ---- T3: the reveal ----

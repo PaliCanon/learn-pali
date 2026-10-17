@@ -89,6 +89,8 @@
   "summary_nothing_due": "Hôm nay không có gì cần ôn",
   "summary_practice_done": "Đã luyện xong",
   "summary_title": "Xong buổi ôn",
+  "suttacentral_read": "Đọc trên SuttaCentral",
+  "suttacentral_read_english": "Đọc trên SuttaCentral (tiếng Anh)",
   "sync_account": "Tài khoản Google Drive: {{ email }}",
   "sync_account_unknown": "Đã đăng nhập Google Drive",
   "sync_chip": "Đồng bộ",

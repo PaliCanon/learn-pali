@@ -89,6 +89,8 @@
   "summary_nothing_due": "Nothing due today",
   "summary_practice_done": "Practice done",
   "summary_title": "Session done",
+  "suttacentral_read": "Read on SuttaCentral",
+  "suttacentral_read_english": "Read on SuttaCentral (English)",
   "sync_account": "Google Drive: {{ email }}",
   "sync_account_unknown": "Signed in to Google Drive",
   "sync_chip": "Sync",

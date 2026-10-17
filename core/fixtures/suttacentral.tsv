@@ -1,0 +1,60 @@
+# SuttaCentral uids of the bundled deck's example sources, checked against
+# SuttaCentral's API on 2026-10-17 (53 SuttaCentral link task).
+#
+# Columns (tab separated): source (lower case, no spaces) | uid | original
+# title | English translators | French translators | Vietnamese translators.
+# A translator column lists the authors SuttaCentral holds for that uid and
+# language in the preferred order (rule: SuttaCentral's segmented editions
+# first, then by author uid); `-` means none.
+#
+# How each row was checked (one request per uid, a second for the non-nikaya
+# ones): GET /api/suttas/<uid> answers suttaplex.uid == uid (an2.135 answers
+# the range an2.130-140: the range is the uid kept), the authors come from its
+# `translations`, and for dhp, snp, thag, thig and ud the first words of the
+# deck's line were found in GET /api/bilarasuttas/<uid>/sujato?lang=en root
+# text. The DPD running numbers (SNP40, TH155, THI71, UD45...) are not
+# SuttaCentral's chapter.sutta uids: they were matched by the sutta's name
+# (the deck's `sutta` against SuttaCentral's original title) and by that text.
+an10.48	an10.48	Pabbajitaabhiṇhasutta	sujato,thanissaro	-	minh_chau
+an2.135	an2.130-140	Āyācanavagga	sujato	sekha,buddhavacanaorg	minh_chau
+an3.77	an3.77	Dutiyabhavasutta	sujato,thanissaro	sekha,buddhavacanaorg	minh_chau
+an3.91	an3.91	Saṅkavāsutta	sujato	-	minh_chau
+an4.180	an4.180	Mahāpadesasutta	sujato	buddhavacanaorg	minh_chau
+an4.189	an4.189	Sacchikaraṇīyasutta	sujato	buddhavacanaorg	minh_chau
+an6.61	an6.61	Majjhesutta	sujato	-	minh_chau
+an8.30	an8.30	Anuruddhamahāvitakkasutta	sujato,bodhi	christelle	minh_chau
+dhp123	dhp116-128	Pāpavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp127	dhp116-128	Pāpavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp144	dhp129-145	Daṇḍavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp150	dhp146-156	Jarāvagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp153	dhp146-156	Jarāvagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp190	dhp179-196	Buddhavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp277	dhp273-289	Maggavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dhp75	dhp60-75	Bālavagga	suddhaso,sujato,anandajoti,buddharakkhita,feldmeier	hu	phantuananh
+dn16.36	dn16	Mahāparinibbānasutta	sujato,anandajoti	canonpaliorg,wijayaratna	minh_chau
+dn22.3	dn22	Mahāsatipaṭṭhānasutta	sujato,anandajoti	canonpaliorg,leninan,wijayaratna	minh_chau
+dn22.8	dn22	Mahāsatipaṭṭhānasutta	sujato,anandajoti	canonpaliorg,leninan,wijayaratna	minh_chau
+mn1	mn1	Mūlapariyāyasutta	sujato,bodhi,horner,suddhaso	maes,wijayaratna	minh_chau
+mn2.2	mn2	Sabbāsavasutta	suddhaso,sujato,bodhi,horner	buddhavacanaorg,maes,wijayaratna	minh_chau
+mn30	mn30	Cūḷasāropamasutta	sujato,horner,nyanamoli-thera	maes,wijayaratna	minh_chau
+mn38	mn38	Mahātaṇhāsaṅkhayasutta	sujato,bodhi,horner,suddhaso	maes,wijayaratna	minh_chau
+mn39	mn39	Mahāassapurasutta	sujato,horner,suddhaso	maes,wijayaratna	minh_chau
+mn40	mn40	Cūḷaassapurasutta	sujato,horner	maes,wijayaratna	minh_chau
+mn43	mn43	Mahāvedallasutta	sujato,horner,nyanamoli-thera,suddhaso	maes,wijayaratna	minh_chau
+mn60	mn60	Apaṇṇakasutta	sujato,bodhi,horner	maes,wijayaratna	minh_chau
+sn10.5	sn10.5	Sānusutta	sujato	-	minh_chau
+sn12.61	sn12.61	Assutavāsutta	sujato,bodhi	leninan	minh_chau
+sn12.63	sn12.63	Puttamaṁsasutta	sujato,bodhi	leninan	minh_chau
+sn22.57	sn22.57	Sattaṭṭhānasutta	sujato,bodhi	-	minh_chau
+sn22.87	sn22.87	Vakkalisutta	sujato,bodhi	christelle	minh_chau
+sn22.97	sn22.97	Nakhasikhāsutta	sujato,bodhi	-	minh_chau
+sn47.10	sn47.10	Bhikkhunupassayasutta	sujato,bodhi	-	minh_chau
+sn47.14	sn47.14	Ukkacelasutta	sujato,bodhi	-	minh_chau
+snp4	snp1.4	Kasibhāradvājasutta	sujato,mills	canonpaliorg	-
+snp40	snp4.2	Guhaṭṭhakasutta	sujato,mills	canonpaliorg	-
+snp56	snp5.2	Ajitamāṇavapucchā	sujato,anandajoti,mills	canonpaliorg	-
+snp68	snp5.14	Udayamāṇavapucchā	sujato,anandajoti,mills	canonpaliorg	-
+th155	thag2.35	Sambulakaccānattheragāthā	sujato	-	indacanda
+th259	thag17.2	Sāriputtattheragāthā	sujato	-	indacanda
+thi71	thig14.1	Subhājīvakambavanikātherīgāthā	soma,sujato,thanissaro	-	indacanda
+ud45	ud5.5	Uposathasutta	sujato,anandajoti	canonpaliorg	-
