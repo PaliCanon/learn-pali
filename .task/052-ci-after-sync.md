@@ -17,3 +17,7 @@ Difficulty 2, impact 2: two CI jobs fail on main since 562b2f7 (run 38994247890,
 | web_sync fix | FAKE_GIS frozen, `window.google` read-only; green with the 4 s wait and without it; 1 passed | commit "test(sync): the fake Google cannot be replaced" |
 | CI commands | fmt, clippy ssr/hydrate/csr/native/core-wasm, test ssr (445 + learn_core/cli/deck), test csr, test web_sync, csr-without-web-store.sh, rustdoc: every exit 0 | scratchpad all.out |
 | Check | done | orchestrator, 2026-10-17: diff read (two cfg attributes; the fake Google frozen, window.google read-only); every CI command exit 0 per the lane; the real-script cause inferred, reproduced by a 4 s wait |
+| Merge | done | b67eeed on main, pushed |
+
+## Retro
+One line (light path): a browser test that injects a real third-party script must freeze its fake (or block the host): it passed locally only by finishing before the script arrived.
