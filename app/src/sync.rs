@@ -41,7 +41,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use learn_core::deck::TermId;
+use learn_core::deck::{Term, TermId};
 use learn_core::merge::merge;
 use learn_core::progress::{Progress, State, StateError};
 use leptos::prelude::*;
@@ -364,7 +364,7 @@ impl Cycle {
         let drive = match pulled {
             Err(error) => return self.finish(SyncStatus::Failed(error)),
             Ok(None) => None,
-            Ok(Some(text)) => match State::from_json(&text) {
+            Ok(Some(text)) => match State::from_json_for(&text, crate::deck::deck()) {
                 Ok(state) => Some(state),
                 Err(StateError::UnknownVersion(version)) if version > State::VERSION => {
                     return self.finish(SyncStatus::DriveNewer);
@@ -435,8 +435,10 @@ impl Cycle {
 }
 
 /// Whether `a` and `b` hold the same progress, whatever the order of their
-/// terms: the same version and `last_today`, and the same entry for every
-/// term. A copy in another order is neither saved nor pushed.
+/// terms and of their added words: the same `last_today`, the same entry
+/// for every term and the same added words. The version stamp is how a
+/// file was written (1 while no word was added), not progress: a copy in
+/// another order or of another stamp is neither saved nor pushed.
 fn same(a: &State, b: &State) -> bool {
     let entries = |state: &State| -> HashMap<TermId, Progress> {
         state
@@ -445,10 +447,18 @@ fn same(a: &State, b: &State) -> bool {
             .map(|entry| (entry.term.clone(), entry.clone()))
             .collect()
     };
-    a.version == b.version
-        && a.last_today == b.last_today
+    let words = |state: &State| -> HashMap<TermId, Term> {
+        state
+            .added
+            .iter()
+            .map(|term| (term.id.clone(), term.clone()))
+            .collect()
+    };
+    a.last_today == b.last_today
         && a.progress.len() == b.progress.len()
+        && a.added.len() == b.added.len()
         && entries(a) == entries(b)
+        && words(a) == words(b)
 }
 
 /// Runs `callback` once after `delay` (the browser's `setTimeout`); never
@@ -647,6 +657,116 @@ mod tests {
         });
     }
 
+    /// The fixture holding the added word `sānuvajja`.
+    fn with_word(mut state: State) -> State {
+        state.added.push(crate::test_support::added_word());
+        state
+    }
+
+    #[test]
+    fn an_added_word_on_this_device_alone_is_pushed() {
+        Owner::new().with(|| {
+            let local = with_word(progress_fixture());
+            let store = FakeStore::new(Load::Ok(local.clone()));
+            let transport = FakeTransport::signed_in();
+            transport.set_drive(Some(&progress_fixture().to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            transport.settle();
+            assert_eq!(store.saved(), vec![], "nothing new locally");
+            assert_eq!(changed.get(), 0);
+            assert_eq!(transport.pushed(), vec![local.to_json()]);
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    /// A word added while a pull is pending is in the merge the answer
+    /// triggers: it is saved with the Drive's terms and pushed, never lost
+    /// to a stale copy of the progress.
+    #[test]
+    fn an_add_while_a_pull_is_pending_keeps_the_word() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let drive = with_term(State::empty(), "ghost 2");
+            transport.set_drive(Some(&drive.to_json()));
+            let (sync, _) = cycle(&store, &transport);
+            sync.run();
+            let backend = backend_of(&store, &FakeFiles::default());
+            crate::learn::adding::add_word(backend, crate::test_support::added_word()).unwrap();
+            transport.settle();
+            let Load::Ok(local) = backend.load() else {
+                panic!("a progress");
+            };
+            assert_eq!(local.added, vec![crate::test_support::added_word()]);
+            assert!(
+                local.get(&TermId("kho".into())).is_some(),
+                "and the device's"
+            );
+            assert!(
+                local.get(&TermId("ghost 2".into())).is_some(),
+                "and the Drive's"
+            );
+            let pushed = transport.pushed();
+            assert_eq!(pushed.len(), 1);
+            assert!(pushed[0].contains("sānuvajja"), "{}", pushed[0]);
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn an_added_word_on_the_drive_alone_is_saved_locally_and_not_pushed() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let ahead = with_word(progress_fixture());
+            transport.set_drive(Some(&ahead.to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            transport.settle();
+            assert_eq!(store.saved(), vec![ahead]);
+            assert_eq!(changed.get(), 1, "the home reads the store again");
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn the_same_words_in_another_order_are_the_same_progress() {
+        Owner::new().with(|| {
+            let mut local = with_word(progress_fixture());
+            let mut other = crate::test_support::added_word();
+            other.id = TermId("abhiññā 1".into());
+            local.added.push(other);
+            let store = FakeStore::new(Load::Ok(local.clone()));
+            let transport = FakeTransport::signed_in();
+            let mut reordered = local;
+            reordered.added.reverse();
+            transport.set_drive(Some(&reordered.to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            transport.settle();
+            assert_eq!(store.saved(), vec![]);
+            assert_eq!(changed.get(), 0);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+        });
+    }
+
+    #[test]
+    fn the_version_stamp_is_not_part_of_the_progress() {
+        // A file of version 1 with no word reads as the empty state.
+        let one: State = State::from_json(r#"{"version":1,"progress":[]}"#).unwrap();
+        assert!(same(&one, &State::empty()));
+        let stamped = State {
+            version: 1,
+            ..progress_fixture()
+        };
+        assert!(same(&stamped, &progress_fixture()));
+        // The content still decides.
+        assert!(!same(&with_word(progress_fixture()), &progress_fixture()));
+        assert!(!same(&lapsed(progress_fixture()), &progress_fixture()));
+    }
+
     #[test]
     fn a_copy_ahead_is_saved_locally_and_not_pushed() {
         Owner::new().with(|| {
@@ -706,7 +826,7 @@ mod tests {
         Owner::new().with(|| {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
             let transport = FakeTransport::signed_in();
-            let newer = r#"{"version": 2, "progress": []}"#;
+            let newer = r#"{"version": 3, "progress": []}"#;
             transport.set_drive(Some(newer));
             let (sync, changed) = cycle(&store, &transport);
             sync.run();
@@ -738,6 +858,27 @@ mod tests {
                 assert_eq!(store.saved(), vec![], "{raw}");
             });
         }
+    }
+
+    #[test]
+    fn a_copy_whose_added_word_is_a_deck_term_is_read_with_the_word_shadowed() {
+        Owner::new().with(|| {
+            let mut copy = progress_fixture();
+            let mut word = crate::test_support::added_word();
+            word.id = TermId("kho".into());
+            copy.added.push(word);
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            transport.set_drive(Some(&copy.to_json()));
+            let (sync, changed) = cycle(&store, &transport);
+            sync.run();
+            transport.settle();
+            // The copy is the local progress once the shadowed word is gone.
+            assert_eq!(sync.status().get_untracked(), synced());
+            assert_eq!(store.saved(), vec![]);
+            assert_eq!(changed.get(), 0);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+        });
     }
 
     #[test]

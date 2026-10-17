@@ -12,6 +12,8 @@
 use learn_core::date::Date;
 use learn_core::progress::{State, StateError};
 
+use crate::deck::deck;
+
 /// The `localStorage` key of the progress.
 pub(crate) const KEY: &str = "pc_learn";
 
@@ -59,18 +61,26 @@ pub(crate) enum ImportError {
 /// [`Load::Unreadable`]: that is a read that failed, not a text. A host's
 /// store that reads a text itself (the app's file) classifies it with this.
 pub fn classify(raw: Option<&str>) -> Load {
+    classify_as(raw, State::VERSION)
+}
+
+/// [`classify`] as a build whose highest version is `newest` classifies:
+/// the build before added words (1) holds a version-2 file read-only. An
+/// added word the deck now teaches is dropped: the deck's term shadows it.
+pub(crate) fn classify_as(raw: Option<&str>, newest: u32) -> Load {
     let Some(raw) = raw else {
         return Load::Empty;
     };
-    match State::from_json(raw) {
-        Ok(state) => Load::Ok(state),
+    match State::from_json_upto(raw, newest) {
+        Ok(mut state) => {
+            state.shadow_added(deck());
+            Load::Ok(state)
+        }
         // `from_json` reads the `version` before the shape: a newer
         // version is told apart whatever else it holds.
-        Err(StateError::UnknownVersion(version)) if version > State::VERSION => {
-            Load::NewerVersion {
-                raw: raw.to_owned(),
-            }
-        }
+        Err(StateError::UnknownVersion(version)) if version > newest => Load::NewerVersion {
+            raw: raw.to_owned(),
+        },
         Err(_) => Load::Invalid {
             raw: raw.to_owned(),
         },
@@ -85,7 +95,7 @@ pub fn classify(raw: Option<&str>) -> Load {
 /// this build's), [`ImportError::Newer`] (a version above), or
 /// [`ImportError::DuplicateTerm`].
 pub(crate) fn validate_import(text: &str) -> Result<State, ImportError> {
-    State::from_json(text).map_err(|error| match error {
+    State::from_json_for(text, deck()).map_err(|error| match error {
         StateError::UnknownVersion(version) if version > State::VERSION => ImportError::Newer,
         StateError::DuplicateTerm(_) => ImportError::DuplicateTerm,
         StateError::Json(_) | StateError::UnknownVersion(_) => ImportError::NotAState,
@@ -99,7 +109,8 @@ pub(crate) fn export_name(date: Date) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{ImportError, Load, classify, export_name, validate_import};
+    use super::{ImportError, Load, classify, classify_as, export_name, validate_import};
+    use crate::test_support::added_word;
     use learn_core::date::Date;
     use learn_core::deck::TermId;
     use learn_core::progress::{Progress, State};
@@ -114,7 +125,7 @@ mod tests {
         state
     }
 
-    const NEWER: &str = r#"{"version": 2, "something": "else"}"#;
+    const NEWER: &str = r#"{"version": 3, "something": "else"}"#;
     /// A state that serialises well but holds one term twice.
     fn duplicate() -> String {
         let mut state = one_term_state();
@@ -191,6 +202,128 @@ mod tests {
     fn an_import_refuses_a_duplicate_term() {
         assert_eq!(
             validate_import(&duplicate()),
+            Err(ImportError::DuplicateTerm)
+        );
+    }
+
+    /// A version-2 file as a session wrote it, text and not `to_json`.
+    const VERSION_TWO: &str = r#"{
+  "version": 2,
+  "last_today": "2026-10-17",
+  "progress": [
+    {"term": "kho", "stage": "Day", "passed": [], "due": "2026-10-18", "lapses": 0}
+  ],
+  "added": [
+    {"id": "sānuvajja", "lemma": "sānuvajja", "pos": "adj",
+     "meaning": {"en": "blameworthy"}, "forms": [], "rank": 4294967295}
+  ]
+}"#;
+
+    #[test]
+    fn a_version_two_file_with_an_added_word_loads() {
+        match classify(Some(VERSION_TWO)) {
+            Load::Ok(state) => {
+                assert_eq!(state.added.len(), 1);
+                assert_eq!(state.added[0].id, TermId("sānuvajja".into()));
+                assert_eq!(state.progress.len(), 1);
+            }
+            other => panic!("a version-2 file loads, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_build_before_added_words_keeps_a_version_two_file_read_only() {
+        // That build's highest version is 1: it never overwrites the file.
+        assert_eq!(
+            classify_as(Some(VERSION_TWO), 1),
+            Load::NewerVersion {
+                raw: VERSION_TWO.into()
+            }
+        );
+        assert!(matches!(classify_as(Some(VERSION_TWO), 2), Load::Ok(_)));
+        let one = one_term_state().to_json();
+        assert!(matches!(classify_as(Some(&one), 1), Load::Ok(_)));
+    }
+
+    /// A file holding the progress of `kho` and an added word of that id,
+    /// which the deck now teaches, beside one the deck lacks.
+    fn shadowed() -> State {
+        let mut state = one_term_state();
+        state.progress[0].term = TermId("kho".into());
+        let mut word = added_word();
+        word.id = TermId("kho".into());
+        word.meaning.en = "the added word's sense".into();
+        state.added.push(word);
+        state.added.push(added_word());
+        state
+    }
+
+    #[test]
+    fn an_added_word_the_deck_now_teaches_is_shadowed_never_invalid() {
+        let text = shadowed().to_json();
+        let Load::Ok(state) = classify(Some(&text)) else {
+            panic!("the file reads");
+        };
+        let kho = TermId("kho".into());
+        assert_eq!(
+            state.added,
+            vec![added_word()],
+            "only the deck's term is dropped"
+        );
+        assert_eq!(
+            state.get(&kho),
+            shadowed().get(&kho),
+            "its progress is kept"
+        );
+        let served = state.term(crate::deck::deck(), &kho).unwrap();
+        assert_eq!(
+            Some(served),
+            crate::deck::deck().term(&kho),
+            "served by the deck"
+        );
+        // The next save has no trace of the shadowed word.
+        let written: serde_json::Value = serde_json::from_str(&state.to_json()).unwrap();
+        assert_eq!(written["added"].as_array().unwrap().len(), 1);
+        assert_eq!(written["added"][0]["id"], "sānuvajja");
+        // An import reads the same.
+        assert_eq!(validate_import(&text), Ok(state));
+    }
+
+    #[test]
+    fn a_file_whose_only_added_word_the_deck_teaches_is_written_back_as_version_one() {
+        // A version-2 file holding one added word, which the deck now
+        // teaches: read, the word is dropped and the next write is a file
+        // every build reads.
+        let mut state = one_term_state();
+        state.progress[0].term = TermId("kho".into());
+        let mut word = added_word();
+        word.id = TermId("kho".into());
+        state.added.push(word);
+        let text = state.to_json();
+        assert!(
+            text.contains("\"version\": 2"),
+            "it is written as 2: {text}"
+        );
+        let Load::Ok(read) = classify(Some(&text)) else {
+            panic!("the file reads");
+        };
+        assert_eq!(read.added.len(), 0);
+        assert!(read.to_json().contains("\"version\": 1"), "now 1");
+        let Ok(imported) = validate_import(&text) else {
+            panic!("an import reads");
+        };
+        assert!(imported.to_json().contains("\"version\": 1"), "imported: 1");
+    }
+
+    #[test]
+    fn the_same_added_word_twice_makes_the_file_invalid() {
+        let mut state = one_term_state();
+        state.added.push(added_word());
+        state.added.push(added_word());
+        let raw = state.to_json();
+        assert_eq!(classify(Some(&raw)), Load::Invalid { raw });
+        assert_eq!(
+            validate_import(&state.to_json()),
             Err(ImportError::DuplicateTerm)
         );
     }

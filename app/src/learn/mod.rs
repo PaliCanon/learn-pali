@@ -3,6 +3,7 @@
 //!
 //! - [`window`]: the Context facet's line, windowed around the blank.
 //! - [`words`]: parts of speech, form labels and dates in words.
+//! - [`adding`]: a word added to the practice, in or outside a run.
 //! - [`home_state`]: which of its states the home shows.
 //! - [`summary`]: what a finished session changed, counted in terms.
 //! - [`key`]: the card's presentation key and the grade keys' rules.
@@ -10,6 +11,7 @@
 //! - [`stages`]: the stages' names and counts.
 //! - [`translation`]: the example's translation to show, and its translator.
 
+pub(crate) mod adding;
 pub(crate) mod home_state;
 pub(crate) mod key;
 pub(crate) mod run;

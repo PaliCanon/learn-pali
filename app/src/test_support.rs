@@ -9,7 +9,7 @@
 )]
 
 use learn_core::date::Date;
-use learn_core::deck::TermId;
+use learn_core::deck::{Meaning, Pos, Term, TermId};
 use learn_core::facet::{Facet, FacetSet};
 use learn_core::progress::{Progress, State};
 use learn_core::session::Session;
@@ -42,6 +42,41 @@ pub(crate) fn progress_fixture() -> State {
         lapses: 0,
     });
     state
+}
+
+/// A word the learner added from a passage: `sānuvajja`, two facets
+/// (Meaning, Recall), at the rank an added word has.
+pub(crate) fn added_word() -> Term {
+    Term {
+        id: TermId("sānuvajja".into()),
+        lemma: "sānuvajja".into(),
+        pos: Pos("adj".into()),
+        meaning: Meaning {
+            en: "blameworthy".into(),
+            fr: None,
+            vi: None,
+            literal: None,
+        },
+        construction: None,
+        root: None,
+        example: None,
+        forms: Vec::new(),
+        rank: u32::MAX,
+    }
+}
+
+/// A state holding [`added_word`], started at `stage` and due on `due`.
+pub(crate) fn added_started(stage: Stage, due: Date) -> State {
+    let mut held = State::empty();
+    held.added.push(added_word());
+    held.progress.push(Progress {
+        term: added_word().id,
+        stage,
+        passed: FacetSet::empty(),
+        due,
+        lapses: 0,
+    });
+    held
 }
 
 /// The byte where `needle` starts; a panic showing the HTML otherwise.
@@ -214,7 +249,7 @@ impl ProgressStore for FakeStore {
             }
             Some(Outcome::Newer) => {
                 *self.0.load.borrow_mut() = Load::NewerVersion {
-                    raw: r#"{"version": 2}"#.into(),
+                    raw: r#"{"version": 3}"#.into(),
                 };
                 self.0
                     .status

@@ -64,10 +64,10 @@ pub fn review<R: BufRead, W: Write>(
     let mut shown = false;
     while let Some(question) = session.next().cloned() {
         shown = true;
-        let term = deck
-            .term(&question.term)
-            .ok_or_else(|| CliError::missing_term(&question.term))?;
         let state = session.snapshot();
+        let term = state
+            .term(deck, &question.term)
+            .ok_or_else(|| CliError::missing_term(&question.term))?;
         let progress = state
             .get(&question.term)
             .ok_or_else(|| CliError::missing_term(&question.term))?;
@@ -359,6 +359,32 @@ mod tests {
         )
         .unwrap();
         String::from_utf8(out).unwrap()
+    }
+
+    #[test]
+    fn an_added_word_of_the_state_is_reviewed_like_a_deck_term() {
+        let path = dir("added").join("state.json");
+        let mut state = started(&["gamma"]);
+        state.added.push(learn_core::deck::Term {
+            id: TermId("gamma".to_owned()),
+            lemma: "gamma".to_owned(),
+            pos: learn_core::deck::Pos("ind".to_owned()),
+            meaning: learn_core::deck::Meaning {
+                en: "an added sense".to_owned(),
+                fr: None,
+                vi: None,
+                literal: None,
+            },
+            construction: None,
+            root: None,
+            example: None,
+            forms: Vec::new(),
+            rank: u32::MAX,
+        });
+        let (result, out) = run_review(state, &typed(&["y"; 2]), &path);
+        let outcome = result.unwrap();
+        assert_eq!((outcome.answered, outcome.passed), (2, 2), "{out}");
+        assert!(out.contains("an added sense"), "{out}");
     }
 
     #[test]

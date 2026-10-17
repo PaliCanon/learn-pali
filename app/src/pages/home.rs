@@ -2672,6 +2672,7 @@ mod tests {
     fn state_of(progress: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: None,
             progress,
         }

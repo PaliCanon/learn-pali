@@ -59,14 +59,18 @@ pub(crate) fn home_state(load: &Load, deck: &Deck, today: Date) -> HomeState {
 /// The cards due on `today` for `state` and `deck` (A1: Σ over the due
 /// terms the deck knows of their facets not passed at their stage — the
 /// queue `Session::start` builds): a term is due when `due <= today`, its
-/// facets are `facets_of` less `effective_passed`; a term the deck does not
-/// know counts for nothing.
+/// facets are `facets_of` less `effective_passed`; a term neither the deck
+/// nor the state's added words know counts for nothing.
 pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
     state
         .progress
         .iter()
         .filter(|progress| progress.due <= today)
-        .filter_map(|progress| deck.term(&progress.term).map(|term| (progress, term)))
+        .filter_map(|progress| {
+            state
+                .term(deck, &progress.term)
+                .map(|term| (progress, term))
+        })
         .map(|(progress, term)| {
             facets_of(term)
                 .difference(&State::effective_passed(progress, term))
@@ -75,19 +79,16 @@ pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
         .sum()
 }
 
-/// The deck's terms not started yet in `load` (all of them when it holds
-/// no state; 0 when it is Broken: nothing may be added). Bounds the new
+/// The terms not started yet in `load`, the deck's and the added words (all
+/// the deck's when it holds no state; 0 when it is Broken: nothing may be
+/// added). Bounds the new
 /// terms control and disables the home's CTA at 0 (Q4; ruled 3698). A term
 /// in the state that the deck does not know uses up nothing.
 pub(crate) fn new_left(load: &Load, deck: &Deck) -> usize {
     match load {
         Load::Empty => deck.terms.len(),
         Load::Invalid { .. } | Load::NewerVersion { .. } | Load::Unreadable(_) => 0,
-        Load::Ok(state) => deck
-            .terms
-            .iter()
-            .filter(|term| state.get(&term.id).is_none())
-            .count(),
+        Load::Ok(state) => state.new_terms(deck).len(),
     }
 }
 
@@ -121,6 +122,7 @@ mod tests {
     fn state_of(entries: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: Some(today()),
             progress: entries,
         }
@@ -237,7 +239,7 @@ mod tests {
             raw: "{".to_string(),
         };
         let newer = Load::NewerVersion {
-            raw: "{\"version\":2}".to_string(),
+            raw: "{\"version\":3}".to_string(),
         };
         assert_eq!(
             home_state(&invalid, deck(), today()),
@@ -299,5 +301,29 @@ mod tests {
         let newer = Load::NewerVersion { raw: String::new() };
         assert_eq!(new_left(&invalid, deck()), 0);
         assert_eq!(new_left(&newer, deck()), 0);
+    }
+
+    #[test]
+    fn a_started_added_word_is_due_and_makes_the_home_due() {
+        let state = crate::test_support::added_started(Stage::Day, today());
+        assert_eq!(due_cards(deck(), &state, today()), 2);
+        assert_eq!(
+            home_state(&Load::Ok(state), deck(), today()),
+            HomeState::Due(2)
+        );
+        let later = crate::test_support::added_started(Stage::Week, today() + 3);
+        assert_eq!(due_cards(deck(), &later, today()), 0);
+    }
+
+    #[test]
+    fn the_added_words_not_started_are_new_terms_too() {
+        let mut state = state_of(vec![]);
+        state.added.push(crate::test_support::added_word());
+        assert_eq!(
+            new_left(&Load::Ok(state.clone()), deck()),
+            deck().terms.len() + 1
+        );
+        state.progress.push(entry("sānuvajja", Stage::Day, today()));
+        assert_eq!(new_left(&Load::Ok(state), deck()), deck().terms.len());
     }
 }

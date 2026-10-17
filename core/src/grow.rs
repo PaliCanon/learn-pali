@@ -5,38 +5,35 @@
 //! learner has nothing left to do: only when no known term is due and every
 //! deck term is already in the state.
 
-use std::collections::HashSet;
-
-use crate::deck::{Term, TermId};
-use crate::progress::Progress;
-use crate::session::{Session, unpassed_questions};
+use crate::progress::{Progress, State, find_term};
+use crate::session::{Question, Session, unpassed_questions};
 use crate::stage::Stage;
 
 impl Session<'_> {
     /// Starts up to `n` new terms: the next ones by `rank` that are not in
-    /// the state, each as a [`crate::progress::Progress::new`] (stage Day,
+    /// the state, then the added words in the order they were added
+    /// ([`State::new_terms`]), each as a [`crate::progress::Progress::new`] (stage Day,
     /// due today) appended to the state, their facets appended to the end of
     /// the queue. Returns how many were started: fewer than `n` when the
     /// deck has fewer left, 0 when it is exhausted.
     pub fn request_new(&mut self, n: usize) -> usize {
-        let deck = self.deck;
-        let fresh: Vec<&Term> = {
-            let known: HashSet<&TermId> = self.state.progress.iter().map(|p| &p.term).collect();
-            let mut fresh: Vec<&Term> = deck
-                .terms
-                .iter()
-                .filter(|term| !known.contains(&term.id))
-                .collect();
-            fresh.sort_by_key(|term| term.rank);
-            fresh.truncate(n);
-            fresh
-        };
-        for term in &fresh {
-            let progress = Progress::new(term.id.clone(), self.today);
-            self.queue.extend(unpassed_questions(term, &progress));
+        let (today, deck) = (self.today, self.deck);
+        let mut fresh = self.state.new_terms(deck);
+        fresh.truncate(n);
+        let started: Vec<(Progress, Vec<Question>)> = fresh
+            .into_iter()
+            .map(|term| {
+                let progress = Progress::new(term.id.clone(), today);
+                let questions = unpassed_questions(term, &progress);
+                (progress, questions)
+            })
+            .collect();
+        let count = started.len();
+        for (progress, questions) in started {
+            self.queue.extend(questions);
             self.state.progress.push(progress);
         }
-        fresh.len()
+        count
     }
 
     /// Brings long-stage terms forward when nothing else is to do.
@@ -55,7 +52,7 @@ impl Session<'_> {
         let today = self.today;
         let mut picked: Vec<(usize, u32)> = Vec::new();
         for (index, progress) in self.state.progress.iter().enumerate() {
-            if let Some(term) = deck.term(&progress.term)
+            if let Some(term) = self.state.term(deck, &progress.term)
                 && progress.stage >= Stage::Month
             {
                 picked.push((index, term.rank));
@@ -64,28 +61,27 @@ impl Session<'_> {
         picked.sort_by_key(|(index, rank)| (self.state.progress[*index].due, *rank));
         picked.truncate(k);
         for (index, _) in &picked {
-            let progress = &mut self.state.progress[*index];
+            let State {
+                progress, added, ..
+            } = &mut self.state;
+            let progress = &mut progress[*index];
             progress.due = today;
-            if let Some(term) = deck.term(&progress.term) {
+            if let Some(term) = find_term(deck, added, &progress.term) {
                 self.queue.extend(unpassed_questions(term, progress));
             }
         }
         picked.len()
     }
 
-    /// True when nothing is queued, no known term is due and every deck
-    /// term has been started.
+    /// True when nothing is queued, no known term is due and every new term
+    /// has been started: the deck's, and the added words an older build
+    /// left unstarted too.
     fn may_advance(&self) -> bool {
         let deck = self.deck;
-        let nothing_due = !self
-            .state
-            .progress
-            .iter()
-            .any(|progress| progress.due <= self.today && deck.term(&progress.term).is_some());
-        let all_started = deck
-            .terms
-            .iter()
-            .all(|term| self.state.get(&term.id).is_some());
+        let nothing_due = !self.state.progress.iter().any(|progress| {
+            progress.due <= self.today && self.state.term(deck, &progress.term).is_some()
+        });
+        let all_started = self.state.new_terms(deck).is_empty();
         self.queue.is_empty() && nothing_due && all_started
     }
 }
@@ -120,6 +116,7 @@ mod tests {
     fn state_of(progress: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: None,
             progress,
         }

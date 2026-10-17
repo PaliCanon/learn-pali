@@ -1,5 +1,10 @@
 {
+  "add_refused_newer": "Tiến trình của bạn được lưu bởi một phiên bản mới hơn. Hãy cập nhật để thêm từ.",
+  "add_refused_there": "Đã có trong phần luyện tập của bạn.",
+  "add_refused_unreadable": "Tiến trình của bạn chưa thể đọc hoặc lưu lúc này.",
+  "add_refused_unusable": "Tiến trình của bạn chưa thể nhận từ này.",
   "add_terms": "Thuật ngữ mới",
+  "add_word": "Thêm vào luyện tập",
   "back_home": "Về trang chủ",
   "broken_download": "Tải bản sao gốc",
   "broken_import_hint": "Hoặc nhập một bản sao trong Cài đặt.",
@@ -117,5 +122,6 @@
   "sync_sign_out": "Đăng xuất",
   "sync_syncing": "Đang đồng bộ…",
   "unit_cards": "thẻ",
+  "word_added": "Đã thêm",
   "words_more": "+ {{ count }} nữa"
 }

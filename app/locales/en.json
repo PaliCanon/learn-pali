@@ -1,5 +1,10 @@
 {
+  "add_refused_newer": "Your progress was saved by a newer version. Update to add words.",
+  "add_refused_there": "Already in your practice.",
+  "add_refused_unreadable": "Your progress cannot be read or saved now.",
+  "add_refused_unusable": "Your progress cannot take it now.",
   "add_terms": "New terms",
+  "add_word": "Add to practice",
   "back_home": "Back home",
   "broken_download": "Download the raw copy",
   "broken_import_hint": "Or import a copy in Settings.",
@@ -117,5 +122,6 @@
   "sync_sign_out": "Sign out",
   "sync_syncing": "Syncing…",
   "unit_cards": "cards",
+  "word_added": "Added",
   "words_more": "+ {{ count }} more"
 }

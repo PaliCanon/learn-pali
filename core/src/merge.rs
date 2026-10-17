@@ -17,15 +17,20 @@
 //! advance undone (with its partial passes) by the next merge. `last_today` moves every device's day forward to the latest one
 //! seen, as an import does.
 //!
+//! The learner's **added words** ([`State::added`]) are unioned by id; the
+//! same id on both sides keeps the lesser serialised term, whole, so the join
+//! stays commutative, associative and idempotent without a clock. A word is
+//! never removed (a removal would need tombstones: its own task).
+//!
 //! The order of the result is `b`'s terms, then `a`'s other terms in `a`'s
 //! order: merging a state into itself, or into a merge it is already part
 //! of, gives the very same state ([`State`] equality is ordered).
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::date::Date;
-use crate::deck::TermId;
+use crate::deck::{Term, TermId};
 use crate::progress::{Progress, State};
 use crate::stage::Stage;
 
@@ -55,9 +60,34 @@ pub fn merge(a: &State, b: &State) -> State {
     );
     State {
         version: State::VERSION,
+        added: merge_added(&a.added, &b.added),
         last_today: a.last_today.max(b.last_today),
         progress,
     }
+}
+
+/// The added words of both sides, unioned by id, in `b`'s order then `a`'s
+/// other words. The same id on both sides keeps the **lesser serialised
+/// term**, whole: no clock, and the join stays commutative, associative and
+/// idempotent.
+fn merge_added(a: &[Term], b: &[Term]) -> Vec<Term> {
+    let ours: HashMap<&TermId, &Term> = a.iter().map(|term| (&term.id, term)).collect();
+    let theirs: HashSet<&TermId> = b.iter().map(|term| &term.id).collect();
+    let mut added: Vec<Term> = b
+        .iter()
+        .map(|term| match ours.get(&term.id) {
+            Some(mine) => lesser(mine, term).clone(),
+            None => term.clone(),
+        })
+        .collect();
+    added.extend(a.iter().filter(|term| !theirs.contains(&term.id)).cloned());
+    added
+}
+
+/// The one of two terms whose JSON text is the lesser (the first on a tie).
+fn lesser<'t>(a: &'t Term, b: &'t Term) -> &'t Term {
+    let text = |term: &Term| serde_json::to_string(term).expect("a term always serialises");
+    if text(a) <= text(b) { a } else { b }
 }
 
 /// The join of two entries of one term: the greater [`key`] wins whole; an
@@ -76,6 +106,8 @@ fn join(a: &Progress, b: &Progress) -> Progress {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::deck::Term;
+    use crate::deck::samples::indeclinable;
     use crate::facet::Facet;
 
     fn day(days: u32) -> Date {
@@ -95,6 +127,7 @@ mod tests {
     fn state(last: Option<u32>, progress: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: last.map(day),
             progress,
         }
@@ -102,6 +135,22 @@ mod tests {
 
     fn terms(state: &State) -> Vec<&str> {
         state.progress.iter().map(|p| p.term.0.as_str()).collect()
+    }
+
+    /// An added word `id` whose English sense is `sense`.
+    fn word(id: &str, sense: &str) -> Term {
+        let mut term = indeclinable(id, u32::MAX);
+        term.meaning.en = sense.to_string();
+        term
+    }
+
+    fn with_added(mut state: State, added: Vec<Term>) -> State {
+        state.added = added;
+        state
+    }
+
+    fn added_ids(state: &State) -> Vec<&str> {
+        state.added.iter().map(|t| t.id.0.as_str()).collect()
     }
 
     #[test]
@@ -190,6 +239,41 @@ mod tests {
     }
 
     #[test]
+    fn the_added_words_are_the_union_of_both_sides_in_the_progress_order() {
+        let a = with_added(
+            State::empty(),
+            vec![word("p", "1"), word("q", "1"), word("r", "1")],
+        );
+        let b = with_added(State::empty(), vec![word("r", "1"), word("z", "1")]);
+        let merged = merge(&a, &b);
+        assert_eq!(added_ids(&merged), vec!["r", "z", "p", "q"]);
+        assert_eq!(merge(&a, &State::empty()), a);
+        assert_eq!(merge(&State::empty(), &a), a);
+    }
+
+    #[test]
+    fn the_same_word_on_both_sides_keeps_the_lesser_serialised_term_whole() {
+        let ours = with_added(State::empty(), vec![word("x", "b sense")]);
+        let theirs = with_added(State::empty(), vec![word("x", "a sense")]);
+        for merged in [merge(&ours, &theirs), merge(&theirs, &ours)] {
+            assert_eq!(merged.added, vec![word("x", "a sense")]);
+        }
+    }
+
+    #[test]
+    fn a_merge_holding_a_word_is_written_as_version_two() {
+        let a = with_added(State::empty(), vec![word("x", "1")]);
+        let merged = merge(&a, &State::empty());
+        assert_eq!(merged.version, State::VERSION);
+        assert!(merged.to_json().contains("\"version\": 2"));
+        assert!(
+            merge(&State::empty(), &State::empty())
+                .to_json()
+                .contains("\"version\": 1")
+        );
+    }
+
+    #[test]
     fn merging_with_nothing_changes_nothing() {
         let a = state(
             Some(2),
@@ -253,12 +337,27 @@ mod tests {
             0 => None,
             n => Some(u32::try_from(n).unwrap()),
         };
-        state(last, progress)
+        // Three possible words, two senses each: the same id on both sides
+        // often differs.
+        let mut added = Vec::new();
+        for id in ["u", "v", "w"] {
+            if rng.below(2) == 0 {
+                added.push(word(
+                    id,
+                    ["north", "south"][usize::try_from(rng.below(2)).unwrap()],
+                ));
+            }
+        }
+        if rng.below(2) == 0 {
+            added.reverse();
+        }
+        with_added(state(last, progress), added)
     }
 
     /// The state with its terms in a fixed order: equality as a map.
     fn canonical(mut state: State) -> State {
         state.progress.sort_by(|x, y| x.term.cmp(&y.term));
+        state.added.sort_by(|x, y| x.id.cmp(&y.id));
         state
     }
 
@@ -332,6 +431,20 @@ mod tests {
                     .progress
                     .iter()
                     .all(|p| a.get(&p.term).is_some() || b.get(&p.term).is_some())
+            );
+            assert!(
+                merged
+                    .added
+                    .iter()
+                    .all(|t| a.added.contains(t) || b.added.contains(t)),
+                "{a:?} {b:?}"
+            );
+            assert!(
+                a.added
+                    .iter()
+                    .chain(&b.added)
+                    .all(|t| merged.added.iter().any(|m| m.id == t.id)),
+                "{a:?} {b:?}"
             );
             assert_eq!(merged.last_today, a.last_today.max(b.last_today));
             assert!(State::from_json(&merged.to_json()).is_ok(), "no term twice");

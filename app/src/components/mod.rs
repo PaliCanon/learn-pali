@@ -3,6 +3,7 @@
 //! (export, import, the sync) and the strip that says the progress is not
 //! saved.
 
+pub mod add_word;
 pub mod data_block;
 pub mod new_terms;
 pub mod passage_badge;

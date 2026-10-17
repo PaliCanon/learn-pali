@@ -22,7 +22,7 @@ use palicanon_ui_lib::{
 };
 
 use crate::catalogue::{Strings, strings};
-use crate::deck::deck;
+use crate::deck::{deck, pinned};
 use crate::learn::stages::stage_label;
 use crate::learn::words::date_words;
 
@@ -99,7 +99,7 @@ pub(crate) fn StageTerms(
 /// A known term and where it stands, ready to list.
 #[derive(Clone)]
 pub(crate) struct Row {
-    /// The deck's term.
+    /// The term: the deck's, or an added word.
     term: &'static Term,
     /// Its stage.
     stage: Stage,
@@ -121,8 +121,8 @@ pub(crate) fn known_rows(state: &State, only: Option<Stage>) -> Vec<Row> {
         .iter()
         .filter(|progress| only.is_none_or(|only| progress.stage == only))
         .filter_map(|progress| {
-            deck().term(&progress.term).map(|term| Row {
-                term,
+            state.term(deck(), &progress.term).map(|term| Row {
+                term: pinned(term),
                 stage: progress.stage,
                 due: progress.due,
                 lapses: progress.lapses,
@@ -147,7 +147,7 @@ pub(crate) fn orphan_rows(state: &State) -> Vec<(String, Stage)> {
     state
         .progress
         .iter()
-        .filter(|progress| deck().term(&progress.term).is_none())
+        .filter(|progress| state.term(deck(), &progress.term).is_none())
         .map(|progress| (progress.term.0.clone(), progress.stage))
         .collect()
 }
@@ -915,5 +915,18 @@ mod tests {
         for text in ["Hằng tuần", "ngày 12 tháng 10 năm 2026"] {
             assert!(html.contains(text), "{text}: {html}");
         }
+    }
+
+    #[test]
+    fn a_started_added_word_is_a_known_row_not_an_orphan() {
+        use crate::test_support::{added_started, today};
+        let state = added_started(Stage::Week, today() + 2);
+        let rows = known_rows(&state, None);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].term.lemma, "sānuvajja");
+        assert_eq!(rows[0].facets.len(), 2);
+        assert_eq!(known_rows(&state, Some(Stage::Day)).len(), 0);
+        assert_eq!(orphan_rows(&state), Vec::<(String, Stage)>::new());
+        assert_eq!(next_review(&state), Some(today() + 2));
     }
 }

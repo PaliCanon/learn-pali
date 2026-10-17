@@ -41,7 +41,7 @@ use std::fmt;
 use crate::date::Date;
 use crate::deck::{Deck, Term, TermId};
 use crate::facet::{Facet, FacetSet, facets_of};
-use crate::progress::{Progress, State};
+use crate::progress::{Progress, State, find_term};
 use crate::shuffle::shuffle;
 use crate::stage::Stage;
 
@@ -204,7 +204,7 @@ impl<'d> Session<'d> {
             .iter()
             .filter(|id| seen.insert(*id))
             .filter(|id| state.get(id).is_some())
-            .filter_map(|id| deck.term(id))
+            .filter_map(|id| state.term(deck, id))
             .flat_map(|term| {
                 facets_of(term)
                     .iter()
@@ -282,6 +282,12 @@ impl<'d> Session<'d> {
         Ok(())
     }
 
+    /// The term with this id as the session sees it: the deck's, else an
+    /// added word of the state ([`State::term`]).
+    pub fn term(&self, id: &TermId) -> Option<&Term> {
+        self.state.term(self.deck, id)
+    }
+
     /// The day of this session.
     pub fn today(&self) -> Date {
         self.today
@@ -306,13 +312,12 @@ impl<'d> Session<'d> {
     /// Applies a queue question's answer to the state.
     fn settle(&mut self, question: &Question, answer: Answer) -> Result<(), SessionError> {
         let today = self.today;
-        let term = self
-            .deck
-            .term(&question.term)
+        let State {
+            progress, added, ..
+        } = &mut self.state;
+        let term = find_term(self.deck, added, &question.term)
             .ok_or_else(|| SessionError::UnknownTerm(question.term.clone()))?;
-        let progress = self
-            .state
-            .progress
+        let progress = progress
             .iter_mut()
             .find(|entry| entry.term == question.term)
             .ok_or_else(|| SessionError::UnknownTerm(question.term.clone()))?;
@@ -340,7 +345,11 @@ pub fn nearest(state: &State, deck: &Deck, only: Option<Stage>, n: usize) -> Vec
         .progress
         .iter()
         .filter(|progress| only.is_none_or(|stage| progress.stage == stage))
-        .filter_map(|progress| deck.term(&progress.term).map(|term| (progress, term)))
+        .filter_map(|progress| {
+            state
+                .term(deck, &progress.term)
+                .map(|term| (progress, term))
+        })
         .collect();
     started.sort_by_key(|(progress, term)| (progress.due, term.rank));
     started
@@ -380,9 +389,12 @@ fn fail(progress: &mut Progress, today: Date) {
 /// true when it promoted at least one.
 fn settle_complete(deck: &Deck, state: &mut State, today: Date) -> bool {
     let mut changed = false;
-    for progress in &mut state.progress {
+    let State {
+        progress, added, ..
+    } = state;
+    for progress in progress {
         if progress.due <= today
-            && let Some(term) = deck.term(&progress.term)
+            && let Some(term) = find_term(deck, added, &progress.term)
             && unpassed_questions(term, progress).is_empty()
         {
             promote(progress, today);
@@ -399,7 +411,11 @@ fn due_queue(deck: &Deck, state: &State, today: Date) -> VecDeque<Question> {
         .progress
         .iter()
         .filter(|progress| progress.due <= today)
-        .filter_map(|progress| deck.term(&progress.term).map(|term| (progress, term)))
+        .filter_map(|progress| {
+            state
+                .term(deck, &progress.term)
+                .map(|term| (progress, term))
+        })
         .collect();
     due.sort_by_key(|(progress, term)| (progress.due, term.rank));
     due.into_iter()
@@ -449,6 +465,7 @@ mod tests {
     fn state_of(progress: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: None,
             progress,
         }

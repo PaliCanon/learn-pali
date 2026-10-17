@@ -138,6 +138,7 @@ mod tests {
         };
         let state = State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: None,
             progress: vec![progress],
         };

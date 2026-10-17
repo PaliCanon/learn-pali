@@ -27,7 +27,7 @@ pub(crate) struct Summary {
 pub(crate) fn summary(before: &State, after: &State, deck: &Deck) -> Summary {
     let mut summary = Summary::default();
     for now in &after.progress {
-        if deck.term(&now.term).is_none() {
+        if after.term(deck, &now.term).is_none() {
             continue;
         }
         let (stage, lapses) = before
@@ -73,6 +73,7 @@ mod tests {
     fn state_of(last_today: Option<Date>, entries: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today,
             progress: entries,
         }
@@ -238,5 +239,22 @@ mod tests {
         );
         let summary = summary(&started(), &after, deck());
         assert_eq!(summary.next_due, Some(today() + 2));
+    }
+
+    #[test]
+    fn an_added_word_that_moved_up_is_counted_like_a_deck_term() {
+        let before = crate::test_support::added_started(Stage::Day, today());
+        let mut after = before.clone();
+        after.progress[0].stage = Stage::Week;
+        after.progress[0].due = today() + 7;
+        after.last_today = Some(today());
+        assert_eq!(
+            summary(&before, &after, deck()),
+            Summary {
+                moved_up: 1,
+                back_to_day: 0,
+                next_due: Some(today() + 7),
+            }
+        );
     }
 }

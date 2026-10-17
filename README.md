@@ -19,7 +19,7 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `app/` | Crate `learn_pali`, the site: Leptos SSR + hydrate on ui-lib. |
 | `app/src/` | The site's frame (app.rs: the document, the rail, the footer in app/site_footer.rs), entry point (main.rs), origin guard (origin.rs); the Learn fragment (fragment.rs: LearnRoutes, LearnProvider, LearnSettings), the host's plug-ins (backend.rs: the ProgressStore and FileTransfer traits; web.rs: the site's localStorage store and file transfer), the progress decisions (store.rs: Load, classify, validate_import), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
 | `app/src/pages/` | Page views, the home at `/`. |
-| `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list, the SuttaCentral badge of a passage (passage_badge.rs). |
+| `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list, the SuttaCentral badge of a passage (passage_badge.rs), 'Add to practice' under each entry of a passage's word panel (add_word.rs). |
 | `app/src/learn/` | Learning session logic: home state, session run, Leitner stages, card summary, word lookups, the Context front's window around the blank, which translation shows. |
 | `app/locales/` | UI translations: en.json, fr.json, vi.json. |
 | `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |

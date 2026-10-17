@@ -9,12 +9,13 @@ use crate::session::Session;
 /// What [`Session::stats`] reports.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Stats {
-    /// Started terms known to the deck, per stage, indexed by
+    /// Started terms known to the deck or added, per stage, indexed by
     /// [`crate::stage::Stage::index`] (Day first, Year last).
     pub per_stage: [usize; 6],
     /// Started terms known to the deck with `due <= today`.
     pub due_today: usize,
-    /// Deck terms not started yet (what `request_new` can still give).
+    /// Terms not started yet, deck terms and added words (what
+    /// `request_new` can still give).
     pub new_left: usize,
     /// The lapses of the started terms known to the deck, summed.
     pub lapses_total: u32,
@@ -27,7 +28,7 @@ impl Session<'_> {
     pub fn stats(&self) -> Stats {
         let mut stats = Stats::default();
         for progress in &self.state.progress {
-            if self.deck.term(&progress.term).is_none() {
+            if self.state.term(self.deck, &progress.term).is_none() {
                 stats.orphans += 1;
                 continue;
             }
@@ -37,7 +38,7 @@ impl Session<'_> {
                 stats.due_today += 1;
             }
         }
-        stats.new_left = self.deck.terms.len() - (self.state.progress.len() - stats.orphans);
+        stats.new_left = self.state.new_terms(self.deck).len();
         stats
     }
 }
@@ -68,6 +69,7 @@ mod tests {
     fn state_of(progress: Vec<Progress>) -> State {
         State {
             version: State::VERSION,
+            added: Vec::new(),
             last_today: None,
             progress,
         }

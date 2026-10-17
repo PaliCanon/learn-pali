@@ -40,12 +40,13 @@ use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::Language;
 use palicanon_ui_lib::{
-    Button, Dialog, Disclosed, Disclosure, Pali, PaliSize, PaliText, RevealCard, SessionHeader,
-    Size, Token, Variant, WordEntry, language_signal,
+    Button, Dialog, Disclosed, Disclosure, EntryAction, Pali, PaliSize, PaliText, RevealCard,
+    SessionHeader, Size, Token, Variant, WordEntry, language_signal,
 };
 
 use crate::backend::Backend;
 use crate::catalogue::Locale;
+use crate::components::add_word::entry_action;
 use crate::components::new_terms::NewTerms;
 use crate::components::passage_badge::passage_badge;
 use crate::deck::deck;
@@ -236,6 +237,8 @@ pub fn ReviewView(
     on_home: Callback<()>,
 ) -> impl IntoView {
     let backend = Backend::current();
+    // The example words' 'Add to practice' adds through this run.
+    provide_context(run);
     let stop = Disclosed::new("learn-review-stop", RwSignal::new(false));
     let revealed = StoredValue::new(None::<Signal<bool>>);
     Effect::new(move |_| {
@@ -610,13 +613,15 @@ fn forms_front(card: Card, language: Language) -> impl IntoView {
 /// (`Dhp 127 · <sutta>`).
 fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl IntoView {
     let example = card.term.example.as_ref();
+    let locale = Locale::from(language);
+    let action = example.and_then(|example| entry_action(example.clone(), locale));
     let line = example
         .and_then(|example| example.blank.as_ref())
         .map(|blank| {
             view! {
                 <p class="text-lg leading-8 text-ink">
                     <Pali layout="whitespace-pre-line">
-                        {context_line(blank, revealed, Locale::from(language))}
+                        {context_line(blank, revealed, locale, action)}
                     </Pali>
                 </p>
             }
@@ -656,14 +661,20 @@ fn translation_view(example: &Example, language: Language) -> Option<impl IntoVi
 /// The example's line, windowed ([`context_window`]), as runs of text and
 /// its blank(s): `___` until `revealed`, then the answer in a gold `<mark>`
 /// in the same place, and the words of the runs open their meaning
-/// ([`line_text`]); the marked answer is never a button.
-fn context_line(blank: &Blank, revealed: Signal<bool>, locale: Locale) -> impl IntoView + use<> {
+/// ([`line_text`], each word's panel offering `action`); the marked answer
+/// is never a button.
+fn context_line(
+    blank: &Blank,
+    revealed: Signal<bool>,
+    locale: Locale,
+    action: Option<EntryAction>,
+) -> impl IntoView + use<> {
     let answer = blank.answer.clone();
     let mut ids = LINE_WORDS.into_iter();
     context_window(blank, MAX_CHARS)
         .into_iter()
         .map(|segment| match segment {
-            Segment::Text(text) => line_text(ids.next(), text, revealed, locale),
+            Segment::Text(text) => line_text(ids.next(), text, revealed, locale, action),
             Segment::Blank => {
                 let answer = answer.clone();
                 (move || blank_view(revealed.get(), answer.clone())).into_any()
@@ -680,13 +691,14 @@ fn line_text(
     text: String,
     revealed: Signal<bool>,
     locale: Locale,
+    action: Option<EntryAction>,
 ) -> AnyView {
     let Some(id) = id else {
         return text.into_any();
     };
     (move || {
         if revealed.get() {
-            example_words(id, text.clone(), locale).into_any()
+            example_words(id, text.clone(), locale, action).into_any()
         } else {
             text.clone().into_any()
         }
@@ -827,8 +839,9 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
         captioned(td_string!(locale, reveal_root), body)
     });
     let example = term.example.as_ref().filter(|_| !context).map(|example| {
+        let action = entry_action(example.clone(), locale);
         let body = view! {
-            <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale)}</p>
+            <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale, action)}</p>
             {translation_view(example, language)}
             {passage_badge(example, language).map(|badge| view! { <p class="mt-2">{badge}</p> })}
         };
@@ -844,18 +857,39 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
 
 /// An example passage whose words open their meaning: a [`PaliText`]
 /// over the deck's words ([`passage_entries`]), its "+ n more" line in the
-/// page's language. `id` names the panel, unique on the page.
-fn example_words(id: &'static str, text: String, locale: Locale) -> impl IntoView + use<> {
+/// page's language, each entry's panel offering `action` when given
+/// ([`entry_action`]). `id` names the panel, unique on the page.
+fn example_words(
+    id: &'static str,
+    text: String,
+    locale: Locale,
+    action: Option<EntryAction>,
+) -> impl IntoView + use<> {
     let entries = passage_entries(&text);
     let more_label = Callback::new(move |count: usize| more_words(locale, count));
-    view! {
-        <PaliText
-            id=id
-            text=text
-            entries=entries
-            more_label=more_label
-            layout="whitespace-pre-line"
-        />
+    // The prop is optional, not an `Option`: two arms, the same look.
+    match action {
+        Some(action) => view! {
+            <PaliText
+                id=id
+                text=text
+                entries=entries
+                more_label=more_label
+                entry_action=action
+                layout="whitespace-pre-line"
+            />
+        }
+        .into_any(),
+        None => view! {
+            <PaliText
+                id=id
+                text=text
+                entries=entries
+                more_label=more_label
+                layout="whitespace-pre-line"
+            />
+        }
+        .into_any(),
     }
 }
 
@@ -1976,7 +2010,7 @@ pub(crate) mod tests {
         let html = Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(Language::En);
             let text = "Alaṁ, zzzq sampādethā’ti.".to_string();
-            view! { {example_words("pc-test", text, Locale::from(Language::En))} }.to_html()
+            view! { {example_words("pc-test", text, Locale::from(Language::En), None)} }.to_html()
         });
         assert!(html.contains(">Alaṁ</button>"), "{html}");
         assert!(html.contains(">sampādethā’ti</button>"), "{html}");

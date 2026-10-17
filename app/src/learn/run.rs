@@ -2,19 +2,30 @@
 //! question shown, its presentation key, the grade saved before the next
 //! question, the header's counts and the summary at the end.
 
-use learn_core::deck::{Form, Term};
+use learn_core::added::AddError;
+use learn_core::deck::{Form, Term, TermId};
 use learn_core::facet::Facet;
 use learn_core::forms::forms_question;
 use learn_core::progress::State;
 use learn_core::session::{Answer, Question, Session};
 
-use crate::deck::deck;
+use crate::deck::{deck, pinned};
 use crate::learn::home_state::{due_cards, new_left};
 use crate::learn::key::presentation_key;
 use crate::learn::summary::{Summary, summary};
 use crate::store::Load;
 
-/// What the card of the current question shows, resolved on the deck.
+/// Why [`ReviewRun::start_word`] did not add a word; the run is as it was.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NotAdded {
+    /// The word is already started.
+    Already(AddError),
+    /// The store did not take the save.
+    NotSaved,
+}
+
+/// What the card of the current question shows, resolved on the deck or
+/// the added words.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Card {
     /// The facet asked.
@@ -118,7 +129,7 @@ impl ReviewRun {
     /// The card of the current question, `None` when nothing is asked.
     pub(crate) fn card(&self) -> Option<Card> {
         let question = self.current.as_ref()?;
-        let term = deck().term(&question.term)?;
+        let term = pinned(self.session.term(&question.term)?);
         let form = (question.facet == Facet::Forms)
             .then(|| {
                 let state = self.session.snapshot();
@@ -151,7 +162,38 @@ impl ReviewRun {
         added
     }
 
-    /// The deck's terms not started yet: what 'Add new terms' may add.
+    /// Adds `term` to the practice through the session and starts it, as
+    /// [`ReviewRun::add_new`] starts a deck term (due today, its questions
+    /// queued), so the next answer's snapshot keeps it, and gives the state
+    /// to `save` at once (not called when the word is refused). `save` says
+    /// whether the store took it; when it did not, the word is taken back
+    /// and not counted.
+    ///
+    /// # Errors
+    /// [`NotAdded`]: the word is already started, or the store did not take
+    /// the save.
+    pub(crate) fn start_word(
+        &mut self,
+        term: Term,
+        save: impl FnOnce(&State) -> bool,
+    ) -> Result<(), NotAdded> {
+        let id = term.id.clone();
+        self.session.start_word(term).map_err(NotAdded::Already)?;
+        if save(&self.session.snapshot()) {
+            Ok(())
+        } else {
+            self.session.withdraw_word(&id);
+            Err(NotAdded::NotSaved)
+        }
+    }
+
+    /// True when `id` is started: it has progress, deck term or added word.
+    pub(crate) fn started(&self, id: &TermId) -> bool {
+        self.session.is_started(id)
+    }
+
+    /// The terms not started yet, the deck's and the added words: what 'Add
+    /// new terms' may add.
     pub(crate) fn new_left(&self) -> usize {
         new_left(&Load::Ok(self.session.snapshot()), deck())
     }
@@ -191,7 +233,7 @@ mod tests {
     use learn_core::session::{Answer, Session};
     use learn_core::stage::Stage;
 
-    use super::ReviewRun;
+    use super::{NotAdded, ReviewRun};
     use crate::deck::deck;
 
     /// `(term, facet, practice)`.
@@ -458,5 +500,202 @@ mod tests {
         let saved = Cell::new(false);
         assert_eq!(run.add_new(5, |_| saved.set(true)), 0);
         assert!(!saved.get());
+    }
+
+    #[test]
+    fn a_word_added_in_the_run_is_saved_started_and_kept_by_the_next_answer() {
+        let mut run = started(1);
+        let saved: RefCell<Vec<State>> = RefCell::new(Vec::new());
+        let word = crate::test_support::added_word();
+        let (left, total) = (run.new_left(), run.total());
+        run.start_word(word.clone(), |state| {
+            saved.borrow_mut().push(state.clone());
+            true
+        })
+        .unwrap();
+        {
+            let saved = saved.borrow();
+            assert_eq!(saved.len(), 1, "saved at once");
+            assert_eq!(saved[0].added, vec![word.clone()]);
+            let progress = saved[0].get(&word.id).expect("started");
+            assert_eq!((progress.stage, progress.due), (Stage::Day, today()));
+        }
+        assert!(run.started(&word.id));
+        assert_eq!(run.new_left(), left, "it is not a new term any more");
+        assert_eq!(run.total(), total + 2, "its two facets are due today");
+        run.grade(Answer::Pass, |state| saved.borrow_mut().push(state.clone()));
+        let saved = saved.into_inner();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[1].added, vec![word.clone()], "the snapshot keeps it");
+        assert!(saved[1].get(&word.id).is_some(), "and keeps it started");
+    }
+
+    #[test]
+    fn a_deck_term_not_started_is_started_by_the_run_and_adds_nothing() {
+        let mut run = started(1);
+        let mut deck_term = crate::test_support::added_word();
+        deck_term.id = TermId("rūpa 1".into());
+        assert!(!run.started(&deck_term.id), "rūpa 1 is not started yet");
+        let left = run.new_left();
+        let saved: RefCell<Vec<State>> = RefCell::new(Vec::new());
+        run.start_word(deck_term.clone(), |state| {
+            saved.borrow_mut().push(state.clone());
+            true
+        })
+        .unwrap();
+        let saved = saved.into_inner();
+        assert_eq!(saved[0].added.len(), 0, "the deck teaches it");
+        assert!(saved[0].get(&deck_term.id).is_some());
+        assert!(run.started(&deck_term.id));
+        assert_eq!(run.new_left(), left - 1);
+    }
+
+    #[test]
+    fn a_word_already_started_saves_nothing() {
+        let mut run = started(1);
+        let saved = Cell::new(0);
+        let first = run.card().expect("a card").term.id.clone();
+        let mut deck_term = crate::test_support::added_word();
+        deck_term.id = first;
+        assert!(
+            run.start_word(deck_term, |_| {
+                saved.set(saved.get() + 1);
+                true
+            })
+            .is_err()
+        );
+        let word = crate::test_support::added_word();
+        run.start_word(word.clone(), |_| {
+            saved.set(saved.get() + 1);
+            true
+        })
+        .unwrap();
+        assert!(
+            run.start_word(word, |_| {
+                saved.set(saved.get() + 1);
+                true
+            })
+            .is_err()
+        );
+        assert_eq!(saved.get(), 1);
+    }
+
+    #[test]
+    fn a_word_started_in_the_run_is_asked_in_this_run() {
+        let mut run = started(1);
+        let word = crate::test_support::added_word();
+        run.start_word(word.clone(), |_| true).unwrap();
+        let mut seen = Vec::new();
+        while let Some((term, _, _)) = asked(&run) {
+            seen.push(term);
+            grade(&mut run, Answer::Pass);
+        }
+        assert_eq!(
+            seen.iter().filter(|term| **term == word.id.0).count(),
+            2,
+            "both facets, after the deck's own card"
+        );
+    }
+
+    /// A run over a state holding the started added word, due today.
+    fn on_added_word() -> ReviewRun {
+        let before = crate::test_support::added_started(Stage::Day, today());
+        let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
+        ReviewRun::new(session, before)
+    }
+
+    #[test]
+    fn the_card_of_an_added_word_carries_its_term() {
+        let run = on_added_word();
+        let card = run.card().unwrap();
+        assert_eq!(card.term.lemma, "sānuvajja");
+        assert_eq!(card.term.meaning.en, "blameworthy");
+        assert_eq!(card.facet, Facet::Meaning);
+        // The same word again is the same term: nothing leaks twice.
+        assert!(std::ptr::eq(card.term, run.card().unwrap().term));
+    }
+
+    #[test]
+    fn an_added_word_with_its_example_is_asked_in_context_with_the_blank() {
+        use learn_core::deck::{Blank, Example};
+        let mut word = crate::test_support::added_word();
+        word.example = Some(Example {
+            text: "natthi sānuvajjo loke".into(),
+            source: "AN 1".into(),
+            sutta: "an1".into(),
+            blank: Some(Blank {
+                before: "natthi ".into(),
+                answer: "sānuvajjo".into(),
+                after: " loke".into(),
+            }),
+            translations: std::collections::BTreeMap::new(),
+        });
+        let mut before = State::empty();
+        before.added.push(word.clone());
+        before
+            .progress
+            .push(Progress::new(word.id.clone(), today()));
+        let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
+        let mut run = ReviewRun::new(session, before);
+        let mut facets = Vec::new();
+        while let Some(card) = run.card() {
+            if card.facet == Facet::Context {
+                let blank = card.term.example.as_ref().unwrap().blank.as_ref().unwrap();
+                assert_eq!(blank.answer, "sānuvajjo");
+                assert_eq!(card.term.example.as_ref().unwrap().source, "AN 1");
+            }
+            facets.push(card.facet);
+            grade(&mut run, Answer::Pass);
+        }
+        facets.sort();
+        assert_eq!(facets, vec![Facet::Meaning, Facet::Recall, Facet::Context]);
+    }
+
+    #[test]
+    fn an_added_word_is_asked_and_saved_like_a_deck_term() {
+        let mut run = on_added_word();
+        assert_eq!(run.total(), 2);
+        let saved: RefCell<Vec<State>> = RefCell::new(Vec::new());
+        run.grade(Answer::Pass, |state| saved.borrow_mut().push(state.clone()));
+        run.grade(Answer::Pass, |state| saved.borrow_mut().push(state.clone()));
+        let saved = saved.into_inner();
+        assert_eq!(saved.last().unwrap().progress[0].stage, Stage::Week);
+        assert_eq!(saved.last().unwrap().added.len(), 1, "the word stays");
+        assert!(run.card().is_none());
+    }
+
+    #[test]
+    fn new_terms_count_and_start_the_added_words_after_the_deck() {
+        let mut before = State::empty();
+        before.added.push(crate::test_support::added_word());
+        let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
+        let mut run = ReviewRun::new(session, before);
+        assert_eq!(run.new_left(), 51);
+        assert_eq!(run.add_new(51, |_| ()), 51);
+        assert_eq!(run.new_left(), 0);
+    }
+
+    #[test]
+    fn a_word_the_store_refused_is_taken_back_and_not_counted() {
+        let mut run = started(1);
+        let word = crate::test_support::added_word();
+        let (left, total) = (run.new_left(), run.total());
+        let saved: RefCell<Vec<State>> = RefCell::new(Vec::new());
+        assert_eq!(
+            run.start_word(word.clone(), |state| {
+                saved.borrow_mut().push(state.clone());
+                false
+            }),
+            Err(NotAdded::NotSaved)
+        );
+        assert!(!run.started(&word.id));
+        assert_eq!((run.new_left(), run.total()), (left, total));
+        run.grade(Answer::Pass, |state| saved.borrow_mut().push(state.clone()));
+        let saved = saved.into_inner();
+        assert_eq!(saved.len(), 2);
+        assert_eq!(saved[1].added.len(), 0, "the next answer does not carry it");
+        assert_eq!(saved[1].get(&word.id), None);
+        // It can be added again once the store takes it.
+        assert_eq!(run.start_word(word, |_| true), Ok(()));
     }
 }

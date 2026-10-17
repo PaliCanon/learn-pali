@@ -13,6 +13,10 @@
 //! [`session`] holds the queue and the transitions; [`forms`], [`grow`] and
 //! [`stats`] hold the rest of the rules.
 //!
+//! **Added words.** A learner can add a word met in a passage to the
+//! practice: [`added`] builds its term from the dictionary entry and the
+//! passage, and the [`progress`] state keeps it (`State::added`).
+//!
 //! **Sync.** [`merge`] joins two states with no clock: per term the entry
 //! further along wins, so devices that sync converge whatever the order.
 //!
@@ -21,6 +25,9 @@
 //! crate reads a clock: `today` is always an input, so the same code runs at
 //! the terminal and, later, in the browser (it builds for wasm32).
 
+pub mod added;
+#[cfg(test)]
+mod added_sites;
 pub mod date;
 pub mod deck;
 pub mod facet;

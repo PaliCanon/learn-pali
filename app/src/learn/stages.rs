@@ -15,7 +15,9 @@ pub(crate) fn stage_counts(state: &State, deck: &Deck) -> [usize; 6] {
         state
             .progress
             .iter()
-            .filter(|progress| progress.stage == stage && deck.term(&progress.term).is_some())
+            .filter(|progress| {
+                progress.stage == stage && state.term(deck, &progress.term).is_some()
+            })
             .count()
     })
 }
@@ -45,5 +47,11 @@ mod tests {
             [2, 1, 0, 0, 0, 0]
         );
         assert_eq!(stage_counts(&State::empty(), deck()), [0; 6]);
+    }
+
+    #[test]
+    fn a_started_added_word_counts_in_its_stage() {
+        let state = crate::test_support::added_started(Stage::Month, crate::test_support::today());
+        assert_eq!(stage_counts(&state, deck()), [0, 0, 1, 0, 0, 0]);
     }
 }

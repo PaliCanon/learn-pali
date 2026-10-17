@@ -1,5 +1,10 @@
 {
+  "add_refused_newer": "Votre progression a été enregistrée par une version plus récente. Mettez à jour pour ajouter des mots.",
+  "add_refused_there": "Déjà dans votre pratique.",
+  "add_refused_unreadable": "Votre progression ne peut pas être lue ni enregistrée pour l’instant.",
+  "add_refused_unusable": "Votre progression ne peut pas l’accepter pour l’instant.",
   "add_terms": "Nouveaux termes",
+  "add_word": "Ajouter à la pratique",
   "back_home": "Retour à l’accueil",
   "broken_download": "Télécharger la copie brute",
   "broken_import_hint": "Ou importez une copie dans les Paramètres.",
@@ -117,5 +122,6 @@
   "sync_sign_out": "Se déconnecter",
   "sync_syncing": "Synchronisation…",
   "unit_cards": "cartes",
+  "word_added": "Ajouté",
   "words_more": "+ {{ count }} de plus"
 }
