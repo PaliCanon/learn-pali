@@ -1,6 +1,6 @@
 # 053 A passage links to SuttaCentral to read it whole
 
-status: building · rank: 2 · level: simple · type: feature · request: user, 2026-10-16/17 («le sutta / passage devrait avoir un badge pour rediriger vers SuttaCentral et lire le passage en entier»; «avant, on a des passages de suttas, j'aimerais qu'on puisse avoir un badge pour lire sur SuttaCentral !») · light path, fast path (no architecture, no data change: the link is computed from the reference the deck already holds)
+status: merged · rank: 2 · level: simple · type: feature · request: user, 2026-10-16/17 («le sutta / passage devrait avoir un badge pour rediriger vers SuttaCentral et lire le passage en entier»; «avant, on a des passages de suttas, j'aimerais qu'on puisse avoir un badge pour lire sur SuttaCentral !») · light path, fast path (no architecture, no data change: the link is computed from the reference the deck already holds)
 
 ## Summary
 Rank: difficulty 2 (a pure mapping from DPD-style references to SuttaCentral uids, a link chip), impact 2 (a link beside each passage) → 2.
@@ -30,3 +30,7 @@ flowchart LR
 | Served | cargo leptos serve on 127.0.0.1:3053 (pid 116, stopped by pid); a practice session in headless Chrome: Context card, badge «MN 1» href https://suttacentral.net/mn1/en/sujato target _blank rel noopener title «Read on SuttaCentral»; scrollWidth == innerWidth at 1100 and 390 (CDP mobile emulation) | scratchpad/053/lane/passage-badge-{desktop,phone}.png |
 | Gold outline (user 2026-10-17: «peut-être le badge avec un contour jaune») | badge switched from Variant::Chip to Variant::Accent, Size::Sm, no class override; test red (1 failed, 3 passed) then green (4 passed). Checks exit 0: fmt, leptosfmt, 5 clippy runs, test learn_pali ssr (451), test core+cli+build_deck, csr (6 passed + 1 passed), web_sync, csr-without-web-store, doc, cargo leptos build, cargo deny. chromedriver 155.0.8059.82 (Chrome 155.0.8059.82). Screenshots desktop and phone, scrollWidth == innerWidth at 1100 and 390; server pid 2570 stopped | scratchpad/053/lane/passage-badge-{desktop,phone}.png |
 | Check | done | the user, 2026-10-17: «peut-être le badge avec un contour jaune. Puis check les tests et merge» — the gold outline (Variant::Accent) done; orchestrator read the screenshots; all checks exit 0 incl. both browser suites |
+| Merge | done | 9706264 on main, pushed (dev deploys); prod by tag after CI |
+
+## Retro
+One line (light path): SuttaCentral's API answers 200 for any uid, so a uid is verified by reading suttaplex.uid back, never by the status.
