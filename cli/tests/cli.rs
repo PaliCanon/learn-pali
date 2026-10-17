@@ -2,7 +2,7 @@
 //! state file in a temporary folder and answers piped to the standard input.
 
 use std::fs;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -64,12 +64,13 @@ impl Env {
             .stderr(Stdio::piped())
             .spawn()
             .unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(input.as_bytes())
-            .unwrap();
+        match child.stdin.take().unwrap().write_all(input.as_bytes()) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::BrokenPipe => {
+                // The program exited before reading all the input; this is expected.
+            }
+            Err(e) => panic!("{}", e),
+        }
         let output = child.wait_with_output().unwrap();
         Run {
             code: output.status.code().unwrap(),
@@ -478,4 +479,28 @@ fn a_deck_with_fewer_facets_promotes_and_stats_writes() {
     assert_eq!(term.due, today + 30);
     assert_eq!(term.passed, FacetSet::empty());
     assert_eq!(saved.last_today, Some(today));
+}
+
+#[test]
+fn a_wrong_deck_with_large_input_does_not_panic_on_broken_pipe() {
+    let env = Env::new("broken-pipe-test");
+    env.run(TODAY, &["new", "3"], "");
+    let other = env.dir.join("other-deck.json");
+    fs::write(
+        &other,
+        r#"{"version":1,"source":"test","terms":[
+            {"id":"zzz","lemma":"zzz","pos":"ind","meaning":{"en":"nothing"},"forms":[],"rank":1}]}"#,
+    )
+    .unwrap();
+    // Create a large input (~200 KB) that cannot fit in a pipe buffer.
+    // The program will exit early because of the wrong deck, and the write
+    // will fail with BrokenPipe, which should be ignored gracefully.
+    let large_input = "y\n".repeat(100_000);
+    let run = env.run_with_deck(&other, TODAY, &["review"], &large_input);
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(
+        run.out.contains("3 terms of the state are not in the deck"),
+        "{}",
+        run.out
+    );
 }
