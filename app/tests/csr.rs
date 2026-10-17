@@ -14,7 +14,7 @@
 
 #![cfg(all(target_arch = "wasm32", feature = "csr"))]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use learn_core::date::Date;
@@ -22,8 +22,9 @@ use learn_core::deck::Deck;
 use learn_core::progress::State;
 use learn_core::session::Session;
 use learn_pali::fragment::{
-    FileTransfer, LearnProvider, LearnRoutes, Load, PickFailed, ProgressStore, SaveError,
-    SaveStatus, SharedFiles, SharedStore,
+    FileTransfer, LearnProvider, LearnRoutes, LearnSettings, Load, PickFailed, ProgressStore,
+    SaveError, SaveStatus, SharedFiles, SharedStore, SharedSync, SyncAccount, SyncError,
+    SyncTransport,
 };
 use leptos::prelude::*;
 use leptos_router::components::{Outlet, ParentRoute, Router, Routes};
@@ -301,4 +302,89 @@ async fn the_strip_stays_until_a_save_succeeds_across_a_leave_and_return() {
     page.set(true);
     settle().await;
     assert!(strip().is_some(), "failed while away, Pending, back: kept");
+}
+
+/// A sync transport that counts `prepare` (task 050, round 1, S4): the sync
+/// UI readies Google's script where a tap may follow, and nowhere else.
+#[derive(Clone)]
+struct CountingSync {
+    prepared: Rc<Cell<usize>>,
+    account: RwSignal<SyncAccount>,
+}
+
+impl SyncTransport for CountingSync {
+    fn sign_in(&self, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {}
+
+    fn sign_out(&self) {}
+
+    fn account(&self) -> Signal<SyncAccount> {
+        self.account.into()
+    }
+
+    fn pull(&self, _on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {}
+
+    fn push(&self, _text: &str, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {}
+
+    fn prepare(&self) {
+        self.prepared.set(self.prepared.get() + 1);
+    }
+}
+
+/// The fragment at `/learn` with a counting sync for `account`, Settings'
+/// section shown when `settings` (no shell: shown at once).
+fn mount_with_sync(root: &'static str, account: SyncAccount, settings: bool) -> CountingSync {
+    go_to("/learn");
+    let transport = CountingSync {
+        prepared: Rc::default(),
+        account: RwSignal::new(account),
+    };
+    let (shared, files, sync): (SharedStore, SharedFiles, SharedSync) = (
+        Rc::new(seeded_store()),
+        Rc::new(NoFiles),
+        Rc::new(transport.clone()),
+    );
+    csr::mount(move || {
+        palicanon_ui_lib::provide_language();
+        view! {
+            <div id=root>
+                <LearnProvider store=shared files=files sync=Some(sync)>
+                    {settings.then(|| view! { <LearnSettings /> })}
+                    <Router>
+                        <Routes fallback=|| "Not found.">
+                            <ParentRoute path=path!("/learn") view=|| view! { <Outlet /> }>
+                                <LearnRoutes />
+                            </ParentRoute>
+                        </Routes>
+                    </Router>
+                </LearnProvider>
+            </div>
+        }
+    });
+    transport
+}
+
+/// Signed out with Settings closed: no sync UI asks anything of Google.
+/// Settings shown: its Sign in appears and Google's script is readied, so
+/// the tap opens the window in its gesture. A remembered account: the
+/// home's chip appears and readies it too.
+#[wasm_bindgen_test]
+async fn the_sync_ui_readies_google_only_where_a_tap_may_follow() {
+    let home = mount_with_sync("csr-sync-home", SyncAccount::SignedOut, false);
+    settle().await;
+    assert_eq!(home.prepared.get(), 0, "nothing before a tap may follow");
+    assert!(button("csr-sync-home", "Sync").is_none(), "no chip");
+
+    let settings = mount_with_sync("csr-sync-settings", SyncAccount::SignedOut, true);
+    settle().await;
+    assert!(button("csr-sync-settings", "Sync with Google Drive").is_some());
+    assert!(settings.prepared.get() >= 1, "Settings shown: readied");
+
+    let chip = mount_with_sync(
+        "csr-sync-chip",
+        SyncAccount::Remembered { email: None },
+        false,
+    );
+    settle().await;
+    assert!(button("csr-sync-chip", "Sync").is_some(), "the chip");
+    assert!(chip.prepared.get() >= 1, "the chip shown: readied");
 }

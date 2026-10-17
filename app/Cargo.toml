@@ -46,6 +46,12 @@ web-sys = { version = "0.3", optional = true, features = [
   "Location",
 ] }
 js-sys = { version = "0.3", optional = true }
+# The web sync's Drive calls (`fetch`) are awaited (task 050); already in the
+# lock through leptos.
+wasm-bindgen-futures = { version = "0.4", optional = true }
+# The web sync reads Google's JSON answers (task 050), in pure functions the
+# native tests cover; already in the lock through learn_core.
+serde_json = "1"
 
 [build-dependencies]
 # As in ui-lib's build.rs: the parser's diagnostics fail the build on a missing key.
@@ -97,11 +103,27 @@ web-store = [
   "web-sys/BlobPropertyBag",
   "web-sys/Url",
 ]
+# The site's sync through the learner's Google Drive (task 050,
+# `web_sync()`): Google Identity Services' token client, loaded on the first
+# Sign in or Sync tap, and the Drive REST calls from the browser. The app
+# builds with `csr` alone and syncs through its own Rust transport.
+web-sync = [
+  "web-store",
+  "dep:wasm-bindgen-futures",
+  "web-sys/Headers",
+  "web-sys/Request",
+  "web-sys/RequestInit",
+  "web-sys/Response",
+  "web-sys/HtmlHeadElement",
+  "web-sys/HtmlScriptElement",
+  "web-sys/console",
+]
 hydrate = [
   "leptos/hydrate",
   "palicanon-ui-lib/hydrate",
   "browser",
   "web-store",
+  "web-sync",
   "dep:console_error_panic_hook",
 ]
 # The PaliCanon app: the Learn fragment mounted by a host with no server

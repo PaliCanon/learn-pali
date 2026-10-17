@@ -224,6 +224,9 @@ cargo test -p learn_core -p learn_cli -p build_deck
 # Cargo.lock's wasm-bindgen version, a chromedriver matching Chrome):
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
   cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test csr
+# The site's Google Drive sync against a fake Google, same runner (task 050):
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
+  cargo test -p learn_pali --features csr,web-sync --target wasm32-unknown-unknown --test web_sync
 bash scripts/csr-without-web-store.sh   # the csr build holds nothing of the web store
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 cargo leptos build

@@ -15,7 +15,7 @@ use palicanon_ui_lib::{
 
 use crate::catalogue::strings;
 use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
-use crate::{web_files, web_store};
+use crate::{web_files, web_store, web_sync};
 
 mod site_footer;
 use site_footer::SiteFooter;
@@ -118,13 +118,14 @@ fn nav(current: Signal<String>) -> NavList {
 /// Settings with 'Your progress' after Appearance (export, import), and
 /// the Learn routes (the home at `/`, which holds the progress and runs the
 /// review in place), the footer in the shell's slot. The site's progress
-/// lives in the browser ([`web_store`], [`web_files`]); the provider
+/// lives in the browser ([`web_store`], [`web_files`]) and syncs through
+/// the learner's Google Drive ([`web_sync`]); the provider
 /// renders the import's confirmation after the shell, outside Settings.
 #[component]
 fn Layout() -> impl IntoView {
     let location = use_location();
     view! {
-        <LearnProvider store=web_store() files=web_files()>
+        <LearnProvider store=web_store() files=web_files() sync=web_sync()>
             <AppShell
                 nav=nav(location.pathname.into())
                 settings_extra=move || view! { <LearnSettings /> }
@@ -372,12 +373,42 @@ mod tests {
         assert!(!html.contains("data-page"), "{html}");
     }
 
-    /// The one page leads to neither `/progress` nor `/review`.
+    /// The one page leads to neither `/progress` nor `/review`. Read on its
+    /// link targets (`href`, `action`), never on its text: the footer's
+    /// badge prints the branch, and a branch may be named `…/progress-…`.
     #[test]
     fn the_page_links_to_no_removed_path() {
         let html = render_layout(Language::En, "/");
-        assert!(!html.contains("/progress"), "{html}");
-        assert!(!html.contains("/review"), "{html}");
+        let targets: Vec<&str> = ["href=\"", "action=\""]
+            .iter()
+            .flat_map(|attribute| html.split(attribute).skip(1))
+            .map(|rest| &rest[..rest.find('"').expect("a closed attribute")])
+            .collect();
+        assert!(targets.contains(&"/"), "the links are read: {targets:?}");
+        for target in &targets {
+            let path = target.split(['?', '#']).next().unwrap_or_default();
+            for removed in ["/progress", "/review"] {
+                assert!(
+                    path != removed && !path.starts_with(&format!("{removed}/")),
+                    "{target}: {html}"
+                );
+            }
+        }
+    }
+
+    /// The server is built without `web-sync`: it has no sync transport,
+    /// so its first paint shows no sync UI (never a Sign in that does
+    /// nothing); the browser shows it once hydrated.
+    #[test]
+    fn the_server_renders_no_sync_ui() {
+        let html = render_layout(Language::En, "/");
+        assert!(
+            html.contains(">Your progress</h3>"),
+            "Settings is there: {html}"
+        );
+        assert!(!html.contains("Sync with Google Drive"), "{html}");
+        assert!(!html.contains("data-sync"), "{html}");
+        assert!(!html.contains(">Sync<"), "no chip: {html}");
     }
 
     /// The one route renders in every language, its marker present.

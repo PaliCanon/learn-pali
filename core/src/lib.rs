@@ -13,6 +13,9 @@
 //! [`session`] holds the queue and the transitions; [`forms`], [`grow`] and
 //! [`stats`] hold the rest of the rules.
 //!
+//! **Sync.** [`merge`] joins two states with no clock: per term the entry
+//! further along wins, so devices that sync converge whatever the order.
+//!
 //! **State and deck JSON.** The [`progress`] state and the deck are plain
 //! JSON, versioned, with dates as `YYYY-MM-DD` ([`date`]). Nothing in this
 //! crate reads a clock: `today` is always an input, so the same code runs at
@@ -23,6 +26,7 @@ pub mod deck;
 pub mod facet;
 pub mod forms;
 pub mod grow;
+pub mod merge;
 pub mod progress;
 pub mod session;
 mod shuffle;
