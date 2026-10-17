@@ -10,7 +10,7 @@ OAuth: project palicanon-app; web client 873594463453-ag83cvs5t5uqa6uvir9n4p9igb
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ local list"]:::done --> Review["Review ✓ round 1; round 2 waived by the user"]:::done --> Check["Check ✓ the user, on dev"]:::done --> Merge["Merge ✓ 562b2f7"]:::done --> Retro:::todo
+  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ local list"]:::done --> Review["Review ✓ round 1; round 2 waived by the user"]:::done --> Check["Check ✓ the user, on dev"]:::done --> Merge["Merge ✓ 562b2f7"]:::done --> Retro["Retro ✓ validated"]:::done
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -83,3 +83,15 @@ Ruled out: sage's "join merges a newer or unreadable copy" (tests a_newer_copy_s
 
 ## Merge
 562b2f7 (fragment-v0.2.0)
+
+## Retro
+Retro agent: retro-discussion dccda90a6b90947, summary 11364; voice gemini 11365. Validated by the orchestrator, 2026-10-17:
+- v1's merge rule needed a review time the format never stored → ask-yourself/back/schema-holds-what-the-algorithm-reads.md (docs 3b0274b).
+- The first tap's popup opened outside the gesture, live on dev → ask-yourself/front/auth-in-the-gesture.md (docs 3b0274b).
+- The brief assumed a CSP that does not exist → ask-yourself/common/the-config-exists.md (docs 3b0274b); the site CSP is a follow-up.
+- Two @orchestrator pings unanswered until the hook → already a rule since 021's retro (process.md); applied late here.
+- Scratch folders collided → prompts/task-brief.md: one folder per agent (docs, 2026-10-17).
+- The branch rebased and force-pushed while app 006 pinned its commit → conventions/git.md (docs 3b0274b).
+- main's deploy overwrote the branch deployed on dev for the user's check → conventions/deploy.md (docs 3b0274b).
+- Review round 2 waived by the user: the 12 fix commits are reviewed on main after; the thin second voice and the graph pasted verbatim are prompts/review.md matters, kept for its next revision.
+
