@@ -10,7 +10,7 @@ OAuth: project palicanon-app; web client 873594463453-ag83cvs5t5uqa6uvir9n4p9igb
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build:::doing --> Verify:::todo --> Review:::todo --> Check:::todo --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ local list"]:::done --> Review["Review ✓ round 1; round 2 waived by the user"]:::done --> Check["Check ✓ the user, on dev"]:::done --> Merge:::todo --> Retro:::todo
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -25,6 +25,10 @@ flowchart LR
 | Rulings | done | orchestrator (thread): no site CSP here (none exists: follow-up opened); failed push keeps the merged state locally; Session::advance noted; sign-out after reload cannot revoke: the line says so with a link to Google's connections page; deps accepted; the badge-matching test fixed here |
 | Deploy dev | done | 35217b5 on learn-pali-dev (revision 00036-rex, image h-647d7147ccff4637, Cloud Build from the laptop); rollout-check exit 0 on the tagged URL and via the Worker; hydrated, no panic; rollback: learn-pali-dev-rot-20261016 |
 | Review 1 | fail | reviewer: d13594a812fb14c v1; deep 11170/11183/11196/11209 (real defects: a push after a refused save, a cycle surviving sign-out, the first tap's popup outside the gesture), sage 11230/11245/11259/11272 (thin). Rulings in ### Round 1 |
+| Fix 1 | done | lane:sync: d1137c8 S1, 33c946c S2/S5, 2a01da0 S2, 933756f S3, 6cb364e S4, 4b2d3b8 S6, 0b9aeb1 S7, 5ce4bbc S8, 9066bde S9, 97de0ef S10, a2d066c + ab81106 v7; all checks exit 0 (ssr 445, core 141, browser 6 + 1); coverage lines 97.72% (main 97.62%); no Google request before Settings opens |
+| Deploy dev | done | ab81106 on learn-pali-dev (revision 00040-rag), rollout-check exit 0, hydrated |
+| Check | done | the user, 2026-10-17, on learn.dev: «le sync de pali learn marche, on peut tag la branche» |
+| Rule (user) | — | the same words taken as the go to merge without review round 2 (its round runs on main after; findings become a follow-up) |
 
 ## Design
 Viewer: learn-pali-050-progress-sync/design, v6 (v6: the desktop sign-in shows its link, user 2026-10-16; desktop only).
