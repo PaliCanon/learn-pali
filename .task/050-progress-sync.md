@@ -1,6 +1,6 @@
 # 050 The progress synced through the user's Google Drive
 
-status: building · rank: 7 · level: hard · type: feature · request: user, 2026-10-16 («un moyen de se connecter avec Google … pour passer d'un device à un autre»; «Google puis Apple; anatta plus tard»; «Passe sur la dev, et l'app desktop»; «sans serveur») · session: learn-pali-050-progress-sync · ui-lib: v0.3.0
+status: merged · rank: 7 · level: hard · type: feature · request: user, 2026-10-16 («un moyen de se connecter avec Google … pour passer d'un device à un autre»; «Google puis Apple; anatta plus tard»; «Passe sur la dev, et l'app desktop»; «sans serveur») · session: learn-pali-050-progress-sync · ui-lib: v0.3.0
 
 ## Summary
 Rank (rank.md): difficulty 7 (OAuth on the web without a server, a merge with no clock, a sync cycle around 048's store rules, CSP changes on the site), impact 7 (the learner's progress across devices; a third-party script on the site) → 7.
@@ -10,7 +10,7 @@ OAuth: project palicanon-app; web client 873594463453-ag83cvs5t5uqa6uvir9n4p9igb
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ local list"]:::done --> Review["Review ✓ round 1; round 2 waived by the user"]:::done --> Check["Check ✓ the user, on dev"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ v5"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓ local list"]:::done --> Review["Review ✓ round 1; round 2 waived by the user"]:::done --> Check["Check ✓ the user, on dev"]:::done --> Merge["Merge ✓ 562b2f7"]:::done --> Retro:::todo
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -29,6 +29,7 @@ flowchart LR
 | Deploy dev | done | ab81106 on learn-pali-dev (revision 00040-rag), rollout-check exit 0, hydrated |
 | Check | done | the user, 2026-10-17, on learn.dev: «le sync de pali learn marche, on peut tag la branche» |
 | Rule (user) | — | the same words taken as the go to merge without review round 2 (its round runs on main after; findings become a follow-up) |
+| Merge | done | 562b2f7 on main (squash), pushed (dev deploys main); tag fragment-v0.2.0 for the PaliCanon app |
 
 ## Design
 Viewer: learn-pali-050-progress-sync/design, v6 (v6: the desktop sign-in shows its link, user 2026-10-16; desktop only).
@@ -81,3 +82,4 @@ Voices: deep (11170, 11183, 11196, 11209), sage (11230, 11245, 11259, 11272). Ru
 Ruled out: sage's "join merges a newer or unreadable copy" (tests a_newer_copy_stops_the_sync_and_is_never_written and a_copy_that_does_not_parse_stops_the_sync_with_its_raw_text cover it).
 
 ## Merge
+562b2f7 (fragment-v0.2.0)
