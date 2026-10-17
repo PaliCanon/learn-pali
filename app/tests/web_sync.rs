@@ -68,9 +68,12 @@ window.fetch = async (request) => {
 "#;
 
 /// The fake Google Identity Services: the token client answers a token
-/// (or a blocked window), revoke records the token.
+/// (or a blocked window), revoke records the token. It is frozen, and
+/// `window.google` read-only: the sign-in injects the real script (the
+/// test only dispatches its events), which on a machine with a network
+/// arrives later and would replace the fake mid-test (CI, task 052).
 const FAKE_GIS: &str = r#"
-window.google = { accounts: { oauth2: {
+const google = { accounts: { oauth2: {
   initTokenClient(config) {
     window.__drive.config = config;
     return { requestAccessToken(overrides) {
@@ -84,6 +87,10 @@ window.google = { accounts: { oauth2: {
   },
   revoke(token, done) { window.__drive.revoked.push(token); if (done) done(); },
 } } };
+Object.freeze(google.accounts.oauth2);
+Object.freeze(google.accounts);
+Object.freeze(google);
+Object.defineProperty(window, 'google', { value: google, writable: false, configurable: true });
 "#;
 
 /// Runs `code` in the page and returns its value.
@@ -188,6 +195,16 @@ async fn first_sign_in(sync: &SharedSync) {
     let asked = js("return window.__drive.overrides !== undefined");
     assert_eq!(asked.as_bool(), Some(false), "readying asks no token");
     js(FAKE_GIS);
+    assert_eq!(
+        js("try { window.google = {}; } catch (e) {}
+            try { window.google.accounts.oauth2 = {}; } catch (e) {}
+            try { window.google.accounts.oauth2.revoke = null; } catch (e) {}
+            try { return typeof window.google.accounts.oauth2.revoke === 'function'; }
+            catch (e) { return false; }")
+        .as_bool(),
+        Some(true),
+        "the real script, arriving late from the network, cannot replace the fake"
+    );
     js(&format!(
         "document.head.querySelector('script[src=\"{GIS_SCRIPT}\"]').dispatchEvent(new Event('load'))"
     ));

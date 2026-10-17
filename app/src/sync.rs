@@ -164,8 +164,8 @@ impl SyncCycle {
         use_context::<SyncCycle>()
     }
 
-    /// Sets where the sync stands (the render tests).
-    #[cfg(test)]
+    /// Sets where the sync stands (the render tests, which are `ssr`).
+    #[cfg(all(test, feature = "ssr"))]
     pub(crate) fn set_status(self, status: SyncStatus) {
         self.0.with_value(|cycle| cycle.status.set(status));
     }
@@ -192,8 +192,9 @@ impl SyncCycle {
         self.0.with_value(|cycle| cycle.mounted.get())
     }
 
-    /// Marks the cycle mounted without a cycle (the render tests).
-    #[cfg(test)]
+    /// Marks the cycle mounted without a cycle (the render tests, which are
+    /// `ssr`).
+    #[cfg(all(test, feature = "ssr"))]
     pub(crate) fn set_mounted(self) {
         self.0.with_value(|cycle| cycle.mounted.set(true));
     }
