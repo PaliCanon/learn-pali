@@ -1,6 +1,6 @@
 # 054 Add a passage's word to the practice
 
-status: building · rank: 5 · level: standard · type: feature · request: user, 2026-10-17 («j'aimerais qu'on puisse ajouter des mots à la practice … quand on clique on peut voir la définition, il serait bien de pouvoir les ajouter») · session: learn-pali-054-add-word · after: [ui-lib 069 (v0.3.1, merged)]
+status: merged · rank: 5 · level: standard · type: feature · request: user, 2026-10-17 («j'aimerais qu'on puisse ajouter des mots à la practice … quand on clique on peut voir la définition, il serait bien de pouvoir les ajouter») · session: learn-pali-054-add-word · after: [ui-lib 069 (v0.3.1, merged)]
 
 ## Summary
 Rank: difficulty 5 (a new kind of term living in the progress, one lookup at ~10 sites, a format version bumped only when used, the sync merge), impact 5 (the learner's own words, kept in export and Drive) → 5.
@@ -10,7 +10,7 @@ Design v3 (consensus deep and sage, 2026-10-17): ui-lib 069's PaliText entry_act
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v3"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓"]:::done --> Review["Review ✓ 2 rounds"]:::done --> Check["Check ✓ the user on dev"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ v3"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓"]:::done --> Review["Review ✓ 2 rounds"]:::done --> Check["Check ✓ the user on dev"]:::done --> Merge["Merge ✓ c0b399e"]:::done --> Retro:::todo
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -27,6 +27,7 @@ flowchart LR
 | Review 2 | fail | reviewer: a2m diff dee9d609d3ffc41, a2m graph app d4f3db6b3ee9049 / core d914f7f4c3eef48, review dbb2b9c3e384a49 v2; deep 12463/12474/12489/12498/12513, gemini 12464/12497 (A, B only: quota). Rulings in ### Round 2; the user: «fix les, deploy. Puis on fait l'app de bureau» |
 | Fix 2 | done | lane:054-r2: 74eee7c R1–R5, d6a24a7 R6, d4e98b9 R7, e12dd9d clippy; red or mutation per item; all checks exit 0 (lib 516, csr 13 ×5 runs, web_add 2, web_sync 1); the user's go: «fix les, deploy» (no third review round) |
 | Check | done | the user on dev, 2026-10-17: words added are started and counted (export: rahas 2, phassa 1 Daily); orchestrator: the fixes read against rulings R1–R7 |
+| Merge | done | c0b399e on main (squash), pushed (dev deploys); prod by tag after CI; fragment tag for the app |
 
 ## Design
 Viewer: learn-pali-054-add-word/design (d6afa14ac981449), v4 — v3 + the user's U1 (adding starts the word), 2026-10-17.
@@ -83,3 +84,4 @@ Voices: deep (11812, 11822, 11833), gemini (11879, 11889, 11899). Rulings (orche
 Ruled out: pinned after a poisoned lock (a panic elsewhere), ids with stray spaces (headwords come from the deck's dictionary as is).
 
 ## Merge
+c0b399e
