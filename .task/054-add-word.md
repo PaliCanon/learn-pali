@@ -10,7 +10,7 @@ Design v3 (consensus deep and sage, 2026-10-17): ui-lib 069's PaliText entry_act
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v3"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓"]:::done --> Review["Review ✓ 2 rounds"]:::done --> Check["Check ✓ the user on dev"]:::done --> Merge["Merge ✓ c0b399e"]:::done --> Retro:::todo
+  Define["Define ✓ v3"]:::done --> Plan["Plan ✓ one lane"]:::done --> Build["Build ✓"]:::done --> Verify["Verify ✓"]:::done --> Review["Review ✓ 2 rounds"]:::done --> Check["Check ✓ the user on dev"]:::done --> Merge["Merge ✓ c0b399e"]:::done --> Retro["Retro ✓ validated"]:::done
   classDef doing fill:#f9a825,color:#000
   classDef done fill:#2e7d32,color:#fff
   classDef todo fill:#9e9e9e,color:#fff
@@ -85,3 +85,13 @@ Ruled out: pinned after a poisoned lock (a panic elsewhere), ids with stray spac
 
 ## Merge
 c0b399e
+
+## Retro
+Retro agent: retro-discussion d0919d2ed86a94f, summary 12659; voice gemini 12661 (flash-lite, after a 429). Validated by the orchestrator, 2026-10-17:
+- Agents stalled on the watchdog until the work was cut small → prompts/task-brief.md: a lane brief is one slice finished well under an hour (docs da225c4).
+- `pkill -f "cargo "` by a lane → prompts/task-brief.md: processes stopped by pid only, never by name, in every lane brief (docs da225c4); git.md already said so for servers.
+- The orchestrator's G1 ruling contradicted design v3, and its round-2 rulings landed inside a Log row (a text anchor matched the Log's mention of "### Round 1" before the heading) → orchestrator practice: a ruling is checked against the design's wording before it is sent, and task-file insertions anchor on a heading line; both recorded here, no rule file needed.
+- The user changed the design mid-way (adding starts the word) → design v4 the same turn once found (the reviewer caught the gap): already the rule (process.md: a ruling changing the design's wording edits the diagram the same turn).
+- The dev check's "wrong count" was correct but unreadable → task 056 (the home says what is started, what is not, what the numbers count).
+- A deploy lane left empty stray files at the repo root and said "Errors: none" → its brief now says absolute paths for every scratch write (the deploy procedure is a lane brief, not a rule file).
+
