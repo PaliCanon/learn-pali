@@ -108,3 +108,4 @@ flowchart TB
 ```
 | Apply | done | orchestrator, 2026-10-22: `tofu plan` 1 to import, 0 to change; `tofu apply` complete (google_project_service.drive imported; the env ignore rule in the config); nothing changed on the cloud |
 | Check | done | the user, 2026-10-22: «apply le badge sur search / map / learn» (go); orchestrator: the dev badge and the revision env are read after the merge |
+| Merge | done | 23c7ae2 on main (squash), pushed: the dev deploy is the first env write; prod by tag v0.1.9 after the dev badge is read |
