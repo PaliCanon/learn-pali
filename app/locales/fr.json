@@ -55,6 +55,7 @@
   "new_add": "Ajouter",
   "new_count_label": "Combien de nouveaux termes",
   "new_custom": "Autre",
+  "new_more_today": "Apprendre davantage aujourd’hui",
   "next_review": "Prochaine révision : {{ date }}",
   "orphans_heading": "Absents de ce paquet",
   "pause_banner": "La progression a changé dans un autre onglet",

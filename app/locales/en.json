@@ -55,6 +55,7 @@
   "new_add": "Add",
   "new_count_label": "How many new terms",
   "new_custom": "Custom",
+  "new_more_today": "Learn more today",
   "next_review": "Next review: {{ date }}",
   "orphans_heading": "Not in this deck",
   "pause_banner": "Progress changed in another tab",

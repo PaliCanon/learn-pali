@@ -163,7 +163,7 @@ pub(crate) fn Home(
     view! {
         <div
             data-page="home"
-            class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] sm:flex-1 sm:justify-center"
+            class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] flex-1 sm:justify-center"
         >
             <SaveStrip />
             {move || matches!(page.mode.get(), Mode::Home).then(|| view! { <SyncChip /> })}
@@ -1321,7 +1321,7 @@ mod tests {
             "sm:mx-auto",
             "sm:w-full",
             "sm:max-w-[40rem]",
-            "sm:flex-1",
+            "flex-1",
             "sm:justify-center",
         ] {
             assert!(tag.split(['"', ' ']).any(|c| c == class), "{class}: {tag}");

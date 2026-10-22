@@ -61,8 +61,12 @@ pub fn NewTerms(
     on_add: Callback<usize>,
     /// The deck's terms not started yet: Custom's upper bound.
     new_left: usize,
+    /// The look of the 'Add' button: Primary unless the screen already has
+    /// a main action.
+    #[prop(default = Variant::Primary)]
+    add_variant: Variant,
 ) -> impl IntoView {
-    view! { <NewTermsForm pick=Pick::new() new_left=new_left on_add=on_add /> }
+    view! { <NewTermsForm pick=Pick::new() new_left=new_left on_add=on_add add_variant=add_variant /> }
 }
 
 /// The number to add: the choice, or the typed text for Custom, kept in
@@ -97,11 +101,13 @@ fn NewTermsForm(
     new_left: usize,
     /// Called with the amount when 'Add' is pressed.
     on_add: Callback<usize>,
+    /// The look of 'Add'.
+    add_variant: Variant,
 ) -> impl IntoView {
     view! {
-        <div data-new-terms="" class="flex flex-wrap items-center gap-3">
+        <div data-new-terms="" class="flex flex-wrap items-center justify-center gap-3">
             <PickerFields pick=pick new_left=new_left />
-            <AddButton pick=pick new_left=new_left on_add=on_add />
+            <AddButton pick=pick new_left=new_left on_add=on_add variant=add_variant />
         </div>
     }
 }
@@ -122,7 +128,7 @@ pub(crate) fn NewTermsPicker(
     }
 }
 
-/// 'Add', Primary: calls `on_add` with the amount `pick` holds; disabled
+/// 'Add', Primary unless `variant` says otherwise: calls `on_add` with the amount `pick` holds; disabled
 /// when nothing is left.
 #[component]
 pub(crate) fn AddButton(
@@ -132,11 +138,14 @@ pub(crate) fn AddButton(
     new_left: usize,
     /// Called with the amount when pressed.
     on_add: Callback<usize>,
+    /// The look of the button.
+    #[prop(default = Variant::Primary)]
+    variant: Variant,
 ) -> impl IntoView {
     let t = strings();
     view! {
         <Button
-            variant=Variant::Primary
+            variant=variant
             size=Size::Md
             disabled=Signal::derive(move || new_left == 0)
             on_click=move |_| pick.add(new_left, on_add)
@@ -218,7 +227,7 @@ mod tests {
                 custom: RwSignal::new(custom.to_owned()),
             };
             let on_add = Callback::new(|_: usize| {});
-            view! { <NewTermsForm pick=pick new_left=new_left on_add=on_add /> }.to_html()
+            view! { <NewTermsForm pick=pick new_left=new_left on_add=on_add add_variant=Variant::Primary /> }.to_html()
         })
     }
 
@@ -252,6 +261,22 @@ mod tests {
             tag_before(&html, "button", "+10").contains(r#"aria-checked="false""#),
             "{html}"
         );
+    }
+
+    #[test]
+    fn add_is_primary_by_default_and_takes_another_variant_on_request() {
+        let html = form(Language::En, Choice::Five, "", 20);
+        let add = tag_before(&html, "button", ">Add<");
+        assert!(add.contains("bg-primary"), "{add}");
+        let html = Owner::new().with(|| {
+            palicanon_ui_lib::provide_language().set(Language::En);
+            let on_add = Callback::new(|_: usize| {});
+            view! { <NewTerms on_add=on_add new_left=20 add_variant=Variant::Accent /> }.to_html()
+        });
+        let add = tag_before(&html, "button", ">Add<");
+        assert!(add.contains("border-gold/40"), "{add}");
+        assert!(!add.contains("bg-primary"), "{add}");
+        assert!(html.contains("justify-center"), "chips centred: {html}");
     }
 
     #[test]

@@ -264,7 +264,7 @@ pub fn ReviewView(
         }
     };
     view! {
-        <div data-review="" class="flex flex-col gap-4" on:keydown=on_key>
+        <div data-review="" class="flex flex-1 flex-col gap-4" on:keydown=on_key>
             {move || paused.get().then(|| view! { <PauseBanner on_reload=on_reload /> })}
             {move || {
                 if over.get() {
@@ -968,32 +968,50 @@ fn Finished(
         } else {
             summary_view(summary, language).into_any()
         };
-        view! {
-            <div class="flex flex-col items-start gap-6">
+        let more = view! {
+            <section class="flex w-full flex-col items-center gap-3 border-t border-line pt-5">
+                <p class="text-sm text-muted">{td_string!(locale, new_more_today)}</p>
+                <NewTerms on_add=add new_left=new_left add_variant=Variant::Accent />
+            </section>
+        };
+        done_card(locale, on_home, heading, Some(more.into_any()))
+    }
+}
+
+/// The card every end of a session shares, centred under the brand, in
+/// width and in the height left under it (the area grows): the
+/// `heading` (with its counts), the one Primary 'Back home', then the
+/// `more` section when there is one.
+fn done_card(
+    locale: Locale,
+    on_home: Callback<()>,
+    heading: AnyView,
+    more: Option<AnyView>,
+) -> AnyView {
+    view! {
+        <div data-session-done-area="" class="flex flex-1 items-center justify-center">
+            <div
+                data-session-done=""
+                class="mx-auto flex w-full max-w-md flex-col items-center gap-6 rounded-xl border border-line bg-card p-6 text-center"
+            >
                 {heading}
                 <Button variant=Variant::Primary size=Size::Lg on_click=move |_| on_home.run(())>
                     {td_string!(locale, back_home)}
-                </Button> <NewTerms on_add=add new_left=new_left />
+                </Button>
+                {more}
             </div>
-        }
-        .into_any()
+        </div>
     }
+    .into_any()
 }
 
 /// The end of a practice ahead: 'Practice done' and 'Back home'; nothing
 /// moved, so no summary lines and no new terms.
 fn practice_done(locale: Locale, on_home: Callback<()>) -> AnyView {
-    view! {
-        <div class="flex flex-col items-start gap-6">
-            <h2 class="font-serif text-xl text-heading">
-                {td_string!(locale, summary_practice_done)}
-            </h2>
-            <Button variant=Variant::Primary size=Size::Lg on_click=move |_| on_home.run(())>
-                {td_string!(locale, back_home)}
-            </Button>
-        </div>
-    }
-    .into_any()
+    let heading = view! {
+        <h2 class="font-serif text-xl text-heading">{td_string!(locale, summary_practice_done)}</h2>
+    };
+    done_card(locale, on_home, heading.into_any(), None)
 }
 
 /// 'Session done', the terms that moved up and those that start again
@@ -1003,27 +1021,39 @@ fn summary_view(summary: Summary, language: Language) -> impl IntoView {
     let up = summary.moved_up;
     let again = summary.back_to_day;
     let moved = if singular(locale, up) {
-        td!(locale, summary_moved_up_1, count = up).into_any()
+        td!(locale, summary_moved_up_1, count = count_numeral(up)).into_any()
     } else {
-        td!(locale, summary_moved_up_n, count = up).into_any()
+        td!(locale, summary_moved_up_n, count = count_numeral(up)).into_any()
     };
     let back = if singular(locale, again) {
-        td!(locale, summary_again_1, count = again).into_any()
+        td!(locale, summary_again_1, count = count_numeral(again)).into_any()
     } else {
-        td!(locale, summary_again_n, count = again).into_any()
+        td!(locale, summary_again_n, count = count_numeral(again)).into_any()
     };
     let next = summary
         .next_due
         .map(|date| td!(locale, summary_next_due, date = date_words(language, date)));
     view! {
-        <div class="flex flex-col gap-3">
+        <div class="flex flex-col items-center gap-3">
             <h2 class="font-serif text-xl text-heading">{td_string!(locale, summary_title)}</h2>
             <ul class="flex flex-col gap-1 text-ink">
                 <li>{moved}</li>
                 <li>{back}</li>
-                {next.map(|next| view! { <li>{next}</li> })}
+                {next.map(|next| view! { <li class="pt-2 text-sm text-muted">{next}</li> })}
             </ul>
         </div>
+    }
+}
+
+/// A count in the summary: a larger serif numeral beside its words. A
+/// closure, so the view can be cloned into the translation.
+fn count_numeral(count: usize) -> impl IntoView + Clone {
+    move || {
+        view! {
+            <span data-count="" class="font-serif text-2xl text-heading">
+                {count}
+            </span>
+        }
     }
 }
 
@@ -1688,6 +1718,163 @@ pub(crate) mod tests {
         assert!(!text.contains("Next due"), "{text}");
         let back = button_tag(&html, "Back home");
         assert!(back.starts_with("<button"), "{back}");
+    }
+
+    // ---- 058: the end of a session as a centred card ----
+
+    /// The number of buttons in `html` whose class list holds the token.
+    fn buttons_with(html: &str, token: &str) -> usize {
+        html.split("<button")
+            .skip(1)
+            .filter(|chunk| {
+                chunk[..chunk.find('>').expect(html)]
+                    .split(['"', ' '])
+                    .any(|class| class == token)
+            })
+            .count()
+    }
+
+    /// The opening tag of the done card.
+    fn card_tag(html: &str) -> &str {
+        let at = html.find(r#"data-session-done=""#).expect(html);
+        let start = html[..at].rfind("<div").expect(html);
+        &html[start..html[start..].find('>').expect(html) + start]
+    }
+
+    fn session_done() -> String {
+        render(after_grade(
+            run_on("kho", &[], Stage::Day),
+            &[Answer::Pass, Answer::Pass, Answer::Pass],
+        ))
+    }
+
+    #[test]
+    fn the_end_of_a_session_is_one_centred_card() {
+        for html in [session_done(), render(nothing_due())] {
+            assert_eq!(html.matches(r#"data-session-done=""#).count(), 1, "{html}");
+            let card = card_tag(&html);
+            for class in [
+                "mx-auto",
+                "max-w-md",
+                "w-full",
+                "text-center",
+                "rounded-xl",
+                "border",
+                "border-line",
+                "bg-card",
+            ] {
+                assert!(
+                    card.split(['"', ' ']).any(|c| c == class),
+                    "{class}: {card}"
+                );
+            }
+            assert!(
+                !html.contains("items-start"),
+                "nothing left-aligned: {html}"
+            );
+        }
+    }
+
+    /// The opening tag of the first `<div` before `marker` that holds it.
+    fn div_with<'a>(html: &'a str, marker: &str) -> &'a str {
+        let at = html.find(marker).expect(html);
+        let start = html[..at].rfind("<div").expect(html);
+        &html[start..html[start..].find('>').expect(html) + start]
+    }
+
+    /// 058 (user check, phone): the card sits in the middle of the height
+    /// under the brand: the review column grows, the done area takes what
+    /// is left and centres the card, with no fixed height.
+    #[test]
+    fn the_done_card_is_centred_in_the_height_under_the_brand() {
+        let mut practice = practice_run(ahead_state(), today(), 1, None, 0).expect("kho");
+        drain(&mut practice, Answer::Fail);
+        for html in [session_done(), render(nothing_due()), render(practice)] {
+            let area = div_with(&html, "data-session-done-area");
+            for class in ["flex", "flex-1", "items-center", "justify-center"] {
+                assert!(
+                    area.split(['"', ' ']).any(|c| c == class),
+                    "{class}: {area}"
+                );
+            }
+            let column = div_with(&html, "data-review");
+            for class in ["flex", "flex-1", "flex-col"] {
+                assert!(
+                    column.split(['"', ' ']).any(|c| c == class),
+                    "{class}: {column}"
+                );
+            }
+            for tag in [area, column] {
+                assert!(!tag.contains("min-h-"), "no fixed height: {tag}");
+                assert!(!tag.contains("h-["), "no fixed height: {tag}");
+            }
+            let at = |needle: &str| html.find(needle).expect(&html);
+            assert!(
+                at("data-session-done-area") < at("data-session-done=\"\""),
+                "{html}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_counts_show_their_number_in_an_emphasised_element() {
+        let html = render(after_grade(
+            run_on("kho", &[], Stage::Day),
+            &[Answer::Fail, Answer::Pass],
+        ));
+        for (number, words) in [("0", " terms moved up"), ("1", " starts again tomorrow")] {
+            let wanted = format!("{number}</span>{words}");
+            let at = html
+                .find(&wanted)
+                .unwrap_or_else(|| panic!("{wanted}: {html}"));
+            let start = html[..at].rfind("<span").expect(&html);
+            let tag = &html[start..at];
+            assert!(tag.contains("data-count"), "{tag}");
+            for class in ["font-serif", "text-2xl", "text-heading"] {
+                assert!(tag.split(['"', ' ']).any(|c| c == class), "{class}: {tag}");
+            }
+        }
+        assert!(text_of(&html).contains("Next due 6 October 2026"), "{html}");
+    }
+
+    #[test]
+    fn back_home_is_the_only_primary_button_and_add_is_secondary() {
+        for html in [session_done(), render(nothing_due())] {
+            assert_eq!(buttons_with(&html, "bg-primary"), 1, "{html}");
+            let back = button_tag(&html, "Back home");
+            assert!(back.split(['"', ' ']).any(|c| c == "bg-primary"), "{back}");
+            let add = button_tag(&html, ">Add<");
+            assert!(
+                add.split(['"', ' ']).any(|c| c == "border-gold/40"),
+                "{add}"
+            );
+            assert!(!add.split(['"', ' ']).any(|c| c == "bg-primary"), "{add}");
+        }
+    }
+
+    #[test]
+    fn learn_more_today_titles_the_new_terms_section() {
+        for (language, said) in [
+            (Language::En, "Learn more today"),
+            (Language::Fr, "Apprendre davantage aujourd’hui"),
+            (Language::Vi, "Học thêm hôm nay"),
+        ] {
+            let html = render_with(language, nothing_due(), false);
+            assert!(text_of(&html).contains(said), "{language:?}: {html}");
+            assert!(html.find(said) < html.find("data-new-terms"), "{html}");
+        }
+    }
+
+    #[test]
+    fn a_practice_done_uses_the_same_card_with_no_new_terms() {
+        let mut run = practice_run(ahead_state(), today(), 1, None, 0).expect("kho");
+        drain(&mut run, Answer::Fail);
+        let html = render(run);
+        assert_eq!(html.matches(r#"data-session-done=""#).count(), 1, "{html}");
+        assert!(card_tag(&html).contains("mx-auto"), "{html}");
+        assert_eq!(buttons_with(&html, "bg-primary"), 1, "{html}");
+        assert!(!html.contains("data-new-terms"), "{html}");
+        assert!(!text_of(&html).contains("Learn more today"), "{html}");
     }
 
     /// The session runs in place on the home: every way back (Stop, Back
