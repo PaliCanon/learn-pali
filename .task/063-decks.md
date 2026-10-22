@@ -1,6 +1,6 @@
 # 063 Decks: several decks in Learn, the Devanāgarī alphabet first, Anki import later
 
-status: review · rank: 6 · level: hard · type: feat · session: learn-pali-063-decks · request: the user, 2026-10-22 («j'aimerais bien apprendre le pali, l'alphabet. Devanāgarī. Est-ce que learn peut gérer des decks ?» · «on commence par devanagari seule d'abord. Regarde Anki … ce serait bien d'être compatible» · «je pensais surtout à importer. Mais commençons simple et lance un design que ça ne se perde pas») · after: [059]
+status: building · rank: 6 · level: hard · type: feat · session: learn-pali-063-decks · request: the user, 2026-10-22 («j'aimerais bien apprendre le pali, l'alphabet. Devanāgarī. Est-ce que learn peut gérer des decks ?» · «on commence par devanagari seule d'abord. Regarde Anki … ce serait bien d'être compatible» · «je pensais surtout à importer. Mais commençons simple et lance un design que ça ne se perde pas») · after: [059]
 
 ## Summary
 Rank: difficulty 6 (the progress file's version 3 with a migration, a deck kind with its own facets, the home's chooser, a new builder command and an inventory, the sync per deck), impact 5 (every learner's progress file; a new way to learn) → 6.
@@ -78,3 +78,7 @@ Worktrees `wt/063/<lane>/learn-pali`, branch `feat/decks-<lane>`, each from the 
 | L5 chooser + screens | app/src/pages/home.rs, components/session.rs, add_word.rs, term_list.rs, learn/run.rs, learn/adding.rs, new component deck_chooser.rs, locales | chooser hidden while one deck, chips with due counts, a session per selected deck, fallback | selected deck used by every screen | 3 | ✓ |
 | Review | done | round 1: deep's six points answered by the code and its tests (Reviews); 063c note; no finding open |
 | Check | done | orchestrator on learn.dev (feat/decks · 95bed39, run 39781988052): headless Chrome dump-dom: data-hydrated set, no panic, no chooser in the markup (the one role=group is ui-lib's hidden language menu), the empty home as before; no visible change by design |
+| Merge 063a | done | be2465d on main (squash); 063b (the Devanāgarī deck) continues on this file, branch feat/devanagari-deck; prod tag with 063b |
+
+## Merge
+063a: be2465d
