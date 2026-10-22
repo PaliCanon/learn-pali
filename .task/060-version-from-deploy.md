@@ -109,3 +109,4 @@ flowchart TB
 | Apply | done | orchestrator, 2026-10-22: `tofu plan` 1 to import, 0 to change; `tofu apply` complete (google_project_service.drive imported; the env ignore rule in the config); nothing changed on the cloud |
 | Check | done | the user, 2026-10-22: «apply le badge sur search / map / learn» (go); orchestrator: the dev badge and the revision env are read after the merge |
 | Merge | done | 23c7ae2 on main (squash), pushed: the dev deploy is the first env write; prod by tag v0.1.9 after the dev badge is read |
+| Prod | done | tag v0.1.9: the prod badge reads `v0.1.9` alone (metas env=v0.1.9, sha empty); the revision env holds LEARN_PALI_ENV=v0.1.9 and LEARN_PALI_SHA with no value (gcloud stores `KEY=` as an entry without `value`; absent and empty compare equal in `same`, as designed) |
