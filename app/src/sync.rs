@@ -68,8 +68,8 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
+use learn_core::book::{Book, DeckId, merge_books};
 use learn_core::deck::{Term, TermId};
-use learn_core::merge::merge;
 use learn_core::progress::{Progress, State, StateError};
 use leptos::prelude::*;
 
@@ -439,16 +439,16 @@ impl Cycle {
     }
 
     /// This device's progress as the cycle may sync it, or why not.
-    fn local(&self) -> Result<State, Refusal> {
+    fn local(&self) -> Result<Book, Refusal> {
         if matches!(
             self.backend.status().get_untracked(),
             SaveStatus::Failed(SaveError::NewerVersion { .. })
         ) {
             return Err(Refusal::Newer);
         }
-        match self.backend.load() {
-            Load::Ok(state) => Ok(state),
-            Load::Empty => Ok(State::empty()),
+        match self.backend.load_book() {
+            Load::Ok(book) => Ok(book),
+            Load::Empty => Ok(Book::empty()),
             Load::Unreadable(_) => Err(Refusal::Unreadable),
             Load::NewerVersion { .. } => Err(Refusal::Newer),
             Load::Invalid { .. } => Err(Refusal::Invalid),
@@ -457,14 +457,14 @@ impl Cycle {
 
     /// Why the store did not take the save of `merged`, read from its
     /// status and its memory right after it; none when it took it.
-    fn refused(&self, merged: &State) -> Option<Refusal> {
+    fn refused(&self, merged: &Book) -> Option<Refusal> {
         match self.backend.status().get_untracked() {
             SaveStatus::Failed(SaveError::NewerVersion { .. }) => return Some(Refusal::Newer),
             SaveStatus::Failed(SaveError::Transient) => return Some(Refusal::NotSaved),
             SaveStatus::Saved | SaveStatus::Pending => {}
         }
-        match self.backend.load() {
-            Load::Ok(state) if same(&state, merged) => None,
+        match self.backend.load_book() {
+            Load::Ok(book) if same(&book, merged) => None,
             Load::Unreadable(_) => Some(Refusal::Unreadable),
             Load::NewerVersion { .. } => Some(Refusal::Newer),
             Load::Ok(_) | Load::Empty | Load::Invalid { .. } => Some(Refusal::NotSaved),
@@ -476,9 +476,12 @@ impl Cycle {
         let drive = match pulled {
             Err(error) => return self.finish(SyncStatus::Failed(error)),
             Ok(None) => None,
-            Ok(Some(text)) => match State::from_json_for(&text, crate::deck::deck()) {
-                Ok(state) => Some(state),
-                Err(StateError::UnknownVersion(version)) if version > State::VERSION => {
+            Ok(Some(text)) => match Book::from_json(&text) {
+                Ok(mut book) => {
+                    book.shadow_added(&DeckId::words(), crate::deck::deck());
+                    Some(book)
+                }
+                Err(StateError::UnknownVersion(version)) if version > Book::VERSION => {
                     return self.finish(SyncStatus::DriveNewer);
                 }
                 Err(_) => return self.finish(SyncStatus::DriveUnreadable { raw: text }),
@@ -490,7 +493,7 @@ impl Cycle {
     /// Reads the local progress NOW, merges the copy in, saves the merge
     /// when it changed the local, pushes it when it differs from the copy:
     /// all in this one call, no wait between the load and the save.
-    fn join(self: &Rc<Self>, drive: Option<State>) {
+    fn join(self: &Rc<Self>, drive: Option<Book>) {
         // The one boundary of a session: the push below sends this call's
         // local snapshot, so a hold landing after the check is harmless (its
         // progress is merged at the next cycle, nothing is saved under it).
@@ -503,7 +506,7 @@ impl Cycle {
         };
         let merged = drive
             .as_ref()
-            .map_or_else(|| local.clone(), |drive| merge(&local, drive));
+            .map_or_else(|| local.clone(), |drive| merge_books(&local, drive));
         if !same(&merged, &local)
             && let Some(refusal) = self.save_merge(&local, &merged)
         {
@@ -532,8 +535,8 @@ impl Cycle {
 
     /// Saves the merge locally, tells the home, counts what came from the
     /// Drive; why the store did not take it, if it did not.
-    fn save_merge(&self, local: &State, merged: &State) -> Option<Refusal> {
-        self.backend.save_merge(merged);
+    fn save_merge(&self, local: &Book, merged: &Book) -> Option<Refusal> {
+        self.backend.save_merge_book(merged);
         (self.changed)();
         if let Some(refusal) = self.refused(merged) {
             return Some(refusal);
@@ -546,7 +549,7 @@ impl Cycle {
     }
 
     /// Pushes the merge; the push's answer ends the cycle.
-    fn push(self: &Rc<Self>, merged: &State) {
+    fn push(self: &Rc<Self>, merged: &Book) {
         let step = self.begin();
         let cycle = Rc::clone(self);
         self.transport.push(
@@ -567,12 +570,22 @@ impl Cycle {
     }
 }
 
+/// Whether `a` and `b` hold the same progress: the same deck ids and the
+/// same entry ([`same_state`]) for each. A deck one side lacks is no empty
+/// entry (only `words`, which a Book always holds, is the invariant): the
+/// side that has it is ahead.
+fn same(a: &Book, b: &Book) -> bool {
+    a.decks().count() == b.decks().count()
+        && a.decks()
+            .all(|(id, state)| b.get(id).is_some_and(|other| same_state(state, other)))
+}
+
 /// Whether `a` and `b` hold the same progress, whatever the order of their
 /// terms and of their added words: the same `last_today`, the same entry
 /// for every term and the same added words. The version stamp is how a
 /// file was written (1 while no word was added), not progress: a copy in
 /// another order or of another stamp is neither saved nor pushed.
-fn same(a: &State, b: &State) -> bool {
+fn same_state(a: &State, b: &State) -> bool {
     a.last_today == b.last_today
         && a.progress.len() == b.progress.len()
         && a.added.len() == b.added.len()
@@ -598,11 +611,19 @@ fn words_of(state: &State) -> HashMap<TermId, Term> {
         .collect()
 }
 
-/// How many terms of `merged` are absent from `local` or differ from it:
-/// the entries by term and the added words by id, compared as [`same`]
-/// compares them (another order is no change). A word and its progress
-/// entry are one term.
-fn terms_changed(local: &State, merged: &State) -> usize {
+/// How many terms of `merged` are absent from `local` or differ from it,
+/// summed over the decks: a deck `local` lacks counts all its terms.
+fn terms_changed(local: &Book, merged: &Book) -> usize {
+    merged
+        .decks()
+        .map(|(id, state)| deck_terms_changed(&local.state(id), state))
+        .sum()
+}
+
+/// [`terms_changed`] of one deck: the entries by term and the added words
+/// by id, compared as [`same_state`] compares them (another order is no
+/// change). A word and its progress entry are one term.
+fn deck_terms_changed(local: &State, merged: &State) -> usize {
     let (entries, words) = (entries_of(local), words_of(local));
     let mut changed: HashSet<&TermId> = HashSet::new();
     for entry in &merged.progress {
@@ -697,6 +718,7 @@ mod tests {
     use std::rc::Rc;
 
     use learn_core::deck::TermId;
+    use learn_core::merge::merge;
     use learn_core::progress::{Progress, State};
     use learn_core::stage::Stage;
 
@@ -983,15 +1005,21 @@ mod tests {
     fn the_version_stamp_is_not_part_of_the_progress() {
         // A file of version 1 with no word reads as the empty state.
         let one: State = State::from_json(r#"{"version":1,"progress":[]}"#).unwrap();
-        assert!(same(&one, &State::empty()));
+        assert!(same_state(&one, &State::empty()));
         let stamped = State {
             version: 1,
             ..progress_fixture()
         };
-        assert!(same(&stamped, &progress_fixture()));
+        assert!(same_state(&stamped, &progress_fixture()));
         // The content still decides.
-        assert!(!same(&with_word(progress_fixture()), &progress_fixture()));
-        assert!(!same(&lapsed(progress_fixture()), &progress_fixture()));
+        assert!(!same_state(
+            &with_word(progress_fixture()),
+            &progress_fixture()
+        ));
+        assert!(!same_state(
+            &lapsed(progress_fixture()),
+            &progress_fixture()
+        ));
     }
 
     #[test]
@@ -1077,7 +1105,7 @@ mod tests {
         Owner::new().with(|| {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
             let transport = FakeTransport::signed_in();
-            let newer = r#"{"version": 3, "progress": []}"#;
+            let newer = r#"{"version": 4, "decks": {}}"#;
             transport.set_drive(Some(newer));
             let (sync, changed) = cycle(&store, &transport);
             sync.run();
@@ -1159,7 +1187,7 @@ mod tests {
         Owner::new().with(|| {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
             store.set_status(SaveStatus::Failed(SaveError::NewerVersion {
-                unsaved: progress_fixture(),
+                unsaved: learn_core::book::Book::from_state(progress_fixture()),
             }));
             let transport = FakeTransport::signed_in();
             let (sync, _) = cycle(&store, &transport);
@@ -1205,11 +1233,15 @@ mod tests {
             let (sync, _) = cycle(&store, &transport);
             sync.run();
             let answered = with_term(progress_fixture(), "meanwhile 1");
-            store.save(&answered);
+            store.save(&learn_core::book::Book::from_state(answered.clone()));
             transport.settle();
             let drive = State::from_json(&transport.drive().unwrap()).unwrap();
             assert!(drive.get(&TermId("meanwhile 1".into())).is_some());
-            assert_eq!(store.load(), Load::Ok(answered), "the local is kept");
+            assert_eq!(
+                store.load(),
+                Load::Ok(learn_core::book::Book::from_state(answered)),
+                "the local is kept"
+            );
         });
     }
 
@@ -1569,7 +1601,10 @@ mod tests {
             assert_eq!(transport.sign_outs(), 1);
             assert_eq!(sync.account().get_untracked(), SyncAccount::SignedOut);
             assert_eq!(sync.status().get_untracked(), SyncStatus::Idle);
-            assert_eq!(store.load(), Load::Ok(progress_fixture()));
+            assert_eq!(
+                store.load(),
+                Load::Ok(learn_core::book::Book::from_state(progress_fixture()))
+            );
         });
     }
 
@@ -1610,6 +1645,202 @@ mod tests {
             assert_eq!(transport.sign_ins_waiting(), 1);
             assert_eq!(transport.pull_calls(), 0);
         });
+    }
+
+    // ---- the Book: one join per deck (task 063a) ----
+
+    /// The deck the tests give progress to besides `words`.
+    fn zz() -> DeckId {
+        DeckId("zz".into())
+    }
+
+    /// A Book of `words` and, when given, the `zz` deck.
+    fn book_of(words: State, zz_state: Option<State>) -> Book {
+        let mut book = Book::from_state(words);
+        if let Some(state) = zz_state {
+            book.set(zz(), state);
+        }
+        book
+    }
+
+    /// A `zz` deck with one started term.
+    fn zz_state() -> State {
+        with_term(State::empty(), "zz 1")
+    }
+
+    /// A cycle over a store holding `local` and a Drive holding `drive`
+    /// (none: no file), run to its end.
+    fn run_cycle(
+        local: &Book,
+        drive: Option<&str>,
+    ) -> (FakeStore, FakeTransport, SyncCycle, Rc<Cell<usize>>) {
+        let store = FakeStore::with_book(Load::Ok(local.clone()));
+        let transport = FakeTransport::signed_in();
+        transport.set_drive(drive);
+        let (sync, changed) = cycle(&store, &transport);
+        sync.run();
+        transport.settle();
+        (store, transport, sync, changed)
+    }
+
+    /// The Book a pushed text holds.
+    fn book_of_text(text: &str) -> Book {
+        Book::from_json(text).expect("a pushed text reads")
+    }
+
+    #[test]
+    fn a_deck_only_this_device_has_is_kept_whole_and_pushed_in_stamp_3() {
+        Owner::new().with(|| {
+            let local = book_of(progress_fixture(), Some(zz_state()));
+            let drive = lapsed(progress_fixture());
+            let (store, transport, sync, changed) = run_cycle(&local, Some(&drive.to_json()));
+            let expected = book_of(drive, Some(zz_state()));
+            let saved = store.saved_books();
+            assert_eq!(saved.len(), 1, "the Drive's words are saved locally");
+            assert!(same(&saved[0], &expected), "zz kept whole: {saved:?}");
+            assert_eq!(changed.get(), 1);
+            let pushed = transport.pushed();
+            assert_eq!(pushed.len(), 1);
+            assert!(pushed[0].contains("\"version\": 3"), "{}", pushed[0]);
+            assert!(same(&book_of_text(&pushed[0]), &expected));
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn a_deck_only_the_drive_has_is_saved_locally_and_counted() {
+        Owner::new().with(|| {
+            let local = Book::from_state(progress_fixture());
+            let drive = book_of(progress_fixture(), Some(zz_state()));
+            let (store, transport, sync, changed) = run_cycle(&local, Some(&drive.to_json()));
+            let saved = store.saved_books();
+            assert_eq!(saved.len(), 1);
+            assert!(same(&saved[0], &drive));
+            assert_eq!(changed.get(), 1);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+            assert_eq!(sync.terms_from_other().get_untracked(), 1, "the zz term");
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn two_devices_ahead_on_different_decks_join_each_deck() {
+        Owner::new().with(|| {
+            let local = book_of(lapsed(progress_fixture()), Some(zz_state()));
+            let drive = book_of(progress_fixture(), Some(with_term(zz_state(), "zz 2")));
+            let (store, transport, sync, _) = run_cycle(&local, Some(&drive.to_json()));
+            let expected = book_of(
+                lapsed(progress_fixture()),
+                Some(with_term(zz_state(), "zz 2")),
+            );
+            let saved = store.saved_books();
+            assert_eq!(saved.len(), 1);
+            assert!(same(&saved[0], &expected), "{saved:?}");
+            let pushed = transport.pushed();
+            assert_eq!(pushed.len(), 1);
+            assert!(same(&book_of_text(&pushed[0]), &expected));
+            assert_eq!(
+                sync.terms_from_other().get_untracked(),
+                1,
+                "only the zz term came from the Drive"
+            );
+        });
+    }
+
+    #[test]
+    fn an_unknown_deck_on_the_drive_survives_the_cycle_and_is_pushed_back() {
+        Owner::new().with(|| {
+            let local = Book::from_state(lapsed(progress_fixture()));
+            let future = DeckId("deck-from-the-future".into());
+            let mut drive = Book::from_state(progress_fixture());
+            drive.set(future.clone(), with_term(State::empty(), "x 1"));
+            let (store, transport, _, _) = run_cycle(&local, Some(&drive.to_json()));
+            let saved = store.saved_books();
+            assert_eq!(saved.len(), 1);
+            assert!(saved[0].get(&future).is_some(), "kept locally");
+            let pushed = transport.pushed();
+            assert_eq!(pushed.len(), 1);
+            let back = book_of_text(&pushed[0]);
+            assert!(same_state(
+                back.get(&future).expect("pushed back"),
+                &with_term(State::empty(), "x 1")
+            ));
+        });
+    }
+
+    #[test]
+    fn a_stamp_3_copy_is_unknown_to_a_build_that_reads_only_2() {
+        let book = book_of(progress_fixture(), Some(zz_state()));
+        assert!(matches!(
+            State::from_json_upto(&book.to_json(), 2),
+            Err(StateError::UnknownVersion(3))
+        ));
+        // This build reads it; a stamp 4 is the newer one.
+        assert!(Book::from_json(&book.to_json()).is_ok());
+        Owner::new().with(|| {
+            let local = Book::from_state(progress_fixture());
+            let newer = r#"{"version": 4, "decks": {}}"#;
+            let (store, transport, sync, changed) = run_cycle(&local, Some(newer));
+            assert_eq!(sync.status().get_untracked(), SyncStatus::DriveNewer);
+            assert_eq!(store.saved_books(), vec![]);
+            assert_eq!(transport.pushed(), Vec::<String>::new());
+            assert_eq!(transport.drive().as_deref(), Some(newer));
+            assert_eq!(changed.get(), 0);
+        });
+    }
+
+    #[test]
+    fn a_stamp_3_local_is_pushed_stamp_3_over_a_flat_copy_of_the_same_words() {
+        Owner::new().with(|| {
+            let local = book_of(progress_fixture(), Some(zz_state()));
+            let (store, transport, sync, _) =
+                run_cycle(&local, Some(&progress_fixture().to_json()));
+            assert_eq!(store.saved_books(), vec![], "nothing new locally");
+            assert_eq!(transport.pushed(), vec![local.to_json()]);
+            assert!(transport.pushed()[0].contains("\"version\": 3"));
+            assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn a_second_cycle_against_the_pushed_copy_changes_and_pushes_nothing() {
+        Owner::new().with(|| {
+            let local = book_of(lapsed(progress_fixture()), Some(zz_state()));
+            let drive = book_of(progress_fixture(), Some(with_term(zz_state(), "zz 2")));
+            let (store, transport, _, _) = run_cycle(&local, Some(&drive.to_json()));
+            let (pushed, saved) = (transport.pushed().len(), store.saved_books().len());
+            assert_eq!((pushed, saved), (1, 1));
+            let (again, changed) = cycle(&store, &transport);
+            again.run();
+            transport.settle();
+            assert_eq!(transport.pushed().len(), pushed, "nothing pushed");
+            assert_eq!(store.saved_books().len(), saved, "nothing saved");
+            assert_eq!(changed.get(), 0);
+            assert_eq!(again.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    fn a_deck_one_side_lacks_is_no_empty_entry_except_words() {
+        let words = Book::from_state(progress_fixture());
+        let with_empty = book_of(progress_fixture(), Some(State::empty()));
+        assert!(!same(&words, &with_empty));
+        assert!(!same(&with_empty, &words));
+        assert!(same(&with_empty, &with_empty.clone()));
+        let missing = Book::empty();
+        let empty_words = Book::from_state(State::empty());
+        assert!(same(&missing, &empty_words), "words is always there");
+    }
+
+    #[test]
+    fn the_count_sums_the_decks_and_a_deck_absent_locally_counts_whole() {
+        let local = Book::from_state(progress_fixture());
+        let merged = book_of(
+            lapsed(progress_fixture()),
+            Some(with_term(zz_state(), "zz 2")),
+        );
+        assert_eq!(terms_changed(&local, &merged), 3, "1 lapsed + 2 in zz");
+        assert_eq!(terms_changed(&merged, &merged), 0);
     }
 
     #[test]

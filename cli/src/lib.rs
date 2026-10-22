@@ -15,7 +15,7 @@ use learn_core::stats::Stats;
 use crate::args::{Args, ArgsError, Command, parse_args, usage};
 use crate::review::review;
 use crate::stats::print_stats;
-use crate::store::{StoreError, load_state, save_state};
+use crate::store::{StateSlot, StoreError, load_state, save_state};
 
 pub mod args;
 pub mod review;
@@ -109,11 +109,15 @@ where
 /// Runs the command of `args`; the first failure stops it.
 fn execute<R: BufRead, W: Write>(args: &Args, input: R, mut out: W) -> Result<(), CliError> {
     let deck = load_deck(&args.deck)?;
-    let state = load_state(&args.state)?;
+    let state = load_state(&args.state, &args.deck_id)?;
     let today = args.today_or_now();
     let seed = args.seed_or_now();
     if args.command == Command::Review {
-        review(&deck, state, today, seed, input, out, &args.state)?;
+        let slot = StateSlot {
+            path: &args.state,
+            id: &args.deck_id,
+        };
+        review(&deck, state, today, seed, input, out, slot)?;
         return Ok(());
     }
     let mut session = Session::start(&deck, state, today, seed)?;
@@ -163,7 +167,7 @@ fn refusal(stats: &Stats) -> &'static str {
 /// file, or it is redone from the stale `due` at every run).
 fn save_if(changed: bool, session: &Session<'_>, args: &Args) -> Result<(), CliError> {
     if changed || session.changed_at_start() {
-        save_state(&args.state, &session.snapshot())?;
+        save_state(&args.state, &args.deck_id, &session.snapshot())?;
     }
     Ok(())
 }
@@ -293,7 +297,7 @@ mod tests {
         assert_eq!(code, 0);
         assert!(out.contains("Started 3 new terms"), "{out}");
         assert!(!out.contains("Did you know"), "{out}");
-        let saved = store::load_state(&state).unwrap();
+        let saved = store::load_state(&state, &learn_core::book::DeckId::words()).unwrap();
         assert_eq!(saved.progress.len(), 3);
         assert_eq!(
             saved.last_today.map(|d| d.to_string()).as_deref(),

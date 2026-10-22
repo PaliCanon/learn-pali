@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use std::sync::{LazyLock, Mutex, PoisonError};
 
 use learn_core::date::Date;
-use learn_core::deck::Term;
+use learn_core::deck::{Deck, Term};
 use learn_core::facet::{Facet, FacetSet, facets_of};
 use learn_core::progress::State;
 use learn_core::stage::Stage;
@@ -92,8 +92,12 @@ pub(crate) fn StageTerms(
     /// What sits just below the list (the home's '+'); none by default.
     #[prop(default = None)]
     add: Option<ViewFn>,
+    /// The deck the progress is read on: the selected one (the words deck
+    /// when not given).
+    #[prop(default = deck())]
+    deck: &'static Deck,
 ) -> impl IntoView {
-    move || view! { <TermRows rows=known_rows(&progress, stage.get()) add=add.clone() /> }
+    move || view! { <TermRows rows=known_rows(&progress, deck, stage.get()) add=add.clone() /> }
 }
 
 /// A known term and where it stands, ready to list.
@@ -113,21 +117,21 @@ pub(crate) struct Row {
     facets: FacetSet,
 }
 
-/// The known terms of `state` (those the deck has), only those of stage
+/// The known terms of `state` (those `deck` has), only those of stage
 /// `only` when given, the earliest due first, then by rank.
-pub(crate) fn known_rows(state: &State, only: Option<Stage>) -> Vec<Row> {
+pub(crate) fn known_rows(state: &State, deck: &Deck, only: Option<Stage>) -> Vec<Row> {
     let mut rows: Vec<Row> = state
         .progress
         .iter()
         .filter(|progress| only.is_none_or(|only| progress.stage == only))
         .filter_map(|progress| {
-            state.term(deck(), &progress.term).map(|term| Row {
+            state.term(deck, &progress.term).map(|term| Row {
                 term: pinned(term),
                 stage: progress.stage,
                 due: progress.due,
                 lapses: progress.lapses,
-                passed: State::effective_passed(progress, term),
-                facets: facets_of(term),
+                passed: State::effective_passed(progress, deck, term),
+                facets: facets_of(deck, term),
             })
         })
         .collect();
@@ -136,18 +140,18 @@ pub(crate) fn known_rows(state: &State, only: Option<Stage>) -> Vec<Row> {
 }
 
 /// The first day a known term of `state` is asked again: the earliest due
-/// of the terms the deck has; none when no term is started.
-pub(crate) fn next_review(state: &State) -> Option<Date> {
-    known_rows(state, None).first().map(|row| row.due)
+/// of the terms `deck` has; none when no term is started.
+pub(crate) fn next_review(state: &State, deck: &Deck) -> Option<Date> {
+    known_rows(state, deck, None).first().map(|row| row.due)
 }
 
-/// The terms of `state` the deck does not know, in file order, with their
+/// The terms of `state` `deck` does not know, in file order, with their
 /// stage.
-pub(crate) fn orphan_rows(state: &State) -> Vec<(String, Stage)> {
+pub(crate) fn orphan_rows(state: &State, deck: &Deck) -> Vec<(String, Stage)> {
     state
         .progress
         .iter()
-        .filter(|progress| state.term(deck(), &progress.term).is_none())
+        .filter(|progress| state.term(deck, &progress.term).is_none())
         .map(|progress| (progress.term.0.clone(), progress.stage))
         .collect()
 }
@@ -442,12 +446,12 @@ mod tests {
 
     /// The list of the fixture's known terms, of `stage` only when given.
     fn list(stage: Option<Stage>, language: Language) -> String {
-        let rows = known_rows(&progress_fixture(), stage);
+        let rows = known_rows(&progress_fixture(), deck(), stage);
         render(language, move || view! { <TermRows rows=rows /> })
     }
 
     fn orphans(language: Language) -> String {
-        let orphans = orphan_rows(&progress_fixture());
+        let orphans = orphan_rows(&progress_fixture(), deck());
         render(language, move || view! { <Orphans orphans=orphans /> })
     }
 
@@ -630,7 +634,7 @@ mod tests {
 
     /// One card, its disclosure `open` or not.
     fn one_card(open: bool) -> String {
-        let row = known_rows(&progress_fixture(), Some(Stage::Week)).remove(0);
+        let row = known_rows(&progress_fixture(), deck(), Some(Stage::Week)).remove(0);
         render(Language::En, move || {
             let detail = Disclosed::new(detail_id(row.term.rank), RwSignal::new(open));
             view! { <TermCard row=row open=detail /> }
@@ -695,7 +699,7 @@ mod tests {
         let kho = deck()
             .term(&learn_core::deck::TermId("kho".into()))
             .expect("kho");
-        let facets = learn_core::facet::facets_of(kho);
+        let facets = learn_core::facet::facets_of(deck(), kho);
         let pills = &html[position(&html, "data-facets")..];
         let pills = &pills[..position(pills, "</ul>")];
         assert_eq!(pills.matches("<li").count(), facets.len(), "{pills}");
@@ -752,17 +756,20 @@ mod tests {
     #[test]
     fn the_next_review_is_the_earliest_due_of_the_known_terms() {
         let state = progress_fixture();
-        assert_eq!(next_review(&state), Some(crate::test_support::today()));
+        assert_eq!(
+            next_review(&state, deck()),
+            Some(crate::test_support::today())
+        );
         let mut later = progress_fixture();
         later
             .progress
             .retain(|p| p.term.0 == "kho" || p.term.0 == "ghost 1");
         assert_eq!(
-            next_review(&later),
+            next_review(&later, deck()),
             Some(Date::from_days(crate::test_support::today().days() + 7)),
             "an orphan's date does not count"
         );
-        assert_eq!(next_review(&State::empty()), None);
+        assert_eq!(next_review(&State::empty(), deck()), None);
     }
 
     #[test]
@@ -921,12 +928,12 @@ mod tests {
     fn a_started_added_word_is_a_known_row_not_an_orphan() {
         use crate::test_support::{added_started, today};
         let state = added_started(Stage::Week, today() + 2);
-        let rows = known_rows(&state, None);
+        let rows = known_rows(&state, deck(), None);
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].term.lemma, "sānuvajja");
         assert_eq!(rows[0].facets.len(), 2);
-        assert_eq!(known_rows(&state, Some(Stage::Day)).len(), 0);
-        assert_eq!(orphan_rows(&state), Vec::<(String, Stage)>::new());
-        assert_eq!(next_review(&state), Some(today() + 2));
+        assert_eq!(known_rows(&state, deck(), Some(Stage::Day)).len(), 0);
+        assert_eq!(orphan_rows(&state, deck()), Vec::<(String, Stage)>::new());
+        assert_eq!(next_review(&state, deck()), Some(today() + 2));
     }
 }

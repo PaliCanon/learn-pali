@@ -111,6 +111,23 @@ whole and replaces the progress in that browser; a refused file (not a state,
 saved by a newer version, the same term twice) leaves it unchanged. A state
 saved by a newer version is read-only and never overwritten.
 
+### The progress Book and the selected deck
+
+The progress file is a `Book` (`core/src/book.rs`): one State body per deck
+id (`{version: 3, decks: {words: {...}, <id>: {...}}}`). It is written in the
+flat format every build reads (version 1 or 2, the `words` deck's State alone)
+as long as every other deck holds no progress and no added word, and as
+version 3 once one does; a flat file reads as `{words: it}`. A build that
+reads up to version 2 refuses a version-3 file and never overwrites it. The
+host's `ProgressStore` holds the Book; the `Backend` maps it to the selected
+deck's State, so the screens and the session work on one State. The selected
+deck is a device setting (`localStorage[pc_learn_deck]`, not in the Book, not
+synced; an unknown id falls back to `words`). The home shows a deck chooser
+only when more than one deck is registered (`app/src/deck.rs`: today one).
+Settings' export writes the whole Book; an import replaces every deck. The
+sync (`app/src/sync.rs`) joins the two Books deck by deck. The CLI acts on one
+entry with `--deck-id` (default `words`).
+
 ### The embedded deck
 
 The site teaches the deck `core/fixtures/deck.json`, embedded in the server
@@ -142,6 +159,12 @@ them with `review`), and `advance K` brings K long-stage terms (Month or
 later) forward after a pause — refused, with the reason, while anything is
 due or new. A date before the state's last day is refused. A state file that
 cannot be read is never overwritten. `learn-cli --help` lists the options.
+
+`--deck-id ID` (default `words`) names the deck of the state file the
+commands act on: the file is a Book with one entry per deck, and `--deck`
+stays the deck file. A file with only `words` progress stays in the flat
+format every build reads; a file with progress in another deck is stamp 3,
+which an older build refuses and never overwrites.
 
 ## Rebuild the fixture deck
 

@@ -6,8 +6,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use learn_core::book::{Book, DeckId};
 use learn_core::date::Date;
-use learn_core::deck::{Deck, TermId};
+use learn_core::deck::{Deck, Term, TermId};
 use learn_core::facet::{Facet, FacetSet};
 use learn_core::progress::{Progress, State};
 use learn_core::stage::Stage;
@@ -503,4 +504,161 @@ fn a_wrong_deck_with_large_input_does_not_panic_on_broken_pipe() {
         "{}",
         run.out
     );
+}
+
+fn zz() -> DeckId {
+    DeckId("zz".to_owned())
+}
+
+impl Env {
+    fn book(&self) -> Book {
+        Book::from_json(&fs::read_to_string(self.state()).unwrap()).unwrap()
+    }
+
+    fn text(&self) -> String {
+        fs::read_to_string(self.state()).unwrap()
+    }
+}
+
+/// An added word, as the site's "add a word" would store it.
+fn added_word() -> Term {
+    let deck = Deck::from_json(
+        r#"{"version":1,"source":"test","terms":[
+            {"id":"sānuvajja","lemma":"sānuvajja","pos":"ind","meaning":{"en":"blameworthy"},
+             "forms":[],"rank":4294967295}]}"#,
+    )
+    .unwrap();
+    deck.terms[0].clone()
+}
+
+#[test]
+fn a_words_only_file_stays_flat_byte_for_byte_after_new() {
+    let stamp_1 = State::empty()
+        .to_json()
+        .replacen("\"version\": 2", "\"version\": 1", 1);
+    let mut with_added = State::empty();
+    with_added.added.push(added_word());
+    for (name, start) in [("flat-1", stamp_1), ("flat-2", with_added.to_json())] {
+        let env = Env::new(name);
+        fs::write(env.state(), &start).unwrap();
+        let run = env.run(TODAY, &["new", "3"], "");
+        assert_eq!(run.code, 0, "{name}: {}", run.err);
+        let text = env.text();
+        assert_eq!(text, env.load().to_json(), "{name}: the state's own text");
+        assert_eq!(env.load().progress.len(), 3, "{name}");
+        assert!(
+            text.contains("\"version\": 1") || text.contains("\"version\": 2"),
+            "{name}: {text}"
+        );
+        assert!(!text.contains("\"decks\""), "{name}: {text}");
+    }
+}
+
+#[test]
+fn new_on_another_deck_makes_the_file_stamp_3_and_leaves_words_whole() {
+    let env = Env::new("deck-id-new");
+    env.run(TODAY, &["new", "1"], "");
+    let words_before = env.load();
+    let run = env.run(TODAY, &["new", "2", "--deck-id", "zz"], "");
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(run.out.contains("Started 2 new terms"), "{}", run.out);
+    assert!(env.text().contains("\"version\": 3"), "{}", env.text());
+    let book = env.book();
+    assert_eq!(book.state(&DeckId::words()), words_before);
+    assert_eq!(book.state(&zz()).progress.len(), 2);
+}
+
+#[test]
+fn stats_on_a_deck_the_file_lacks_prints_all_new_and_writes_nothing() {
+    let env = Env::new("deck-id-stats");
+    env.run(TODAY, &["new", "2"], "");
+    let before = fs::read(env.state()).unwrap();
+    let run = env.run(TODAY, &["stats", "--deck-id", "zz"], "");
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(
+        run.out
+            .lines()
+            .any(|l| l.starts_with("new left") && l.ends_with("50")),
+        "{}",
+        run.out
+    );
+    assert_eq!(fs::read(env.state()).unwrap(), before);
+}
+
+#[test]
+fn the_words_commands_leave_another_decks_entry_intact() {
+    let env = Env::new("deck-id-intact");
+    env.run(TODAY, &["new", "2", "--deck-id", "zz"], "");
+    let zz_before = env.book().state(&zz());
+    assert_eq!(zz_before.progress.len(), 2);
+    let run = env.run(TODAY, &["new", "1"], "");
+    assert_eq!(run.code, 0, "{}", run.err);
+    let book = env.book();
+    assert_eq!(book.state(&zz()), zz_before);
+    assert_eq!(book.state(&DeckId::words()).progress.len(), 1);
+}
+
+#[test]
+fn review_saves_into_the_chosen_entry() {
+    let env = Env::new("deck-id-review");
+    env.run(TODAY, &["new", "3", "--deck-id", "zz"], "");
+    let run = env.run(TODAY, &["review", "--deck-id", "zz"], &yes(40));
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(run.out.contains("Session over"), "{}", run.out);
+    let book = env.book();
+    let progress = book.state(&zz()).progress;
+    assert_eq!(progress.len(), 3);
+    assert!(progress.iter().all(|p| p.stage == Stage::Week));
+    assert_eq!(book.state(&DeckId::words()), State::empty());
+}
+
+#[test]
+fn a_refused_file_is_left_untouched_with_a_deck_id() {
+    for (name, bytes) in [
+        ("stamp4", &b"{\"version\": 4, \"decks\": {}}"[..]),
+        ("garbage", &b"{ this is not a state"[..]),
+    ] {
+        let env = Env::new(&format!("deck-id-refused-{name}"));
+        fs::write(env.state(), bytes).unwrap();
+        for command in [
+            &["review", "--deck-id", "zz"][..],
+            &["stats", "--deck-id", "zz"],
+            &["new", "2", "--deck-id", "zz"],
+            &["advance", "2", "--deck-id", "zz"],
+        ] {
+            let run = env.run(TODAY, command, &yes(5));
+            assert_eq!(run.code, 1, "{name} {command:?}");
+            assert!(run.err.contains("left untouched"), "{}", run.err);
+            assert_eq!(fs::read(env.state()).unwrap(), bytes, "{name} {command:?}");
+        }
+    }
+}
+
+#[test]
+fn deck_id_and_the_flat_format_rule_pair() {
+    let chosen = Env::new("pair-chosen");
+    let run = chosen.run(TODAY, &["new", "1", "--deck-id", "zz"], "");
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(
+        chosen.text().contains("\"version\": 3"),
+        "{}",
+        chosen.text()
+    );
+    let flat = Env::new("pair-flat");
+    fs::write(flat.state(), State::empty().to_json()).unwrap();
+    let run = flat.run(TODAY, &["new", "1"], "");
+    assert_eq!(run.code, 0, "{}", run.err);
+    assert!(!flat.text().contains("\"decks\""), "{}", flat.text());
+}
+
+#[test]
+fn an_empty_deck_id_exits_2_and_a_missing_value_names_the_option() {
+    let env = Env::new("deck-id-bad");
+    let run = env.run(TODAY, &["stats", "--deck-id", ""], "");
+    assert_eq!(run.code, 2);
+    assert!(run.err.contains("--deck-id"), "{}", run.err);
+    let run = env.run(TODAY, &["stats", "--deck-id"], "");
+    assert_eq!(run.code, 2);
+    assert!(run.err.contains("--deck-id"), "{}", run.err);
+    assert!(!env.state().exists());
 }

@@ -11,6 +11,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+use crate::kind::DeckKind;
 use crate::words::WordEntry;
 
 /// The deck's own key: the DPD lemma key (`sati 1.1`). Unique in a deck.
@@ -182,6 +183,11 @@ pub struct Deck {
     /// absent. Empty in a deck written before them.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub words: BTreeMap<String, Vec<WordEntry>>,
+    /// What the deck is made of, which owns its facet rule
+    /// ([`DeckKind::facets`]); absent in the file means words, and a words
+    /// deck is written without it. An unknown kind is refused on load.
+    #[serde(default, skip_serializing_if = "DeckKind::is_words")]
+    pub kind: DeckKind,
 }
 
 impl Deck {
@@ -236,7 +242,7 @@ impl Deck {
 /// Builders of terms and decks shared by the tests of the crate.
 #[cfg(test)]
 pub(crate) mod samples {
-    use super::{Blank, Deck, Example, Form, Meaning, Pos, Term, TermId};
+    use super::{Blank, Deck, DeckKind, Example, Form, Meaning, Pos, Term, TermId};
 
     /// An indeclinable: Meaning and Recall only.
     pub(crate) fn indeclinable(id: &str, rank: u32) -> Term {
@@ -309,6 +315,7 @@ pub(crate) mod samples {
             source: "test deck".to_string(),
             terms,
             words: std::collections::BTreeMap::new(),
+            kind: DeckKind::Words,
         }
     }
 }
@@ -514,5 +521,35 @@ mod tests {
         let found = deck.term(&TermId("kho".to_string())).unwrap();
         assert_eq!(found.rank, 2);
         assert!(deck.term(&TermId("missing".to_string())).is_none());
+    }
+
+    // ---- the kind ----
+
+    #[test]
+    fn a_deck_with_no_kind_reads_as_words_and_a_words_deck_is_written_without_one() {
+        let deck = Deck::from_json(include_str!("../fixtures/deck.json")).unwrap();
+        assert_eq!(deck.kind, DeckKind::Words);
+        assert!(!deck.to_json().contains("\"kind\""));
+        assert!(!two_terms().to_json().contains("\"kind\""));
+    }
+
+    #[test]
+    fn a_script_deck_is_written_with_its_kind_and_round_trips() {
+        let script = Deck {
+            kind: DeckKind::Script,
+            ..two_terms()
+        };
+        let json = script.to_json();
+        assert!(json.contains("\"kind\":\"script\""), "{json}");
+        assert_eq!(Deck::from_json(&json), Ok(script));
+    }
+
+    #[test]
+    fn an_unknown_kind_is_refused() {
+        let json = two_terms()
+            .to_json()
+            .replacen('{', "{\"kind\":\"basic\",", 1);
+        assert!(json.contains("\"kind\":\"basic\""));
+        assert!(matches!(Deck::from_json(&json), Err(DeckError::Json(_))));
     }
 }

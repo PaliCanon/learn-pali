@@ -7,7 +7,7 @@
 //! does not know (a different or newer deck) is kept as it is, never asked.
 //!
 //! `passed` is what has been answered right at the current stage. It is read
-//! through [`State::effective_passed`] as `passed ∩ facets_of(term)`: a deck
+//! through [`State::effective_passed`] as `passed ∩ facets_of(deck, term)`: a deck
 //! that gains a facet makes the term ask it at its next due, and one that
 //! loses a facet does not block the stage.
 
@@ -247,9 +247,10 @@ impl State {
         self.progress.iter().find(|entry| &entry.term == term)
     }
 
-    /// What counts as passed for this term now: `passed ∩ facets_of(term)`.
-    pub fn effective_passed(progress: &Progress, term: &Term) -> FacetSet {
-        progress.passed.intersection(&facets_of(term))
+    /// What counts as passed for this term now, in `deck`:
+    /// `passed ∩ facets_of(deck, term)`.
+    pub fn effective_passed(progress: &Progress, deck: &Deck, term: &Term) -> FacetSet {
+        progress.passed.intersection(&facets_of(deck, term))
     }
 }
 
@@ -266,6 +267,7 @@ mod tests {
     use crate::deck::Deck;
     use crate::deck::samples::{deck, example, form, indeclinable, noun};
     use crate::facet::Facet;
+    use crate::kind::DeckKind;
 
     fn day(text: &str) -> Date {
         Date::parse(text).unwrap()
@@ -639,21 +641,53 @@ mod tests {
 
         // The term still has every facet: nothing is dropped.
         let full = noun("x", 1);
-        assert_eq!(State::effective_passed(&progress, &full), progress.passed);
+        assert_eq!(
+            State::effective_passed(&progress, &deck(vec![]), &full),
+            progress.passed
+        );
 
         // The deck lost Forms and Context: only Meaning counts, so the stage
         // is not blocked by a facet that cannot be asked any more.
         let lost = indeclinable("x", 1);
         let expected: FacetSet = [Facet::Meaning].into_iter().collect();
-        assert_eq!(State::effective_passed(&progress, &lost), expected);
+        assert_eq!(
+            State::effective_passed(&progress, &deck(vec![]), &lost),
+            expected
+        );
 
         // The deck gained a facet the learner never passed: it stays unpassed.
         let mut gained = indeclinable("x", 1);
         gained.forms.push(form("nom sg", "x"));
         gained.example = Some(example(true));
-        let effective = State::effective_passed(&progress, &gained);
+        let effective = State::effective_passed(&progress, &deck(vec![]), &gained);
         assert!(effective.contains(Facet::Forms) && effective.contains(Facet::Context));
         let empty = Progress::new(id("x"), day("2026-10-05"));
-        assert_eq!(State::effective_passed(&empty, &gained), FacetSet::empty());
+        assert_eq!(
+            State::effective_passed(&empty, &deck(vec![]), &gained),
+            FacetSet::empty()
+        );
+    }
+
+    #[test]
+    fn effective_passed_under_a_script_deck_ignores_the_facets_it_does_not_ask() {
+        let mut progress = Progress::new(id("x"), day("2026-10-05"));
+        progress.passed = [Facet::Meaning, Facet::Context, Facet::Forms]
+            .into_iter()
+            .collect();
+        let script = Deck {
+            kind: DeckKind::Script,
+            ..deck(vec![])
+        };
+        let expected: FacetSet = [Facet::Meaning].into_iter().collect();
+        // The noun carries Forms and Context; a script deck asks neither.
+        assert_eq!(
+            State::effective_passed(&progress, &script, &noun("x", 1)),
+            expected
+        );
+        // The same progress under a words deck keeps all three.
+        assert_eq!(
+            State::effective_passed(&progress, &deck(vec![]), &noun("x", 1)),
+            progress.passed
+        );
     }
 }

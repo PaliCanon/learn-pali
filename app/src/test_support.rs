@@ -8,9 +8,11 @@
     allow(dead_code, reason = "used by the ssr render tests only")
 )]
 
+use learn_core::book::{Book, DeckId};
 use learn_core::date::Date;
-use learn_core::deck::{Meaning, Pos, Term, TermId};
+use learn_core::deck::{Deck, Meaning, Pos, Term, TermId};
 use learn_core::facet::{Facet, FacetSet};
+use learn_core::kind::DeckKind;
 use learn_core::progress::{Progress, State};
 use learn_core::session::Session;
 use learn_core::stage::Stage;
@@ -79,6 +81,40 @@ pub(crate) fn added_started(stage: Stage, due: Date) -> State {
     held
 }
 
+/// A tiny second deck of kind script, three signs, for the tests of the
+/// selected deck: its id in a registry is `zz` ([`second_entry`]).
+pub(crate) fn second_deck() -> &'static Deck {
+    static SECOND: std::sync::LazyLock<Deck> = std::sync::LazyLock::new(|| {
+        let terms = ["zz-1", "zz-2", "zz-3"]
+            .into_iter()
+            .zip(1u32..)
+            .map(|(id, rank)| {
+                let mut term = added_word();
+                term.id = TermId(id.into());
+                term.lemma = id.into();
+                term.rank = rank;
+                term
+            })
+            .collect();
+        Deck {
+            version: Deck::VERSION,
+            source: "test".into(),
+            terms,
+            words: std::collections::BTreeMap::new(),
+            kind: DeckKind::Script,
+        }
+    });
+    &SECOND
+}
+
+/// The registry entry of [`second_deck`], id `zz`.
+pub(crate) fn second_entry() -> crate::deck::Entry {
+    crate::deck::Entry {
+        id: DeckId("zz".into()),
+        deck: second_deck(),
+    }
+}
+
 /// The byte where `needle` starts; a panic showing the HTML otherwise.
 #[cfg(feature = "ssr")]
 pub(crate) fn position(html: &str, needle: &str) -> usize {
@@ -139,11 +175,15 @@ pub(crate) enum Outcome {
 /// The state of a [`FakeStore`].
 struct FakeInner {
     /// The memory: what `load` answers.
-    load: RefCell<Load>,
-    /// Every state `save` accepted, in order.
-    saved: RefCell<Vec<State>>,
-    /// Every state that reached the "file".
-    written: RefCell<Vec<State>>,
+    load: RefCell<Load<Book>>,
+    /// Every Book `save` accepted, in order.
+    saved: RefCell<Vec<Book>>,
+    /// Every Book that reached the "file".
+    written: RefCell<Vec<Book>>,
+    /// The deck the device remembers.
+    selected: RefCell<Option<DeckId>>,
+    /// Every deck `select` was given, in order.
+    selects: RefCell<Vec<DeckId>>,
     /// The outcomes of the next saves, then `Written`.
     script: RefCell<VecDeque<Outcome>>,
     /// The status the store reports.
@@ -159,12 +199,20 @@ struct FakeInner {
 pub(crate) struct FakeStore(Rc<FakeInner>);
 
 impl FakeStore {
-    /// A store whose memory is `load`, status `Saved`.
+    /// A store whose memory is `load`, a state read as the `words` entry of
+    /// a flat Book, status `Saved`.
     pub(crate) fn new(load: Load) -> Self {
+        FakeStore::with_book(load.map(Book::from_state))
+    }
+
+    /// A store whose memory is the Book `load`, status `Saved`.
+    pub(crate) fn with_book(load: Load<Book>) -> Self {
         FakeStore(Rc::new(FakeInner {
             load: RefCell::new(load),
             saved: RefCell::default(),
             written: RefCell::default(),
+            selected: RefCell::default(),
+            selects: RefCell::default(),
             script: RefCell::default(),
             status: RwSignal::new(SaveStatus::Saved),
             callbacks: RefCell::default(),
@@ -176,14 +224,49 @@ impl FakeStore {
         self.0.script.borrow_mut().extend(outcomes.iter().copied());
     }
 
-    /// Every state `save` was given.
+    /// The `words` entry of every Book `save` was given.
     pub(crate) fn saved(&self) -> Vec<State> {
+        self.0
+            .saved
+            .borrow()
+            .iter()
+            .map(|book| book.words().clone())
+            .collect()
+    }
+
+    /// Every Book `save` was given.
+    pub(crate) fn saved_books(&self) -> Vec<Book> {
         self.0.saved.borrow().clone()
     }
 
-    /// Every state that reached the "file".
+    /// The `words` entry of every Book that reached the "file".
     pub(crate) fn written(&self) -> Vec<State> {
+        self.0
+            .written
+            .borrow()
+            .iter()
+            .map(|book| book.words().clone())
+            .collect()
+    }
+
+    /// Every Book that reached the "file".
+    pub(crate) fn written_books(&self) -> Vec<Book> {
         self.0.written.borrow().clone()
+    }
+
+    /// What the store holds now, the whole Book.
+    pub(crate) fn book_now(&self) -> Load<Book> {
+        self.0.load.borrow().clone()
+    }
+
+    /// Every deck `select` was given.
+    pub(crate) fn selects(&self) -> Vec<DeckId> {
+        self.0.selects.borrow().clone()
+    }
+
+    /// The device remembers `deck` as chosen, before the page opens.
+    pub(crate) fn remember_selected(&self, deck: &str) {
+        *self.0.selected.borrow_mut() = Some(DeckId(deck.into()));
     }
 
     /// Sets the status the store reports.
@@ -199,6 +282,11 @@ impl FakeStore {
     /// The memory changed outside a save (another tab): `load` answers
     /// `load`, then the handlers run.
     pub(crate) fn changed_to(&self, load: Load) {
+        self.changed_to_book(load.map(Book::from_state));
+    }
+
+    /// [`FakeStore::changed_to`] with a whole Book.
+    pub(crate) fn changed_to_book(&self, load: Load<Book>) {
         *self.0.load.borrow_mut() = load;
         self.changed_outside();
     }
@@ -214,18 +302,18 @@ impl FakeStore {
     /// "file", unless the load was `Unreadable` or a newer file won.
     pub(crate) fn exit_write(&self) {
         let memory = self.0.load.borrow().clone();
-        if let Load::Ok(state) = memory {
-            self.0.written.borrow_mut().push(state);
+        if let Load::Ok(book) = memory {
+            self.0.written.borrow_mut().push(book);
         }
     }
 }
 
 impl ProgressStore for FakeStore {
-    fn load(&self) -> Load {
+    fn load(&self) -> Load<Book> {
         self.0.load.borrow().clone()
     }
 
-    fn save(&self, state: &State) {
+    fn save(&self, state: &Book) {
         self.0.saved.borrow_mut().push(state.clone());
         // The store's own guard: nothing is written over a progress that
         // could not be read, or over a newer file.
@@ -267,6 +355,15 @@ impl ProgressStore for FakeStore {
 
     fn on_change(&self, callback: Box<dyn Fn()>) {
         self.0.callbacks.borrow_mut().push(callback);
+    }
+
+    fn selected(&self) -> Option<DeckId> {
+        self.0.selected.borrow().clone()
+    }
+
+    fn select(&self, deck: &DeckId) {
+        self.0.selects.borrow_mut().push(deck.clone());
+        *self.0.selected.borrow_mut() = Some(deck.clone());
     }
 }
 
@@ -344,6 +441,28 @@ pub(crate) fn backend_of(store: &FakeStore, files: &FakeFiles) -> Backend {
     let (store, files): (SharedStore, SharedFiles) =
         (Rc::new(store.clone()), Rc::new(files.clone()));
     Backend::new(store, files)
+}
+
+/// A [`Backend`] over `store` and `files` teaching `decks`.
+pub(crate) fn backend_with_decks(
+    store: &FakeStore,
+    files: &FakeFiles,
+    decks: crate::deck::Decks,
+) -> Backend {
+    let (store, files): (SharedStore, SharedFiles) =
+        (Rc::new(store.clone()), Rc::new(files.clone()));
+    Backend::with_decks(store, files, decks)
+}
+
+/// The registry of the words deck and [`second_deck`] (`zz`).
+pub(crate) fn two_decks() -> crate::deck::Decks {
+    crate::deck::Decks::new(vec![
+        crate::deck::Entry {
+            id: DeckId::words(),
+            deck: deck(),
+        },
+        second_entry(),
+    ])
 }
 
 /// Provides a [`Backend`] over fresh fakes whose memory is `load`, in the

@@ -26,7 +26,7 @@
 //! a newer version (in a run too), there is no button.
 
 use learn_core::added::AddError;
-use learn_core::deck::{Example, Term, TermId};
+use learn_core::deck::{Deck, Example, Term, TermId};
 use learn_core::words::{WordEntry as DeckEntry, word_key};
 use leptos::prelude::*;
 use leptos_i18n::td_string;
@@ -35,7 +35,6 @@ use palicanon_ui_lib::{Button, EntryAction, Size, Variant, WordEntry};
 use crate::backend::Backend;
 use crate::catalogue::Locale;
 use crate::components::data_block::ProgressData;
-use crate::deck::deck;
 use crate::learn::adding::{Refused, add_through, live};
 use crate::learn::run::ReviewRun;
 use crate::store::Load;
@@ -47,7 +46,7 @@ pub(crate) fn entry_action(passage: Example, locale: Locale) -> Option<EntryActi
     let run = use_context::<RwSignal<ReviewRun>>();
     let moved = use_context::<ProgressData>();
     Some(Callback::new(move |(form, entry): (String, WordEntry)| {
-        let Some(found) = lookup(&form, &entry.headword) else {
+        let Some(found) = lookup(backend.deck(), &form, &entry.headword) else {
             return ().into_any();
         };
         if !offered(run, backend, &TermId(found.headword.clone())) {
@@ -58,14 +57,13 @@ pub(crate) fn entry_action(passage: Example, locale: Locale) -> Option<EntryActi
 }
 
 /// The dictionary entry to build the word from: among the entries the
-/// deck's dictionary holds for the pressed `form`'s key, the one whose
+/// selected deck's dictionary (a deck with none offers no button) holds for the pressed `form`'s key, the one whose
 /// headword is `headword`. A headword is offered only from the pressed
 /// form's own entries: a headword the panel shows that the dictionary does
 /// not list under that form (no entry, or another headword) gets no button,
 /// because there is nothing to build the word from.
-fn lookup(form: &str, headword: &str) -> Option<&'static DeckEntry> {
-    deck()
-        .words
+fn lookup(deck: &'static Deck, form: &str, headword: &str) -> Option<&'static DeckEntry> {
+    deck.words
         .get(&word_key(form))?
         .iter()
         .find(|entry| entry.headword == headword)
@@ -269,7 +267,7 @@ mod tests {
 
     fn run_with(state: State) -> ReviewRun {
         let session = Session::start(deck(), state.clone(), today(), 0).unwrap();
-        ReviewRun::new(session, state)
+        ReviewRun::new(session, deck(), state)
     }
 
     fn started(id: &str) -> State {
@@ -485,7 +483,7 @@ mod tests {
             let (store, _) = provide_fakes(Load::Empty);
             let backend = Backend::current();
             let run = RwSignal::new(run_with(started("kho")));
-            let entry = lookup("sānuvajjo", "sānuvajja").expect("the deck's entry");
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").expect("the deck's entry");
             let press = || add_pressed(Some(run), backend, None, entry, &passage(), "sānuvajjo");
             assert_eq!(press(), Ok(()));
             let saved = store.saved();
@@ -517,7 +515,7 @@ mod tests {
             let (store, _) = provide_fakes(Load::Empty);
             let backend = Backend::current();
             let run = RwSignal::new(run_with(started("kho")));
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             add_pressed(Some(run), backend, None, entry, &passage(), "sānuvajjo").unwrap();
             run.update(|run| {
                 run.grade(learn_core::session::Answer::Pass, |state| {
@@ -534,7 +532,7 @@ mod tests {
         Owner::new().with(|| {
             let (store, _) = provide_fakes(Load::Empty);
             let backend = Backend::current();
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             assert_eq!(
                 add_pressed(None, backend, None, entry, &passage(), "sānuvajjo"),
                 Ok(())
@@ -548,7 +546,7 @@ mod tests {
     fn a_form_not_in_the_passage_still_adds_the_word_without_a_blank() {
         Owner::new().with(|| {
             let (store, _) = provide_fakes(Load::Empty);
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let elsewhere = Example {
                 text: "natthi loke".into(),
                 ..passage()
@@ -602,7 +600,7 @@ mod tests {
                 let backend = Backend::current();
                 let run = RwSignal::new(run_with(started("kho")));
                 let before = run.with(ReviewRun::new_left);
-                let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+                let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
                 let result = add_pressed(Some(run), backend, None, entry, &passage(), "sānuvajjo");
                 let cause = match refusal {
                     Outcome::Newer => Refused::Newer,
@@ -623,7 +621,7 @@ mod tests {
         Owner::new().with(|| {
             let (store, _) = provide_fakes(Load::Empty);
             store.script(&[Outcome::Unreadable]);
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let result = add_pressed(
                 None,
                 Backend::current(),
@@ -641,7 +639,7 @@ mod tests {
     }
 
     fn store_load(store: &crate::test_support::FakeStore) -> Load {
-        crate::backend::ProgressStore::load(store)
+        crate::backend::ProgressStore::load(store).map(|book| book.words().clone())
     }
 
     #[test]
@@ -661,7 +659,7 @@ mod tests {
             provide_fakes(Load::Empty);
             let data = ProgressData::current();
             let writes = data.writes().0;
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let press = || {
                 add_pressed(
                     None,
@@ -686,7 +684,7 @@ mod tests {
             provide_fakes(Load::Empty);
             let data = ProgressData::current();
             let run = RwSignal::new(run_with(started("kho")));
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let result = add_pressed(
                 Some(run),
                 Backend::current(),
@@ -757,7 +755,7 @@ mod tests {
             let (store, _) = provide_fakes(Load::Ok(ten_started()));
             let data = ProgressData::current();
             let run = disposed_run(ten_started());
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let result = add_pressed(
                 Some(run),
                 Backend::current(),
@@ -795,7 +793,7 @@ mod tests {
             let (store, _) = provide_fakes(Load::Empty);
             let backend = Backend::current();
             let run = RwSignal::new(run_with(started("kho")));
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             let id = TermId("sānuvajja".into());
             // The panel opened with the word not started.
             assert!(super::offered(Some(run), backend, &id));
@@ -816,7 +814,7 @@ mod tests {
         Owner::new().with(|| {
             let (store, _) = provide_fakes(Load::Empty);
             let backend = Backend::current();
-            let entry = lookup("sānuvajjo", "sānuvajja").unwrap();
+            let entry = lookup(deck(), "sānuvajjo", "sānuvajja").unwrap();
             store.changed_to(Load::NewerVersion { raw: "{}".into() });
             let result = add_pressed(None, backend, None, entry, &passage(), "sānuvajjo");
             assert_eq!(result, Err(Refused::Newer));

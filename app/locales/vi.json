@@ -18,6 +18,8 @@
   "cta_practice_ahead_label_n": "Luyện tập trước, {{ count }} thuật ngữ",
   "cta_practice_label_1": "Luyện tập, {{ count }} thẻ cần ôn",
   "cta_practice_label_n": "Luyện tập, {{ count }} thẻ cần ôn",
+  "deck_chooser_label": "Bộ thẻ",
+  "deck_words": "Từ",
   "detail_due": "Lần ôn tới",
   "detail_lapses": "Số lần quên",
   "detail_stage": "Giai đoạn",

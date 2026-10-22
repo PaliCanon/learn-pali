@@ -1,7 +1,8 @@
 //! The site's host side: the progress in the browser's
-//! `localStorage[pc_learn]` ([`web_store`]) and the files through a Blob
-//! download and a file input ([`web_files`]). Today's behaviour, behind the
-//! two traits of [`crate::backend`].
+//! `localStorage[pc_learn]` ([`web_store`]), the selected deck beside it in
+//! `localStorage[pc_learn_deck]` (a device setting), and the files through
+//! a Blob download and a file input ([`web_files`]). Today's behaviour,
+//! behind the two traits of [`crate::backend`].
 //!
 //! Compiled for the site only (`ssr`, where it is a no-op that the server
 //! never calls: the progress is read in an Effect after hydration; and
@@ -18,18 +19,19 @@ use crate::backend::{
     SharedHint, SharedStore,
 };
 use crate::store::{Load, classify};
-use learn_core::progress::State;
+use learn_core::book::{Book, DeckId};
 
-/// The progress store of the web site: `localStorage[pc_learn]`, read and
-/// written synchronously. Its status is `Saved` unless the browser refuses
-/// a write (a full quota, private mode): then `Failed(Transient)`, the state
-/// kept in memory until a write goes through. A storage that is absent or
+/// The progress store of the web site: `localStorage[pc_learn]` holds the
+/// Book, read and written synchronously; the selected deck is
+/// `localStorage[pc_learn_deck]`. Its status is `Saved` unless the browser
+/// refuses a write (a full quota, private mode): then `Failed(Transient)`,
+/// the Book kept in memory until a write goes through. A storage that is absent or
 /// throws on read is [`Load::Unreadable`], and nothing is written over it,
 /// nor over a file saved by a newer version. It reports a change when
 /// another tab writes the key (the `storage` event).
 #[must_use]
 pub fn web_store() -> SharedStore {
-    Rc::new(WebStore::new(BrowserKv))
+    Rc::new(WebStore::with_deck_storage(BrowserKv, BrowserStorage))
 }
 
 /// The file transfer of the web site: the export is a Blob URL download,
@@ -48,6 +50,10 @@ pub fn web_files() -> SharedFiles {
 pub fn web_hint() -> SharedHint {
     Rc::new(WebHint::new(BrowserStorage))
 }
+
+/// The key of the selected deck in `localStorage`: a device setting, not
+/// part of the progress file and never synced.
+pub(crate) const DECK_KEY: &str = "pc_learn_deck";
 
 /// The key of the hint's answer in `localStorage`.
 pub(crate) const HINT_KEY: &str = "pc_learn_hint";
@@ -174,29 +180,43 @@ impl Picks {
     }
 }
 
-/// [`web_store`]'s implementation over a [`KeyValue`].
-struct WebStore<K> {
-    /// Where the text lives.
+/// [`web_store`]'s implementation over a [`KeyValue`] (the Book) and a
+/// [`Storage`] (the selected deck's key).
+struct WebStore<K, D = BrowserStorage> {
+    /// Where the Book lives.
     kv: K,
-    /// The latest state a write did not take: what `load` answers while it
+    /// Where the selected deck's id lives: [`DECK_KEY`] and no other key.
+    device: D,
+    /// The latest Book a write did not take: what `load` answers while it
     /// is set, so a refused write loses nothing.
-    unsaved: RefCell<Option<State>>,
+    unsaved: RefCell<Option<Book>>,
     /// `Saved`, or `Failed(Transient)` while `unsaved` is set.
     status: RwSignal<SaveStatus>,
 }
 
+#[cfg(test)]
 impl<K: KeyValue> WebStore<K> {
-    /// A store over `kv`, status `Saved`.
+    /// A store over `kv`, status `Saved`, its device setting in the
+    /// browser's storage.
     fn new(kv: K) -> Self {
+        WebStore::with_deck_storage(kv, BrowserStorage)
+    }
+}
+
+impl<K: KeyValue, D: Storage> WebStore<K, D> {
+    /// A store over `kv`, status `Saved`, remembering the selected deck in
+    /// `device`.
+    fn with_deck_storage(kv: K, device: D) -> Self {
         WebStore {
             kv,
+            device,
             unsaved: RefCell::new(None),
             status: RwSignal::new(SaveStatus::Saved),
         }
     }
 
     /// What the storage holds, whatever the memory says.
-    fn stored(&self) -> Load {
+    fn stored(&self) -> Load<Book> {
         match self.kv.get() {
             Ok(raw) => classify(raw.as_deref()),
             Err(Unavailable) => Load::Unreadable("localStorage is not available".to_owned()),
@@ -204,17 +224,17 @@ impl<K: KeyValue> WebStore<K> {
     }
 }
 
-impl<K: KeyValue> ProgressStore for WebStore<K> {
+impl<K: KeyValue, D: Storage> ProgressStore for WebStore<K, D> {
     /// The storage is read first: what it cannot give (unreadable) or must
     /// keep (a newer file) is the answer, whatever the memory holds; else
     /// the memory of a refused write, else the storage.
-    fn load(&self) -> Load {
+    fn load(&self) -> Load<Book> {
         let stored = self.stored();
         if matches!(stored, Load::Unreadable(_) | Load::NewerVersion { .. }) {
             return stored;
         }
         match self.unsaved.borrow().as_ref() {
-            Some(state) => Load::Ok(state.clone()),
+            Some(book) => Load::Ok(book.clone()),
             None => stored,
         }
     }
@@ -223,25 +243,25 @@ impl<K: KeyValue> ProgressStore for WebStore<K> {
     /// file saved by a newer version: that refusal says
     /// `Failed(NewerVersion { unsaved })`, so the strip offers the answer
     /// just given. A write the browser refuses keeps the
-    /// state in memory and says `Failed(Transient)`; the next save tries
+    /// Book in memory and says `Failed(Transient)`; the next save tries
     /// again.
-    fn save(&self, state: &State) {
+    fn save(&self, book: &Book) {
         match self.stored() {
             Load::Unreadable(_) => return,
             Load::NewerVersion { .. } => {
                 // The file wins; the answer just given is offered for Export.
                 self.status.set(SaveStatus::Failed(SaveError::NewerVersion {
-                    unsaved: state.clone(),
+                    unsaved: book.clone(),
                 }));
                 return;
             }
             Load::Ok(_) | Load::Empty | Load::Invalid { .. } => {}
         }
-        if self.kv.set(&state.to_json()).is_ok() {
+        if self.kv.set(&book.to_json()).is_ok() {
             *self.unsaved.borrow_mut() = None;
             self.status.set(SaveStatus::Saved);
         } else {
-            *self.unsaved.borrow_mut() = Some(state.clone());
+            *self.unsaved.borrow_mut() = Some(book.clone());
             self.status.set(SaveStatus::Failed(SaveError::Transient));
         }
     }
@@ -250,8 +270,25 @@ impl<K: KeyValue> ProgressStore for WebStore<K> {
         self.status.into()
     }
 
+    /// Only `pc_learn` notifies: the selected deck is a device setting that
+    /// other tabs do not hear about.
     fn on_change(&self, callback: Box<dyn Fn()>) {
         browser::on_storage_change(callback);
+    }
+
+    /// The id under [`DECK_KEY`]; none when the key is absent or the
+    /// storage cannot be read.
+    fn selected(&self) -> Option<DeckId> {
+        match self.device.get_item(DECK_KEY) {
+            Ok(Some(id)) if !id.is_empty() => Some(DeckId(id)),
+            Ok(_) | Err(Unavailable) => None,
+        }
+    }
+
+    /// Writes the id under [`DECK_KEY`]; a refused write is kept in the
+    /// page's memory by the backend, so the selection holds until reload.
+    fn select(&self, deck: &DeckId) {
+        let _ = self.device.set_item(DECK_KEY, &deck.0);
     }
 }
 
@@ -505,6 +542,21 @@ mod tests {
     use crate::backend::SaveError;
     use crate::test_support::progress_fixture;
 
+    /// The fixture progress as the Book of a learner who follows the words
+    /// deck alone.
+    fn book() -> Book {
+        Book::from_state(progress_fixture())
+    }
+
+    /// The fixture's Book with a started term in the deck `zz` too.
+    fn two_decks() -> Book {
+        let mut other = progress_fixture();
+        other.progress[0].term = learn_core::deck::TermId("zz-1".into());
+        let mut book = book();
+        book.set(DeckId("zz".into()), other);
+        book
+    }
+
     /// A `localStorage` the tests drive: its text, whether it reads, whether
     /// it takes a write.
     #[derive(Default)]
@@ -556,7 +608,7 @@ mod tests {
         Owner::new().with(|| {
             let store = web_store();
             assert_eq!(store.load(), Load::Empty);
-            store.save(&State::empty());
+            store.save(&Book::empty());
             assert_eq!(store.load(), Load::Empty);
             assert_eq!(store.status().get_untracked(), SaveStatus::Saved);
             store.on_change(Box::new(|| panic!("no other tab on the server")));
@@ -572,8 +624,8 @@ mod tests {
             let kv = FakeKv::working();
             let store = WebStore::new(&kv);
             assert_eq!(store.load(), Load::Empty);
-            store.save(&progress_fixture());
-            assert_eq!(store.load(), Load::Ok(progress_fixture()));
+            store.save(&book());
+            assert_eq!(store.load(), Load::Ok(book()));
             assert_eq!(store.status().get_untracked(), SaveStatus::Saved);
         });
     }
@@ -587,7 +639,7 @@ mod tests {
             kv.readable.set(false);
             let store = WebStore::new(&kv);
             assert!(matches!(store.load(), Load::Unreadable(_)));
-            store.save(&progress_fixture());
+            store.save(&book());
             assert_eq!(kv.attempts.get(), 0, "nothing is even tried over it");
             assert_eq!(store.status().get_untracked(), SaveStatus::Saved);
             assert!(
@@ -605,15 +657,13 @@ mod tests {
             *kv.text.borrow_mut() = Some(r#"{"version": 99}"#.to_owned());
             let store = WebStore::new(&kv);
             assert!(matches!(store.load(), Load::NewerVersion { .. }));
-            store.save(&progress_fixture());
+            store.save(&book());
             assert_eq!(kv.attempts.get(), 0, "nothing is even tried");
             // The answer just given is not lost silently: the strip offers
             // Export of it.
             assert_eq!(
                 store.status().get_untracked(),
-                SaveStatus::Failed(SaveError::NewerVersion {
-                    unsaved: progress_fixture()
-                })
+                SaveStatus::Failed(SaveError::NewerVersion { unsaved: book() })
             );
             assert!(
                 matches!(store.load(), Load::NewerVersion { .. }),
@@ -631,16 +681,16 @@ mod tests {
             let kv = FakeKv::working();
             let store = WebStore::new(&kv);
             kv.writable.set(false);
-            store.save(&progress_fixture());
+            store.save(&book());
             assert_eq!(
                 store.status().get_untracked(),
                 SaveStatus::Failed(SaveError::Transient)
             );
-            assert_eq!(store.load(), Load::Ok(progress_fixture()), "the memory");
+            assert_eq!(store.load(), Load::Ok(book()), "the memory");
             assert_eq!(kv.attempts.get(), 1, "the refused attempt is counted");
             assert_eq!(kv.writes.get(), 0);
             kv.writable.set(true);
-            let later = State::empty();
+            let later = Book::empty();
             store.save(&later);
             assert_eq!(store.status().get_untracked(), SaveStatus::Saved);
             assert_eq!(kv.attempts.get(), 2);
@@ -659,8 +709,8 @@ mod tests {
             let kv = FakeKv::working();
             let store = WebStore::new(&kv);
             kv.writable.set(false);
-            store.save(&progress_fixture());
-            assert_eq!(store.load(), Load::Ok(progress_fixture()), "the memory");
+            store.save(&book());
+            assert_eq!(store.load(), Load::Ok(book()), "the memory");
             kv.readable.set(false);
             assert!(
                 matches!(store.load(), Load::Unreadable(_)),
@@ -672,6 +722,86 @@ mod tests {
                 matches!(store.load(), Load::NewerVersion { .. }),
                 "the file wins"
             );
+        });
+    }
+
+    /// A Book of two decks round-trips whole, and a flat learner's file is
+    /// exactly today's `State` text.
+    #[test]
+    fn a_book_with_two_decks_round_trips_whole() {
+        Owner::new().with(|| {
+            let kv = FakeKv::working();
+            let store = WebStore::new(&kv);
+            store.save(&two_decks());
+            assert_eq!(store.load(), Load::Ok(two_decks()));
+            let text = kv.text.borrow().clone().unwrap();
+            assert!(text.contains("\"version\": 3"), "{text}");
+            store.save(&book());
+            assert_eq!(*kv.text.borrow(), Some(progress_fixture().to_json()));
+        });
+    }
+
+    /// A refused write keeps the whole Book in memory, the other decks
+    /// included.
+    #[test]
+    fn a_refused_write_keeps_the_whole_book() {
+        Owner::new().with(|| {
+            let kv = FakeKv::working();
+            let store = WebStore::new(&kv);
+            kv.writable.set(false);
+            store.save(&two_decks());
+            assert_eq!(store.load(), Load::Ok(two_decks()));
+            assert_eq!(kv.writes.get(), 0);
+        });
+    }
+
+    /// The selection is a device setting: `pc_learn_deck`, never the Book's
+    /// key, and nothing of the Book is written by selecting.
+    #[test]
+    fn the_selection_lives_under_its_own_key() {
+        Owner::new().with(|| {
+            assert_eq!(DECK_KEY, "pc_learn_deck");
+            assert_ne!(DECK_KEY, crate::store::KEY, "not the Book's key");
+            let kv = FakeKv::working();
+            let device = FakeStorage::working();
+            let store = WebStore::with_deck_storage(&kv, &device);
+            assert_eq!(store.selected(), None, "nothing chosen yet");
+            store.select(&DeckId("zz".into()));
+            assert_eq!(store.selected(), Some(DeckId("zz".into())));
+            assert_eq!(
+                device
+                    .items
+                    .borrow()
+                    .get("pc_learn_deck")
+                    .map(String::as_str),
+                Some("zz")
+            );
+            assert_eq!(kv.attempts.get(), 0, "the Book is not written");
+            let touched = device.touched.borrow();
+            assert!(
+                touched.iter().all(|key| key == "pc_learn_deck"),
+                "{touched:?}"
+            );
+        });
+    }
+
+    /// A storage that throws on read or refuses the write is no selection,
+    /// and no panic.
+    #[test]
+    fn an_unreadable_or_refusing_device_storage_is_no_selection() {
+        Owner::new().with(|| {
+            let kv = FakeKv::working();
+            let device = FakeStorage::working();
+            device.put("pc_learn_deck", "zz");
+            let store = WebStore::with_deck_storage(&kv, &device);
+            device.readable.set(false);
+            assert_eq!(store.selected(), None);
+            device.readable.set(true);
+            device.put("pc_learn_deck", "");
+            assert_eq!(store.selected(), None, "an empty id is none");
+            device.writable.set(false);
+            store.select(&DeckId::words());
+            assert_eq!(store.selected(), None);
         });
     }
 

@@ -3,13 +3,14 @@
 //! A term is learned through facets: **Meaning** (pāli to sense) and
 //! **Recall** (sense to pāli) always; **Forms** (a labelled inflected form)
 //! when the term has at least one regular form; **Context** (the example
-//! with the word blanked) when the example has a blank. [`facets_of`] is that
-//! rule. A [`FacetSet`] is a small set of facets, written in JSON as a list
+//! with the word blanked) when the example has a blank: the rule of a words
+//! deck. The deck's [`kind`](crate::kind) owns the rule, and [`facets_of`]
+//! asks it (a script deck asks Meaning and Recall only). A [`FacetSet`] is a small set of facets, written in JSON as a list
 //! of names (`["Meaning","Forms"]`).
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-use crate::deck::Term;
+use crate::deck::{Deck, Term};
 
 /// One aspect of a term, serialised as its name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -118,9 +119,10 @@ impl<'de> Deserialize<'de> for FacetSet {
     }
 }
 
-/// The facets a term can be asked: Meaning and Recall always; Forms when it
-/// has a form that is not rare; Context when its example has a blank.
-pub fn facets_of(term: &Term) -> FacetSet {
+/// The facets of a term in a words deck: Meaning and Recall always; Forms
+/// when it has a form that is not rare; Context when its example has a
+/// blank. The rule of [`DeckKind::Words`](crate::kind::DeckKind::Words).
+pub(crate) fn words_facets(term: &Term) -> FacetSet {
     let mut facets: FacetSet = [Facet::Meaning, Facet::Recall].into_iter().collect();
     if term.forms.iter().any(|form| !form.rare) {
         facets.insert(Facet::Forms);
@@ -135,10 +137,18 @@ pub fn facets_of(term: &Term) -> FacetSet {
     facets
 }
 
+/// The facets `term` is asked in `deck`: the one rule, owned by the deck's
+/// [`kind`](crate::kind::DeckKind) (words: the four; script: Meaning and
+/// Recall only).
+pub fn facets_of(deck: &Deck, term: &Term) -> FacetSet {
+    deck.kind.facets(term)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::deck::samples::{example, form, indeclinable, noun, rare_form};
+    use crate::deck::samples::{self, example, form, indeclinable, noun, rare_form};
+    use crate::kind::DeckKind;
 
     fn set(facets: &[Facet]) -> FacetSet {
         facets.iter().copied().collect()
@@ -146,14 +156,14 @@ mod tests {
 
     #[test]
     fn an_indeclinable_has_two_facets() {
-        let facets = facets_of(&indeclinable("kho", 1));
+        let facets = facets_of(&samples::deck(vec![]), &indeclinable("kho", 1));
         assert_eq!(facets.len(), 2);
         assert_eq!(facets, set(&[Facet::Meaning, Facet::Recall]));
     }
 
     #[test]
     fn a_noun_with_regular_forms_and_a_blank_has_four() {
-        let facets = facets_of(&noun("sati 1.1", 1));
+        let facets = facets_of(&samples::deck(vec![]), &noun("sati 1.1", 1));
         assert_eq!(facets.len(), 4);
         assert_eq!(facets, set(&Facet::ALL));
     }
@@ -191,7 +201,7 @@ mod tests {
             }
             term.example = blank.map(example);
             assert_eq!(
-                facets_of(&term),
+                facets_of(&samples::deck(vec![]), &term),
                 set(&expected),
                 "{regular} {rare} {blank:?}"
             );
@@ -202,16 +212,45 @@ mod tests {
     fn forms_all_rare_means_no_forms_facet() {
         let mut term = indeclinable("x", 1);
         term.forms = vec![rare_form("nom sg", "x"), rare_form("acc sg", "xaṃ")];
-        assert!(!facets_of(&term).contains(Facet::Forms));
+        assert!(!facets_of(&samples::deck(vec![]), &term).contains(Facet::Forms));
     }
 
     #[test]
     fn an_example_without_a_blank_has_no_context() {
         let mut term = noun("x", 1);
         term.example = Some(example(false));
-        let facets = facets_of(&term);
+        let facets = facets_of(&samples::deck(vec![]), &term);
         assert!(!facets.contains(Facet::Context));
         assert!(facets.contains(Facet::Forms));
+    }
+
+    fn script_deck() -> Deck {
+        Deck {
+            kind: DeckKind::Script,
+            ..samples::deck(vec![])
+        }
+    }
+
+    #[test]
+    fn script_facets_are_exactly_meaning_and_recall() {
+        let (script, words) = (script_deck(), samples::deck(vec![]));
+        let pair = set(&[Facet::Meaning, Facet::Recall]);
+        // The pair kind x term: the same noun (regular forms and an example
+        // with a blank) is the four in a words deck, the two in a script one.
+        assert_eq!(facets_of(&script, &indeclinable("kho", 1)), pair);
+        assert_eq!(facets_of(&script, &noun("sati 1.1", 1)), pair);
+        assert_eq!(facets_of(&words, &noun("sati 1.1", 1)), set(&Facet::ALL));
+        assert_eq!(facets_of(&words, &indeclinable("kho", 1)), pair);
+    }
+
+    #[test]
+    fn a_script_item_with_a_blank_in_its_example_gets_no_context() {
+        let mut term = noun("x", 1);
+        term.example = Some(example(true));
+        let facets = facets_of(&script_deck(), &term);
+        assert!(!facets.contains(Facet::Context));
+        assert!(!facets.contains(Facet::Forms));
+        assert_eq!(facets.len(), 2);
     }
 
     #[test]

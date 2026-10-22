@@ -24,7 +24,7 @@ impl Session<'_> {
             .into_iter()
             .map(|term| {
                 let progress = Progress::new(term.id.clone(), today);
-                let questions = unpassed_questions(term, &progress);
+                let questions = unpassed_questions(deck, term, &progress);
                 (progress, questions)
             })
             .collect();
@@ -67,7 +67,7 @@ impl Session<'_> {
             let progress = &mut progress[*index];
             progress.due = today;
             if let Some(term) = find_term(deck, added, &progress.term) {
-                self.queue.extend(unpassed_questions(term, progress));
+                self.queue.extend(unpassed_questions(deck, term, progress));
             }
         }
         picked.len()

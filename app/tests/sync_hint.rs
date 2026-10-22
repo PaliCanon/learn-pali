@@ -17,6 +17,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use learn_core::book::Book;
 use learn_core::date::Date;
 use learn_core::deck::Deck;
 use learn_core::progress::State;
@@ -34,16 +35,17 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
-/// A store holding a state two terms deep, due whatever today is.
-struct Store(RefCell<Load>);
+/// A store holding a Book whose words deck is two terms deep, due whatever
+/// today is.
+struct Store(RefCell<Load<Book>>);
 
 impl ProgressStore for Store {
-    fn load(&self) -> Load {
+    fn load(&self) -> Load<Book> {
         self.0.borrow().clone()
     }
 
-    fn save(&self, state: &State) {
-        *self.0.borrow_mut() = Load::Ok(state.clone());
+    fn save(&self, book: &Book) {
+        *self.0.borrow_mut() = Load::Ok(book.clone());
     }
 
     fn status(&self) -> Signal<SaveStatus> {
@@ -125,7 +127,7 @@ fn mount(root: &'static str, account: Account) {
         .expect("history")
         .push_state_with_url(&wasm_bindgen::JsValue::NULL, "", Some("/learn"))
         .expect("pushState");
-    let store: SharedStore = Rc::new(Store(RefCell::new(Load::Ok(seeded()))));
+    let store: SharedStore = Rc::new(Store(RefCell::new(Load::Ok(Book::from_state(seeded())))));
     let (files, sync): (SharedFiles, SharedSync) = (Rc::new(NoFiles), Rc::new(account));
     csr::mount(move || {
         palicanon_ui_lib::provide_language();

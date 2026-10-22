@@ -4,11 +4,14 @@
 //!
 //! Where the progress lives is the host's choice ([`crate::backend`]): the
 //! site keeps it in `localStorage[pc_learn]` ([`crate::web`]), the app in
-//! a file. The state is `learn_core::State`'s JSON either way.
+//! a file. The progress file is a [`Book`] (one `State` per deck); the
+//! screens work on the selected deck's `State` through the
+//! [`Backend`](crate::backend::Backend).
 //!
 //! The deck is never authoritative over the state: a term the deck does not
 //! know stays (an orphan), listed apart, never counted.
 
+use learn_core::book::{Book, DeckId};
 use learn_core::date::Date;
 use learn_core::progress::{State, StateError};
 
@@ -17,15 +20,17 @@ use crate::deck::deck;
 /// The `localStorage` key of the progress.
 pub(crate) const KEY: &str = "pc_learn";
 
-/// What a [`ProgressStore`](crate::backend::ProgressStore) holds, read.
+/// What a [`ProgressStore`](crate::backend::ProgressStore) holds, read. A
+/// store holds the whole [`Book`]; the default type is the selected deck's
+/// [`State`], which is what the screens read.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Load {
-    /// A state this build reads, with at least one entry.
-    Ok(State),
+pub enum Load<T = State> {
+    /// A progress this build reads, with at least one entry.
+    Ok(T),
     /// Nothing yet: no key, or a state with no entry.
     Empty,
-    /// Not a state this build reads (bad JSON, version 0, a duplicate
-    /// term); `raw` kept for 'Download the raw copy'.
+    /// Not a state (or a Book) this build reads (bad JSON, version 0, a
+    /// duplicate term); `raw` kept for 'Download the raw copy'.
     Invalid {
         /// The stored text, as is.
         raw: String,
@@ -44,37 +49,53 @@ pub enum Load {
     Unreadable(String),
 }
 
+impl<T> Load<T> {
+    /// The same answer with its progress turned by `f`; every other answer
+    /// is unchanged.
+    pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Load<U> {
+        match self {
+            Load::Ok(value) => Load::Ok(f(value)),
+            Load::Empty => Load::Empty,
+            Load::Invalid { raw } => Load::Invalid { raw },
+            Load::NewerVersion { raw } => Load::NewerVersion { raw },
+            Load::Unreadable(reason) => Load::Unreadable(reason),
+        }
+    }
+}
+
 /// Why an imported file was refused; the progress is unchanged.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ImportError {
-    /// Not a state (bad JSON, or a version below this build's).
+    /// Not a progress file (bad JSON, or a version below this build's).
     NotAState,
-    /// A state saved by a newer version.
+    /// A progress saved by a newer version.
     Newer,
     /// The same term twice.
     DuplicateTerm,
 }
 
-/// What the stored text `raw` is (`None`: no key). A valid state is
+/// What the stored text `raw` is (`None`: no key). A valid file is
 /// [`Load::Ok`] even with no entry: [`Load::Empty`] is the absence of the
 /// key alone, and the home decides what an empty state shows. Never
 /// [`Load::Unreadable`]: that is a read that failed, not a text. A host's
 /// store that reads a text itself (the app's file) classifies it with this.
-pub fn classify(raw: Option<&str>) -> Load {
-    classify_as(raw, State::VERSION)
+/// A flat file (today's state) is a Book holding the `words` deck alone.
+pub fn classify(raw: Option<&str>) -> Load<Book> {
+    classify_as(raw, Book::VERSION)
 }
 
 /// [`classify`] as a build whose highest version is `newest` classifies:
 /// the build before added words (1) holds a version-2 file read-only. An
-/// added word the deck now teaches is dropped: the deck's term shadows it.
-pub(crate) fn classify_as(raw: Option<&str>, newest: u32) -> Load {
+/// added word the words deck now teaches is dropped: the deck's term
+/// shadows it.
+pub(crate) fn classify_as(raw: Option<&str>, newest: u32) -> Load<Book> {
     let Some(raw) = raw else {
         return Load::Empty;
     };
-    match State::from_json_upto(raw, newest) {
-        Ok(mut state) => {
-            state.shadow_added(deck());
-            Load::Ok(state)
+    match Book::from_json_upto(raw, newest) {
+        Ok(mut book) => {
+            book.shadow_added(&DeckId::words(), deck());
+            Load::Ok(book)
         }
         // `from_json` reads the `version` before the shape: a newer
         // version is told apart whatever else it holds.
@@ -87,19 +108,34 @@ pub(crate) fn classify_as(raw: Option<&str>, newest: u32) -> Load {
     }
 }
 
-/// An imported file's text as a whole state, or why it is refused; never
-/// a partial state.
+/// An imported file's text as a whole Book (any version, a flat file
+/// wrapped), or why it is refused; never a partial one.
 ///
 /// # Errors
-/// [`ImportError::NotAState`] (not JSON, not a state, or a version below
+/// [`ImportError::NotAState`] (not JSON, not a progress, or a version below
 /// this build's), [`ImportError::Newer`] (a version above), or
 /// [`ImportError::DuplicateTerm`].
-pub(crate) fn validate_import(text: &str) -> Result<State, ImportError> {
-    State::from_json_for(text, deck()).map_err(|error| match error {
-        StateError::UnknownVersion(version) if version > State::VERSION => ImportError::Newer,
-        StateError::DuplicateTerm(_) => ImportError::DuplicateTerm,
-        StateError::Json(_) | StateError::UnknownVersion(_) => ImportError::NotAState,
-    })
+pub(crate) fn validate_import(text: &str) -> Result<Book, ImportError> {
+    Book::from_json(text)
+        .map(|mut book| {
+            book.shadow_added(&DeckId::words(), deck());
+            book
+        })
+        .map_err(|error| match error {
+            StateError::UnknownVersion(version) if version > Book::VERSION => ImportError::Newer,
+            StateError::DuplicateTerm(_) => ImportError::DuplicateTerm,
+            StateError::Json(_) | StateError::UnknownVersion(_) => ImportError::NotAState,
+        })
+}
+
+/// The `today` an export of `book` is named for: the later of `browser`
+/// and every deck's `last_today` (Q2: a time zone moved west never goes
+/// back). For a learner of the words deck alone, the state's own
+/// [`session_today`](crate::today::session_today).
+pub(crate) fn book_today(browser: Date, book: &Book) -> Date {
+    book.decks()
+        .filter_map(|(_, state)| state.last_today)
+        .fold(browser, Date::max)
 }
 
 /// The export's file name: `pc_learn-<YYYY-MM-DD>.json`.
@@ -111,6 +147,7 @@ pub(crate) fn export_name(date: Date) -> String {
 mod tests {
     use super::{ImportError, Load, classify, classify_as, export_name, validate_import};
     use crate::test_support::added_word;
+    use learn_core::book::{Book, DeckId};
     use learn_core::date::Date;
     use learn_core::deck::TermId;
     use learn_core::progress::{Progress, State};
@@ -125,7 +162,18 @@ mod tests {
         state
     }
 
-    const NEWER: &str = r#"{"version": 3, "something": "else"}"#;
+    /// A stamp this build does not read: the Book is 3.
+    const NEWER: &str = r#"{"version": 4, "something": "else"}"#;
+
+    /// A Book holding a started term in the `words` entry and another in
+    /// the deck `zz`: written with stamp 3.
+    fn two_deck_book() -> Book {
+        let mut book = Book::from_state(one_term_state());
+        let mut other = one_term_state();
+        other.progress[0].term = TermId("zz-1".into());
+        book.set(DeckId("zz".into()), other);
+        book
+    }
     /// A state that serialises well but holds one term twice.
     fn duplicate() -> String {
         let mut state = one_term_state();
@@ -141,9 +189,41 @@ mod tests {
     #[test]
     fn a_valid_state_is_ok_even_with_no_progress() {
         let empty = State::empty();
-        assert_eq!(classify(Some(&empty.to_json())), Load::Ok(empty));
+        assert_eq!(
+            classify(Some(&empty.to_json())),
+            Load::Ok(Book::from_state(empty))
+        );
         let state = one_term_state();
-        assert_eq!(classify(Some(&state.to_json())), Load::Ok(state));
+        assert_eq!(
+            classify(Some(&state.to_json())),
+            Load::Ok(Book::from_state(state))
+        );
+    }
+
+    /// A flat v2 text (today's file) is a Book with the `words` entry
+    /// alone, equal to the state.
+    #[test]
+    fn a_flat_file_is_a_book_holding_words_alone() {
+        let state = one_term_state();
+        let Load::Ok(book) = classify(Some(&state.to_json())) else {
+            panic!("a flat file reads");
+        };
+        assert_eq!(book.words(), &state);
+        assert_eq!(book.decks().count(), 1);
+    }
+
+    /// A stamp-3 text is a Book kept whole; a stamp-4 text is a newer
+    /// version, read-only, whatever its shape.
+    #[test]
+    fn a_stamp_three_text_is_a_book_and_a_stamp_four_text_is_newer() {
+        let book = two_deck_book();
+        let text = book.to_json();
+        assert!(text.contains("\"version\": 3"), "{text}");
+        assert_eq!(classify(Some(&text)), Load::Ok(book));
+        assert_eq!(
+            classify(Some(NEWER)),
+            Load::NewerVersion { raw: NEWER.into() }
+        );
     }
 
     #[test]
@@ -180,7 +260,23 @@ mod tests {
     #[test]
     fn an_import_of_a_valid_file_is_the_whole_state() {
         let state = one_term_state();
-        assert_eq!(validate_import(&state.to_json()), Ok(state));
+        assert_eq!(
+            validate_import(&state.to_json()),
+            Ok(Book::from_state(state))
+        );
+    }
+
+    /// An old flat backup returns the Book to flat: only `words`. A stamp-3
+    /// file keeps every deck.
+    #[test]
+    fn an_import_of_a_flat_file_is_words_alone_and_of_a_book_every_deck() {
+        let flat = validate_import(&one_term_state().to_json()).unwrap();
+        assert_eq!(flat.decks().count(), 1);
+        assert!(flat.get(&DeckId("zz".into())).is_none());
+        let book = two_deck_book();
+        let imported = validate_import(&book.to_json()).unwrap();
+        assert_eq!(imported, book);
+        assert_eq!(imported.decks().count(), 2);
     }
 
     #[test]
@@ -196,6 +292,11 @@ mod tests {
     #[test]
     fn an_import_refuses_a_newer_version() {
         assert_eq!(validate_import(NEWER), Err(ImportError::Newer));
+        // A stamp-3 text of another shape is not a Book.
+        assert_eq!(
+            validate_import(r#"{"version": 3, "something": "else"}"#),
+            Err(ImportError::NotAState)
+        );
     }
 
     #[test]
@@ -222,7 +323,8 @@ mod tests {
     #[test]
     fn a_version_two_file_with_an_added_word_loads() {
         match classify(Some(VERSION_TWO)) {
-            Load::Ok(state) => {
+            Load::Ok(book) => {
+                let state = book.words();
                 assert_eq!(state.added.len(), 1);
                 assert_eq!(state.added[0].id, TermId("sānuvajja".into()));
                 assert_eq!(state.progress.len(), 1);
@@ -261,9 +363,10 @@ mod tests {
     #[test]
     fn an_added_word_the_deck_now_teaches_is_shadowed_never_invalid() {
         let text = shadowed().to_json();
-        let Load::Ok(state) = classify(Some(&text)) else {
+        let Load::Ok(book) = classify(Some(&text)) else {
             panic!("the file reads");
         };
+        let state = book.words().clone();
         let kho = TermId("kho".into());
         assert_eq!(
             state.added,
@@ -286,7 +389,7 @@ mod tests {
         assert_eq!(written["added"].as_array().unwrap().len(), 1);
         assert_eq!(written["added"][0]["id"], "sānuvajja");
         // An import reads the same.
-        assert_eq!(validate_import(&text), Ok(state));
+        assert_eq!(validate_import(&text), Ok(book));
     }
 
     #[test]
@@ -304,9 +407,10 @@ mod tests {
             text.contains("\"version\": 2"),
             "it is written as 2: {text}"
         );
-        let Load::Ok(read) = classify(Some(&text)) else {
+        let Load::Ok(book) = classify(Some(&text)) else {
             panic!("the file reads");
         };
+        let read = book.words();
         assert_eq!(read.added.len(), 0);
         assert!(read.to_json().contains("\"version\": 1"), "now 1");
         let Ok(imported) = validate_import(&text) else {
@@ -325,6 +429,25 @@ mod tests {
         assert_eq!(
             validate_import(&state.to_json()),
             Err(ImportError::DuplicateTerm)
+        );
+    }
+
+    #[test]
+    fn map_turns_the_progress_and_keeps_every_other_answer() {
+        assert_eq!(Load::Ok(2).map(|n| n + 1), Load::Ok(3));
+        assert_eq!(Load::<u8>::Empty.map(u32::from), Load::Empty);
+        let raw = String::from("x");
+        assert_eq!(
+            Load::<u8>::Invalid { raw: raw.clone() }.map(u32::from),
+            Load::Invalid { raw: raw.clone() }
+        );
+        assert_eq!(
+            Load::<u8>::NewerVersion { raw: raw.clone() }.map(u32::from),
+            Load::NewerVersion { raw }
+        );
+        assert_eq!(
+            Load::<u8>::Unreadable("denied".into()).map(u32::from),
+            Load::Unreadable("denied".into())
         );
     }
 

@@ -75,7 +75,7 @@ impl Session<'_> {
         let id = term.id.clone();
         self.state.start_word(deck, term, today)?;
         if let (Some(term), Some(progress)) = (self.state.term(deck, &id), self.state.get(&id)) {
-            self.queue.extend(unpassed_questions(term, progress));
+            self.queue.extend(unpassed_questions(deck, term, progress));
         }
         Ok(())
     }
@@ -378,10 +378,14 @@ mod tests {
     #[test]
     fn the_facets_are_meaning_and_recall_and_context_when_the_blank_exists() {
         let with = added_term(&entry("ca 2.1"), &passage("so ca hoti"), "ca");
-        let facets: Vec<Facet> = facets_of(&with).iter().collect();
+        let facets: Vec<Facet> = facets_of(&crate::deck::samples::deck(vec![]), &with)
+            .iter()
+            .collect();
         assert_eq!(facets, vec![Facet::Meaning, Facet::Recall, Facet::Context]);
         let without = added_term(&entry("ca 2.1"), &passage("so hoti"), "ca");
-        let facets: Vec<Facet> = facets_of(&without).iter().collect();
+        let facets: Vec<Facet> = facets_of(&crate::deck::samples::deck(vec![]), &without)
+            .iter()
+            .collect();
         assert_eq!(facets, vec![Facet::Meaning, Facet::Recall]);
     }
 }

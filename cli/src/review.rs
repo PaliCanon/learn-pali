@@ -6,7 +6,6 @@
 //! question that was not answered stays due.
 
 use std::io::{BufRead, Write};
-use std::path::Path;
 
 use learn_core::date::Date;
 use learn_core::deck::{Deck, Term};
@@ -16,7 +15,7 @@ use learn_core::progress::{Progress, State};
 use learn_core::session::{Answer, Question, Session};
 
 use crate::CliError;
-use crate::store::save_state;
+use crate::store::StateSlot;
 
 /// What a review did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -51,13 +50,13 @@ pub fn review<R: BufRead, W: Write>(
     seed: u64,
     input: R,
     out: W,
-    state_path: &Path,
+    slot: StateSlot<'_>,
 ) -> Result<Outcome, CliError> {
     let mut input = input;
     let mut out = out;
     let mut session = Session::start(deck, state, today, seed)?;
     if session.changed_at_start() {
-        save_state(state_path, &session.snapshot())?;
+        slot.save(&session.snapshot())?;
     }
     warn_orphans(&mut out, session.stats().orphans)?;
     let mut outcome = Outcome::default();
@@ -76,12 +75,12 @@ pub fn review<R: BufRead, W: Write>(
                 out,
                 "\nEnd of input: the question left unanswered stays due; \
                  progress is saved in {}.",
-                state_path.display()
+                slot.path.display()
             )?;
             return Ok(outcome);
         };
         session.answer(&question.term, question.facet, answer)?;
-        save_state(state_path, &session.snapshot())?;
+        slot.save(&session.snapshot())?;
         outcome.count(question.practice, answer);
     }
     outcome.finished = true;
@@ -245,13 +244,14 @@ fn no(term: &Term, what: &str) -> CliError {
 mod tests {
     use super::*;
     use crate::store::{StoreError, load_state, save_state};
+    use learn_core::book::DeckId;
     use learn_core::deck::TermId;
     use learn_core::facet::Facet;
     use learn_core::progress::Progress;
     use learn_core::session::Session;
     use learn_core::stage::Stage;
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     const DECK: &str = r#"{
       "version": 1,
@@ -328,6 +328,15 @@ mod tests {
     }
 
     fn run_review(state: State, input: &str, path: &Path) -> (Result<Outcome, CliError>, String) {
+        run_review_in(state, input, path, &DeckId::words())
+    }
+
+    fn run_review_in(
+        state: State,
+        input: &str,
+        path: &Path,
+        id: &DeckId,
+    ) -> (Result<Outcome, CliError>, String) {
         let mut out = Vec::new();
         let seed = deck_order_seed(&state);
         let result = review(
@@ -337,7 +346,7 @@ mod tests {
             seed,
             input.as_bytes(),
             &mut out,
-            path,
+            StateSlot { path, id },
         );
         (result, String::from_utf8(out).unwrap())
     }
@@ -355,7 +364,10 @@ mod tests {
             seed,
             input.as_bytes(),
             &mut out,
-            &path,
+            StateSlot {
+                path: &path,
+                id: &DeckId::words(),
+            },
         )
         .unwrap();
         String::from_utf8(out).unwrap()
@@ -413,7 +425,7 @@ mod tests {
                 finished: true
             }
         );
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         assert!(saved.progress.iter().all(|p| p.stage == Stage::Week));
         assert_eq!(saved.last_today, Some(day(TODAY)));
         assert!(
@@ -465,7 +477,7 @@ mod tests {
             out.contains("5 answered, 4 passed, 1 failed, 1 practice"),
             "{out}"
         );
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         let alpha = saved.get(&TermId("alpha".to_owned())).unwrap();
         assert_eq!((alpha.stage, alpha.lapses), (Stage::Day, 1));
         assert_eq!(alpha.due, day(TODAY) + 1);
@@ -480,7 +492,7 @@ mod tests {
         let input = format!("{}\n", typed(&["y"]));
         let (result, _) = run_review(started(&["alpha", "beta"]), &input, &path);
         assert!(!result.unwrap().finished);
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         let alpha = saved.get(&TermId("alpha".to_owned())).unwrap();
         assert!(alpha.passed.contains(Facet::Meaning), "{alpha:?}");
     }
@@ -498,7 +510,7 @@ mod tests {
             "no summary of a finished session: {out}"
         );
         // The next session starts with the question that was left.
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         let deck = deck();
         let seed = deck_order_seed(&saved);
         let mut session = Session::start(&deck, saved, day(TODAY), seed).unwrap();
@@ -515,7 +527,7 @@ mod tests {
         assert_eq!((outcome.answered, outcome.finished), (1, false));
         assert!(out.contains("End of input"), "{out}");
         let deck = deck();
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         let seed = deck_order_seed(&saved);
         let mut session = Session::start(&deck, saved, day(TODAY), seed).unwrap();
         assert_eq!(session.next().unwrap().facet, Facet::Recall);
@@ -609,12 +621,29 @@ mod tests {
         let first = format!("{}\n", typed(&["y", "y"]));
         let (result, _) = run_review(started(&["alpha", "beta"]), &first, &path);
         assert!(!result.unwrap().finished);
-        let state = load_state(&path).unwrap();
+        let state = load_state(&path, &DeckId::words()).unwrap();
         let rest = typed(&["y"; 4]);
         let (result, _) = run_review(state, &rest, &path);
         assert!(result.unwrap().finished);
-        let saved = load_state(&path).unwrap();
+        let saved = load_state(&path, &DeckId::words()).unwrap();
         assert!(saved.progress.iter().all(|p| p.stage == Stage::Week));
-        save_state(&path, &saved).unwrap();
+        save_state(&path, &DeckId::words(), &saved).unwrap();
+    }
+
+    #[test]
+    fn the_state_is_written_into_the_chosen_entry_after_each_answer() {
+        let path = dir("entry").join("state.json");
+        let zz = DeckId("zz".to_owned());
+        let input = format!("{}\n", typed(&["y"]));
+        let (result, _) = run_review_in(started(&["alpha", "beta"]), &input, &path, &zz);
+        assert!(!result.unwrap().finished);
+        let saved = load_state(&path, &zz).unwrap();
+        let alpha = saved.get(&TermId("alpha".to_owned())).unwrap();
+        assert!(alpha.passed.contains(Facet::Meaning), "{alpha:?}");
+        assert_eq!(
+            load_state(&path, &DeckId::words()).unwrap(),
+            State::empty(),
+            "the words entry is untouched"
+        );
     }
 }

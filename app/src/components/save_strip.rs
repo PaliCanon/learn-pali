@@ -4,7 +4,7 @@
 //! state for a transient failure, the unsaved state for a newer file that
 //! won. Nothing is rendered while the progress is saved.
 
-use learn_core::progress::State;
+use learn_core::book::Book;
 use leptos::prelude::*;
 use leptos_i18n::td_string;
 use palicanon_ui_lib::{Button, Variant};
@@ -12,16 +12,16 @@ use palicanon_ui_lib::{Button, Variant};
 use crate::backend::{Backend, SaveError, SaveStatus};
 use crate::catalogue::strings;
 use crate::components::data_block::ProgressData;
-use crate::store::{Load, export_name};
-use crate::today::{browser_today, session_today};
+use crate::store::{Load, book_today, export_name};
+use crate::today::browser_today;
 
-/// The state the strip offers to export for `error`: the unsaved one
+/// The Book the strip offers to export for `error`: the unsaved one
 /// of a lost conflict, else what the store holds now (`current`).
-pub(crate) fn exportable(error: &SaveError, current: Load) -> Option<State> {
+pub(crate) fn exportable(error: &SaveError, current: Load<Book>) -> Option<Book> {
     match error {
         SaveError::NewerVersion { unsaved } => Some(unsaved.clone()),
         SaveError::Transient => match current {
-            Load::Ok(state) => Some(state),
+            Load::Ok(book) => Some(book),
             Load::Empty
             | Load::Invalid { .. }
             | Load::NewerVersion { .. }
@@ -34,9 +34,9 @@ pub(crate) fn exportable(error: &SaveError, current: Load) -> Option<State> {
 /// transfer, named for the day (`pc_learn-<date>.json`); nothing when
 /// there is nothing to export.
 pub(crate) fn export_for(backend: Backend, error: &SaveError) {
-    if let Some(state) = exportable(error, backend.load()) {
-        let name = export_name(session_today(browser_today(), &state));
-        backend.export(&name, &state.to_json());
+    if let Some(book) = exportable(error, backend.load_book()) {
+        let name = export_name(book_today(browser_today(), &book));
+        backend.export(&name, &book.to_json());
     }
 }
 
@@ -79,7 +79,7 @@ fn Strip(backend: Backend, error: SaveError) -> impl IntoView {
     let t = strings();
     // The state is taken when the button is clicked: a transient failure
     // goes on taking saves, and the export is of the latest one.
-    let offer = exportable(&error, backend.load()).is_some();
+    let offer = exportable(&error, backend.load_book()).is_some();
     let on_click = move |_| export_for(backend, &error);
     let export = offer.then(|| {
         view! {
@@ -136,10 +136,10 @@ mod tests {
 
     #[test]
     fn a_transient_failure_exports_the_current_state() {
-        let state = progress_fixture();
+        let book = Book::from_state(progress_fixture());
         assert_eq!(
-            exportable(&SaveError::Transient, Load::Ok(state.clone())),
-            Some(state)
+            exportable(&SaveError::Transient, Load::Ok(book.clone())),
+            Some(book)
         );
         for nothing in [
             Load::Empty,
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn a_lost_conflict_exports_the_unsaved_state_whatever_the_store_holds() {
-        let unsaved = later();
+        let unsaved = Book::from_state(later());
         let error = SaveError::NewerVersion {
             unsaved: unsaved.clone(),
         };
@@ -195,7 +195,7 @@ mod tests {
             Owner::new().with(|| {
                 let store = FakeStore::new(Load::Ok(progress_fixture()));
                 store.script(&[Outcome::Transient]);
-                crate::backend::ProgressStore::save(&store, &progress_fixture());
+                crate::backend::ProgressStore::save(&store, &Book::from_state(progress_fixture()));
                 let html = strip(language, &store).replace("<!>", "");
                 assert!(html.contains(r#"role="alert""#), "{html}");
                 assert!(html.contains(&format!(">{title}</strong>")), "{html}");
@@ -236,7 +236,7 @@ mod tests {
 
             backend.save(&second);
             let unsaved = SaveError::NewerVersion {
-                unsaved: second.clone(),
+                unsaved: Book::from_state(second.clone()),
             };
             assert_eq!(store.status_now(), SaveStatus::Failed(unsaved.clone()));
             assert_eq!(seen.get(), 1, "on_change ran in the same synchronous run");
@@ -260,7 +260,9 @@ mod tests {
     /// it, `Saved` takes it away, a new failure replaces the old one.
     #[test]
     fn a_failure_is_kept_until_a_save_succeeds() {
-        let newer = SaveError::NewerVersion { unsaved: later() };
+        let newer = SaveError::NewerVersion {
+            unsaved: Book::from_state(later()),
+        };
         let failed = SaveStatus::Failed(SaveError::Transient);
         assert_eq!(kept_failure(None, &SaveStatus::Saved), None);
         assert_eq!(kept_failure(None, &SaveStatus::Pending), None);

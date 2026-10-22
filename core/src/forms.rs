@@ -116,7 +116,10 @@ mod tests {
             ..indeclinable("kho", 1)
         };
         assert_eq!(forms_question(&rare_only, &progress), None);
-        assert!(!crate::facet::facets_of(&rare_only).contains(Facet::Forms));
+        assert!(
+            !crate::facet::facets_of(&crate::deck::samples::deck(vec![]), &rare_only)
+                .contains(Facet::Forms)
+        );
     }
 
     #[test]

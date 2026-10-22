@@ -1,6 +1,7 @@
 //! The Learn fragment in the app's mode, in a real browser (task 048): built
 //! with `csr` alone (no `web-store`), mounted by ui-lib's `csr::mount` under
-//! a `ParentRoute` at `/learn` with a fake store on a seeded state. The home
+//! a `ParentRoute` at `/learn` with a fake store holding a Book whose words
+//! deck is the seeded state (task 063a: the store holds the whole Book). The home
 //! appears at `/learn` and at `/learn/`, review answers are given and the
 //! store saw one save each, and `/learn/nope` is Not found.
 //!
@@ -17,6 +18,7 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use learn_core::book::{Book, DeckId};
 use learn_core::date::Date;
 use learn_core::deck::{Deck, TermId};
 use learn_core::progress::State;
@@ -41,8 +43,13 @@ type Handler = Box<dyn Fn()>;
 /// The progress the fake store holds and every state it was given to save.
 #[derive(Clone)]
 struct BrowserStore {
-    load: Rc<RefCell<Load>>,
+    load: Rc<RefCell<Load<Book>>>,
+    /// The words deck of every Book the fragment gave to save.
     saved: Rc<RefCell<Vec<State>>>,
+    /// Every Book the fragment gave to save, whole.
+    saved_books: Rc<RefCell<Vec<Book>>>,
+    /// Every deck the fragment asked the store to remember as selected.
+    selects: Rc<RefCell<Vec<DeckId>>>,
     /// The status the store reports; the tests move it.
     status: RwSignal<SaveStatus>,
     /// The fragment's `on_change` handlers.
@@ -53,7 +60,7 @@ impl BrowserStore {
     /// The progress changed outside a save (another tab): `load` answers
     /// `state`, then the fragment's handlers run.
     fn changed_to(&self, state: State) {
-        *self.load.borrow_mut() = Load::Ok(state);
+        *self.load.borrow_mut() = Load::Ok(Book::from_state(state));
         for callback in self.callbacks.borrow().iter() {
             callback();
         }
@@ -61,13 +68,14 @@ impl BrowserStore {
 }
 
 impl ProgressStore for BrowserStore {
-    fn load(&self) -> Load {
+    fn load(&self) -> Load<Book> {
         self.load.borrow().clone()
     }
 
-    fn save(&self, state: &State) {
-        self.saved.borrow_mut().push(state.clone());
-        *self.load.borrow_mut() = Load::Ok(state.clone());
+    fn save(&self, book: &Book) {
+        self.saved.borrow_mut().push(book.words().clone());
+        self.saved_books.borrow_mut().push(book.clone());
+        *self.load.borrow_mut() = Load::Ok(book.clone());
     }
 
     fn status(&self) -> Signal<SaveStatus> {
@@ -76,6 +84,10 @@ impl ProgressStore for BrowserStore {
 
     fn on_change(&self, callback: Box<dyn Fn()>) {
         self.callbacks.borrow_mut().push(callback);
+    }
+
+    fn select(&self, deck: &DeckId) {
+        self.selects.borrow_mut().push(deck.clone());
     }
 }
 
@@ -151,8 +163,10 @@ fn seeded_store() -> BrowserStore {
 /// A fake store holding `state`, status `Saved`.
 fn store_on(state: State) -> BrowserStore {
     BrowserStore {
-        load: Rc::new(RefCell::new(Load::Ok(state))),
+        load: Rc::new(RefCell::new(Load::Ok(Book::from_state(state)))),
         saved: Rc::default(),
+        saved_books: Rc::default(),
+        selects: Rc::default(),
         status: RwSignal::new(SaveStatus::Saved),
         callbacks: Rc::default(),
     }
@@ -282,6 +296,106 @@ async fn the_home_runs_a_review_under_learn_and_saves_each_answer() {
         settle().await;
         assert_eq!(store.saved.borrow().len(), answers, "one answer, one save");
     }
+}
+
+/// The chooser of decks is hidden while the build teaches one deck (task
+/// 063a): the home has no `[role=group][aria-label]` node, the one
+/// registered deck being the words deck.
+///
+/// Mutation, not run here: with `offered` in `components/deck_chooser.rs`
+/// reading `backend.decks().len() > 0` (the `<= 1` guard turned into
+/// `<= 0`), the chooser mounts for the one deck and this test fails.
+#[wasm_bindgen_test]
+async fn the_home_has_no_deck_chooser_while_one_deck_exists() {
+    let (_store, _page) = mount_at("csr-learn-nochooser", "/learn");
+    settle().await;
+
+    assert!(
+        first("csr-learn-nochooser", r#"[data-page="home"]"#).is_some(),
+        "the home appears"
+    );
+    assert!(
+        first("csr-learn-nochooser", r#"[role="group"][aria-label]"#).is_none(),
+        "no deck chooser"
+    );
+}
+
+/// A words-only learner's stored text stays the flat one (task 063a): after
+/// a session answer the Book the fragment saved writes no `"decks"` key and
+/// carries stamp 1 or 2, and the pre-Book reader still reads it as a state.
+///
+/// Mutation, not run here (app/src is not edited by this slice): if
+/// `Backend::save` wrote a Book that is not flat (a non-words deck holding
+/// progress, so stamp 3), the text would carry `"decks"` and `"version": 3`
+/// and this test would fail.
+#[wasm_bindgen_test]
+async fn the_stored_text_after_an_answer_is_the_flat_format() {
+    let (store, _page) = mount_at("csr-learn-flat", "/learn");
+    settle().await;
+    button("csr-learn-flat", "Practice")
+        .expect("the Practice button")
+        .click();
+    settle().await;
+    button("csr-learn-flat", "Show the answer")
+        .expect("the card")
+        .click();
+    settle().await;
+    button("csr-learn-flat", "Knew it")
+        .expect("the grade")
+        .click();
+    settle().await;
+
+    let books = store.saved_books.borrow();
+    assert_eq!(books.len(), 1, "one answer, one save");
+    assert!(books[0].is_flat(), "the saved Book is flat");
+    let text = books[0].to_json();
+    assert!(!text.contains(r#""decks""#), "no decks key: {text}");
+    assert!(
+        text.contains(r#""version": 1"#) || text.contains(r#""version": 2"#),
+        "stamp 1 or 2: {text}"
+    );
+    let state = State::from_json(&text).expect("the flat text is a state");
+    assert_eq!(&state, books[0].words(), "the text is the words state's");
+}
+
+/// `localStorage[pc_learn_deck]` through `method` (`getItem`, `removeItem`),
+/// by script: the test build has no `web-sys` Storage feature.
+fn storage_call(method: &str) -> wasm_bindgen::JsValue {
+    js_sys::Function::new_with_args(
+        "method",
+        "return localStorage[method]('pc_learn_deck') ?? null",
+    )
+    .call1(&wasm_bindgen::JsValue::NULL, &method.into())
+    .expect("localStorage answers")
+}
+
+/// The selected deck is a device setting written only by a choice (task
+/// 063a): a session that answers a card asks the store to remember no deck
+/// and writes no `pc_learn_deck` to the page's `localStorage`.
+#[wasm_bindgen_test]
+async fn a_normal_session_never_writes_the_deck_selection() {
+    storage_call("removeItem");
+    let (store, _page) = mount_at("csr-learn-noselect", "/learn");
+    settle().await;
+    button("csr-learn-noselect", "Practice")
+        .expect("the Practice button")
+        .click();
+    settle().await;
+    button("csr-learn-noselect", "Show the answer")
+        .expect("the card")
+        .click();
+    settle().await;
+    button("csr-learn-noselect", "Knew it")
+        .expect("the grade")
+        .click();
+    settle().await;
+
+    assert_eq!(store.saved.borrow().len(), 1, "the answer was saved");
+    assert_eq!(store.selects.borrow().len(), 0, "no selection remembered");
+    assert!(
+        storage_call("getItem").is_null(),
+        "pc_learn_deck never written"
+    );
 }
 
 /// Opens, one after another, the words of the revealed card until a panel
@@ -662,7 +776,7 @@ async fn stop_after_adding(root: &'static str, state: State) {
     settle().await;
 
     let stored = match &*store.load.borrow() {
-        Load::Ok(state) => state.progress.len(),
+        Load::Ok(book) => book.words().progress.len(),
         _ => 0,
     };
     assert_eq!(stored, 10 + added, "the store holds them started");

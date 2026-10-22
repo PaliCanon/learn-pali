@@ -3,13 +3,13 @@
 //! question, the header's counts and the summary at the end.
 
 use learn_core::added::AddError;
-use learn_core::deck::{Form, Term, TermId};
+use learn_core::deck::{Deck, Form, Term, TermId};
 use learn_core::facet::Facet;
 use learn_core::forms::forms_question;
 use learn_core::progress::State;
 use learn_core::session::{Answer, Question, Session};
 
-use crate::deck::{deck, pinned};
+use crate::deck::pinned;
 use crate::learn::home_state::{due_cards, new_left};
 use crate::learn::key::presentation_key;
 use crate::learn::summary::{Summary, summary};
@@ -39,10 +39,13 @@ pub(crate) struct Card {
     pub(crate) form: Option<&'static Form>,
 }
 
-/// A [`Session`] on the embedded deck, with what the page shows around it.
+/// A [`Session`] on one deck, with what the page shows around it.
 #[derive(Debug)]
 pub(crate) struct ReviewRun {
     session: Session<'static>,
+    /// The deck the session started on: the one selected then, whatever is
+    /// selected later.
+    deck: &'static Deck,
     before: State,
     current: Option<Question>,
     counter: u32,
@@ -58,10 +61,15 @@ pub(crate) struct ReviewRun {
 impl ReviewRun {
     /// A run over `session` (just started); `before` is the state it
     /// started from, for the summary. The first question is taken at once.
-    pub(crate) fn new(mut session: Session<'static>, before: State) -> ReviewRun {
+    pub(crate) fn new(
+        mut session: Session<'static>,
+        deck: &'static Deck,
+        before: State,
+    ) -> ReviewRun {
         let current = session.next().cloned();
         ReviewRun {
             session,
+            deck,
             before,
             current,
             counter: 0,
@@ -74,10 +82,14 @@ impl ReviewRun {
     /// A run over a practice ahead (`session` from [`Session::practice`]):
     /// its header counts every question it asks, its end says 'Practice
     /// done'.
-    pub(crate) fn practice(session: Session<'static>, before: State) -> ReviewRun {
+    pub(crate) fn practice(
+        session: Session<'static>,
+        deck: &'static Deck,
+        before: State,
+    ) -> ReviewRun {
         ReviewRun {
             practice: true,
-            ..ReviewRun::new(session, before)
+            ..ReviewRun::new(session, deck, before)
         }
     }
 
@@ -195,7 +207,7 @@ impl ReviewRun {
     /// The terms not started yet, the deck's and the added words: what 'Add
     /// new terms' may add.
     pub(crate) fn new_left(&self) -> usize {
-        new_left(&Load::Ok(self.session.snapshot()), deck())
+        new_left(&Load::Ok(self.session.snapshot()), self.deck)
     }
 
     /// The answers given so far.
@@ -212,13 +224,13 @@ impl ReviewRun {
             return self.done + self.session.remaining();
         }
         let snapshot = self.session.snapshot();
-        self.done + due_cards(deck(), &snapshot, self.session.today()) + self.practice_pending
+        self.done + due_cards(self.deck, &snapshot, self.session.today()) + self.practice_pending
     }
 
     /// What the session changed, from the state it started from to the
     /// snapshot ([`crate::learn::summary::summary`]).
     pub(crate) fn summary(&self) -> Summary {
-        summary(&self.before, &self.session.snapshot(), deck())
+        summary(&self.before, &self.session.snapshot(), self.deck)
     }
 }
 
@@ -248,7 +260,7 @@ mod tests {
     fn started(n: usize) -> ReviewRun {
         let mut session = Session::start(deck(), State::empty(), today(), 0).unwrap();
         session.request_new(n);
-        ReviewRun::new(session, State::empty())
+        ReviewRun::new(session, deck(), State::empty())
     }
 
     /// What is asked now, as `(term, facet, practice)`.
@@ -405,7 +417,7 @@ mod tests {
     #[test]
     fn nothing_due_is_an_empty_run_with_no_key_and_no_count() {
         let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
-        let mut run = ReviewRun::new(session, State::empty());
+        let mut run = ReviewRun::new(session, deck(), State::empty());
         assert_eq!(asked(&run), None);
         assert_eq!((run.done(), run.total()), (0, 0));
         assert_eq!(run.key(), "");
@@ -418,7 +430,7 @@ mod tests {
     #[test]
     fn grading_an_empty_run_saves_nothing_whatever_the_answer() {
         let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
-        let mut run = ReviewRun::new(session, State::empty());
+        let mut run = ReviewRun::new(session, deck(), State::empty());
         let saves = Cell::new(0_usize);
         for answer in [Answer::Pass, Answer::Fail] {
             run.grade(answer, |_| saves.set(saves.get() + 1));
@@ -439,7 +451,7 @@ mod tests {
         let mut before = State::empty();
         before.progress.push(entry);
         let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
-        ReviewRun::new(session, before)
+        ReviewRun::new(session, deck(), before)
     }
 
     #[test]
@@ -470,7 +482,11 @@ mod tests {
     #[test]
     fn there_is_no_card_when_nothing_is_asked() {
         let session = Session::start(deck(), State::empty(), today(), 0).unwrap();
-        assert!(ReviewRun::new(session, State::empty()).card().is_none());
+        assert!(
+            ReviewRun::new(session, deck(), State::empty())
+                .card()
+                .is_none()
+        );
     }
 
     #[test]
@@ -601,7 +617,7 @@ mod tests {
     fn on_added_word() -> ReviewRun {
         let before = crate::test_support::added_started(Stage::Day, today());
         let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
-        ReviewRun::new(session, before)
+        ReviewRun::new(session, deck(), before)
     }
 
     #[test]
@@ -636,7 +652,7 @@ mod tests {
             .progress
             .push(Progress::new(word.id.clone(), today()));
         let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
-        let mut run = ReviewRun::new(session, before);
+        let mut run = ReviewRun::new(session, deck(), before);
         let mut facets = Vec::new();
         while let Some(card) = run.card() {
             if card.facet == Facet::Context {
@@ -669,7 +685,7 @@ mod tests {
         let mut before = State::empty();
         before.added.push(crate::test_support::added_word());
         let session = Session::start(deck(), before.clone(), today(), 0).unwrap();
-        let mut run = ReviewRun::new(session, before);
+        let mut run = ReviewRun::new(session, deck(), before);
         assert_eq!(run.new_left(), 51);
         assert_eq!(run.add_new(51, |_| ()), 51);
         assert_eq!(run.new_left(), 0);

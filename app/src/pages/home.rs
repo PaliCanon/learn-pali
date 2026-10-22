@@ -51,6 +51,7 @@ use palicanon_ui_lib::{
 use crate::backend::Backend;
 use crate::catalogue::{Locale, strings};
 use crate::components::data_block::StoreWrites;
+use crate::components::deck_chooser::{DeckChooser, offered};
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
 use crate::components::save_strip::SaveStrip;
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
@@ -59,7 +60,6 @@ use crate::components::sync_status::SyncStatusLine;
 use crate::components::term_list::{
     AddRow, Orphans, StageStrip, StageTerms, next_review, orphan_rows,
 };
-use crate::deck::deck;
 use crate::learn::home_state::{BrokenKind, HomeState, home_state, new_left};
 use crate::learn::stages::stage_counts;
 use crate::learn::words::date_words;
@@ -408,9 +408,10 @@ fn HomeScreen(
                 saved,
                 detail,
             } = model;
-            view! {
-                <h1 class="sr-only">{move || td_string!(t.locale(), home_title)}</h1>
+            let backend = Backend::current();
+            let home = view! {
                 <HomeView
+                    deck=untrack(|| backend.deck())
                     state=state
                     new_left=new_left
                     counts=counts
@@ -420,8 +421,25 @@ fn HomeScreen(
                     batch=batch
                     on_action=on_action
                 />
+            };
+            let title =
+                view! { <h1 class="sr-only">{move || td_string!(t.locale(), home_title)}</h1> };
+            // Two decks or more: the chooser, above the stage counts. One
+            // deck: no chooser node at all, so the markup is the home's alone.
+            if offered(backend) {
+                view! {
+                    {title}
+                    <DeckChooser />
+                    {home}
+                }
+                .into_any()
+            } else {
+                view! {
+                    {title}
+                    {home}
+                }
+                .into_any()
             }
-            .into_any()
         }
         Mode::Session(phase) => {
             view! { <SessionView phase=phase paused=paused on_reload=on_reload on_home=on_home /> }
@@ -436,7 +454,7 @@ fn HomeScreen(
 
 /// Reads the store and the clock into the model.
 fn read_model(backend: Backend) -> Model {
-    compute(&backend.load(), deck(), browser_today())
+    compute(&backend.load(), backend.deck(), browser_today())
 }
 
 /// The model for `load`, the deck and the browser's date: `today` is the
@@ -507,7 +525,7 @@ fn perform(
                 }
             };
             let today = session_today(browser_today(), &state);
-            match grown(count, state, deck(), today) {
+            match grown(count, state, backend.deck(), today) {
                 Some(next) => {
                     backend.save(&next);
                     go();
@@ -565,6 +583,10 @@ pub fn HomeView(
     /// happens without it.
     #[prop(optional, into)]
     on_action: Option<Callback<HomeAction>>,
+    /// The deck the screen shows: the selected one ([`Home`] gives it); the
+    /// words deck when not given.
+    #[prop(default = crate::deck::deck())]
+    deck: &'static Deck,
 ) -> impl IntoView {
     let stage = stage.unwrap_or_else(|| RwSignal::new(None));
     let batch = batch.unwrap_or_else(|| RwSignal::new(BATCH));
@@ -579,15 +601,21 @@ pub fn HomeView(
         HomeState::Empty => view! { <EmptyBlock new_terms=new_terms act=act /> }.into_any(),
         HomeState::Due(due) => view! {
             <DueBlock due=due new_terms=new_terms act=act>
-                <HomeProgress counts=counts saved=saved stage=stage new_terms=new_terms />
+                <HomeProgress counts=counts saved=saved stage=stage new_terms=new_terms deck=deck />
             </DueBlock>
         }
         .into_any(),
         HomeState::NothingDue => {
-            let cta = nothing_due_cta(counts, saved.as_ref(), stage, batch);
+            let cta = nothing_due_cta(counts, saved.as_ref(), (stage, batch), deck);
             view! {
                 <NothingDueBlock cta=cta new_terms=new_terms act=act>
-                    <HomeProgress counts=counts saved=saved stage=stage new_terms=new_terms />
+                    <HomeProgress
+                        counts=counts
+                        saved=saved
+                        stage=stage
+                        new_terms=new_terms
+                        deck=deck
+                    />
                 </NothingDueBlock>
             }
             .into_any()
@@ -604,10 +632,10 @@ pub fn HomeView(
 fn nothing_due_cta(
     counts: [usize; 6],
     saved: Option<&Saved>,
-    stage: RwSignal<Option<Stage>>,
-    batch: RwSignal<u32>,
+    (stage, batch): (RwSignal<Option<Stage>>, RwSignal<u32>),
+    deck: &Deck,
 ) -> Option<CtaSlot> {
-    let next = saved.and_then(|saved| next_review(&saved.state));
+    let next = saved.and_then(|saved| next_review(&saved.state, deck));
     let started = counts.iter().sum();
     if started > 0 {
         Some(CtaSlot::Ahead(Ahead {
@@ -1156,13 +1184,14 @@ fn HomeProgress(
     saved: Option<Saved>,
     stage: RwSignal<Option<Stage>>,
     new_terms: NewTerms,
+    deck: &'static Deck,
 ) -> impl IntoView {
     let add = new_terms.plus();
     let list = match saved {
         Some(Saved { state }) => {
-            let orphans = orphan_rows(&state);
+            let orphans = orphan_rows(&state, deck);
             view! {
-                <StageTerms progress=state stage=stage add=add />
+                <StageTerms progress=state stage=stage add=add deck=deck />
                 <Orphans orphans=orphans />
             }
             .into_any()
@@ -3060,5 +3089,185 @@ mod tests {
         let mut state = State::empty();
         state.last_today = Some(today() + 1);
         assert_eq!(grown(5, state, deck(), today()), None);
+    }
+
+    // ---- The deck chooser and the screens on the selected deck (063a) ----
+
+    use learn_core::book::{Book, DeckId};
+
+    use crate::components::data_block::ProgressData;
+    use crate::test_support::{FakeFiles, FakeStore, backend_with_decks, second_deck, two_decks};
+
+    fn zz() -> DeckId {
+        DeckId("zz".into())
+    }
+
+    /// `n` terms of `deck` started on [`today`].
+    fn started_in(deck: &'static Deck, n: usize) -> State {
+        let mut session = Session::start(deck, State::empty(), today(), 0).expect("a session");
+        assert_eq!(session.request_new(n), n);
+        session.into_state()
+    }
+
+    /// The fixture's words progress beside two `zz` terms started.
+    fn two_deck_book() -> Book {
+        let mut book = Book::from_state(progress_fixture());
+        book.set(zz(), started_in(second_deck(), 2));
+        book
+    }
+
+    /// A backend over two decks and `book`, `selected` remembered by the
+    /// store; make it inside an `Owner`.
+    fn two_deck_backend(book: Book, selected: Option<&str>) -> (FakeStore, Backend) {
+        let (store, files) = (FakeStore::with_book(Load::Ok(book)), FakeFiles::default());
+        if let Some(id) = selected {
+            store.remember_selected(id);
+        }
+        let backend = backend_with_decks(&store, &files, two_decks());
+        provide_context(backend);
+        provide_context(ProgressData::new());
+        (store, backend)
+    }
+
+    /// The home screen over what `backend` holds, as the server renders it.
+    fn home_screen(backend: Backend) -> String {
+        palicanon_ui_lib::provide_language().set(Language::En);
+        let none = Callback::new(|()| ());
+        view! {
+            <HomeScreen
+                mode=Mode::Home
+                model=read_model(backend)
+                base=Signal::stored("/".to_owned())
+                stage=RwSignal::new(None)
+                batch=RwSignal::new(5)
+                on_action=Callback::new(|_| ())
+                paused=Signal::stored(false)
+                on_reload=none
+                on_home=none
+            />
+        }
+        .to_html()
+        .replace("<!>", "")
+    }
+
+    #[test]
+    fn with_one_deck_the_home_shows_no_chooser() {
+        Owner::new().with(|| {
+            provide_fakes(Load::Ok(progress_fixture()));
+            let html = home_screen(Backend::current());
+            assert!(!html.contains(r#"role="group""#), "{html}");
+            assert!(!html.contains(r#"aria-label="Deck""#), "{html}");
+            assert!(html.contains("Daily"), "the stage counts are there: {html}");
+            assert!(
+                html.contains(r#"</h1><div data-home-state="due""#),
+                "the home follows its title with no node between: {html}"
+            );
+        });
+    }
+
+    #[test]
+    fn with_two_decks_the_chooser_sits_above_the_stage_counts() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), None);
+            let html = home_screen(backend);
+            let chooser = html
+                .find(r#"aria-label="Deck""#)
+                .unwrap_or_else(|| panic!("{html}"));
+            assert!(
+                html.find(">Words<").is_some_and(|at| at > chooser),
+                "{html}"
+            );
+            assert!(chooser < html.find("Daily").expect(&html), "{html}");
+        });
+    }
+
+    #[test]
+    fn selecting_a_deck_gives_the_home_that_decks_counts() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), None);
+            let book = two_deck_book();
+            let words = stage_counts(&book.state(&DeckId::words()), deck());
+            let other = stage_counts(&book.state(&zz()), second_deck());
+            assert_ne!(words, other, "the fixture tells the decks apart");
+            assert_eq!(read_model(backend).counts, words);
+            backend.select(&zz());
+            assert_eq!(backend.selected(), zz());
+            assert_eq!(read_model(backend).counts, other);
+        });
+    }
+
+    #[test]
+    fn a_session_starts_on_the_selected_deck() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), Some("zz"));
+            let Phase::Running(run) = start_phase(&Owner::current().unwrap(), backend) else {
+                panic!("a running session");
+            };
+            let mut seen = Vec::new();
+            run.update(|run| {
+                while let Some(question) = run.current().cloned() {
+                    seen.push(question.term.0.clone());
+                    run.grade(learn_core::session::Answer::Pass, |_| ());
+                }
+            });
+            assert!(!seen.is_empty(), "cards are due in zz");
+            assert!(seen.iter().all(|term| term.starts_with("zz-")), "{seen:?}");
+        });
+    }
+
+    #[test]
+    fn a_practice_ahead_picks_from_the_selected_deck() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), Some("zz"));
+            let owner = Owner::current().unwrap();
+            let Some(Phase::Running(run)) = practice_phase(&owner, backend, 5, None) else {
+                panic!("a practice");
+            };
+            let term = run.with(|run| run.current().map(|question| question.term.0.clone()));
+            assert!(term.expect("a question").starts_with("zz-"));
+        });
+    }
+
+    #[test]
+    fn the_new_terms_are_bounded_by_the_selected_decks_terms_left() {
+        Owner::new().with(|| {
+            let (store, backend) = two_deck_backend(Book::from_state(progress_fixture()), None);
+            assert_eq!(read_model(backend).new_left, deck().terms.len() - 3);
+            backend.select(&zz());
+            assert_eq!(read_model(backend).new_left, 3, "zz has 3 terms");
+            perform(HomeAction::AddNew(10), backend, || (), || (), |_, _| ());
+            let book = match store.book_now() {
+                Load::Ok(book) => book,
+                other => panic!("{other:?}"),
+            };
+            assert_eq!(book.state(&zz()).progress.len(), 3, "all of zz, no more");
+            assert_eq!(
+                book.state(&DeckId::words()),
+                progress_fixture(),
+                "the words deck is untouched"
+            );
+        });
+    }
+
+    #[test]
+    fn a_stored_selection_the_registry_lacks_gives_the_words_screens() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), Some("klingon"));
+            assert_eq!(backend.selected(), DeckId::words());
+            let words = stage_counts(&progress_fixture(), deck());
+            assert_eq!(read_model(backend).counts, words);
+            assert!(!home_screen(backend).contains("klingon"));
+        });
+    }
+
+    #[test]
+    fn the_term_list_and_the_orphans_are_the_selected_decks() {
+        Owner::new().with(|| {
+            let (_store, backend) = two_deck_backend(two_deck_book(), Some("zz"));
+            let html = home_screen(backend);
+            assert!(html.contains("zz-1"), "{html}");
+            assert!(!html.contains("Not in this deck"), "{html}");
+            assert!(!html.contains(">kho<"), "{html}");
+        });
     }
 }

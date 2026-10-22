@@ -5,6 +5,7 @@
 
 pub mod add_word;
 pub mod data_block;
+pub mod deck_chooser;
 pub mod new_terms;
 pub mod passage_badge;
 pub mod save_strip;

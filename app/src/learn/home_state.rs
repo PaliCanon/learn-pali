@@ -59,7 +59,7 @@ pub(crate) fn home_state(load: &Load, deck: &Deck, today: Date) -> HomeState {
 /// The cards due on `today` for `state` and `deck` (A1: Σ over the due
 /// terms the deck knows of their facets not passed at their stage — the
 /// queue `Session::start` builds): a term is due when `due <= today`, its
-/// facets are `facets_of` less `effective_passed`; a term neither the deck
+/// facets in `deck` are `facets_of` less `effective_passed`; a term neither the deck
 /// nor the state's added words know counts for nothing.
 pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
     state
@@ -72,8 +72,8 @@ pub(crate) fn due_cards(deck: &Deck, state: &State, today: Date) -> usize {
                 .map(|term| (progress, term))
         })
         .map(|(progress, term)| {
-            facets_of(term)
-                .difference(&State::effective_passed(progress, term))
+            facets_of(deck, term)
+                .difference(&State::effective_passed(progress, deck, term))
                 .len()
         })
         .sum()

@@ -12,7 +12,6 @@ use learn_core::progress::State;
 use leptos::prelude::*;
 
 use crate::backend::Backend;
-use crate::deck::deck;
 use crate::learn::run::{NotAdded, ReviewRun};
 use crate::store::Load;
 use crate::today::{browser_today, session_today};
@@ -97,7 +96,7 @@ pub(crate) fn add_word(backend: Backend, term: Term) -> Result<(), Refused> {
     let id = term.id.clone();
     let load = backend.load();
     let today = start_day(&load);
-    let state = with_word(load, deck(), term, today)?;
+    let state = with_word(load, backend.deck(), term, today)?;
     backend.save(&state);
     kept(backend, &id)
 }
@@ -287,7 +286,7 @@ mod tests {
                     .last_today
                     .unwrap_or(Date::parse("2026-10-05").unwrap());
                 let session = Session::start(deck(), state.clone(), today, 0).unwrap();
-                let run = RwSignal::new(ReviewRun::new(session, state));
+                let run = RwSignal::new(ReviewRun::new(session, deck(), state));
                 store.script(&[refusal]);
                 assert_eq!(
                     add_through(Some(run), backend, added_word()),
@@ -319,7 +318,7 @@ mod tests {
             let owner = Owner::new();
             let run = owner.with(|| {
                 let session = Session::start(deck(), state.clone(), today, 0).unwrap();
-                RwSignal::new(ReviewRun::new(session, state))
+                RwSignal::new(ReviewRun::new(session, deck(), state))
             });
             owner.cleanup();
             assert_eq!(add_through(Some(run), backend, added_word()), Ok(()));
@@ -348,7 +347,7 @@ mod tests {
         run_on(Load::Ok(ahead.clone()), |store, backend| {
             let today = session_today(browser_today(), &ahead);
             let session = Session::start(deck(), ahead.clone(), today, 0).unwrap();
-            let run = RwSignal::new(ReviewRun::new(session, ahead.clone()));
+            let run = RwSignal::new(ReviewRun::new(session, deck(), ahead.clone()));
             add_through(Some(run), backend, added_word()).unwrap();
             assert_eq!(due_of(store), ahead.last_today.unwrap(), "in a run");
         });
@@ -368,7 +367,7 @@ mod tests {
                 .last_today
                 .unwrap_or(Date::parse("2026-10-05").unwrap());
             let session = Session::start(deck(), state.clone(), today, 0).unwrap();
-            let run = RwSignal::new(ReviewRun::new(session, state));
+            let run = RwSignal::new(ReviewRun::new(session, deck(), state));
             add_through(Some(run), backend, added_word()).unwrap();
             // The learner leaves without grading: the home reads the store.
             let home = backend.load();

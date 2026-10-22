@@ -3,8 +3,10 @@
 //! ([`deck`]). No fetch, so no network failure state in v1; the pipeline's
 //! deck (task 004) replaces the file, and later the site serves it.
 
+use std::rc::Rc;
 use std::sync::{LazyLock, Mutex};
 
+use learn_core::book::DeckId;
 use learn_core::deck::{Deck, Term};
 
 /// The embedded deck, parsed on first use. A parse failure is caught by
@@ -17,6 +19,66 @@ static DECK: LazyLock<Deck> = LazyLock::new(|| {
 /// The deck every page reads: the same `&'static` on every call.
 pub(crate) fn deck() -> &'static Deck {
     &DECK
+}
+
+/// One deck this build teaches: its id in the progress [`Book`](learn_core::book::Book)
+/// and the deck itself.
+#[derive(Debug, Clone)]
+pub(crate) struct Entry {
+    /// The id of the deck's entry in the Book.
+    pub(crate) id: DeckId,
+    /// The deck, parsed once for the life of the page.
+    pub(crate) deck: &'static Deck,
+}
+
+/// The decks compiled into the build, in the order they are offered; the
+/// first is always the words deck, the default and the fallback of every
+/// unknown selection. A cheaply cloned handle over a shared list.
+#[derive(Debug, Clone)]
+pub(crate) struct Decks(Rc<[Entry]>);
+
+impl Decks {
+    /// A registry of `entries`.
+    ///
+    /// # Panics
+    /// When `entries` is empty or its first entry is not the words deck:
+    /// the fallback of an unknown selection must exist.
+    pub(crate) fn new(entries: Vec<Entry>) -> Self {
+        assert!(
+            entries.first().is_some_and(|entry| entry.id.is_words()),
+            "the registry starts with the words deck"
+        );
+        Decks(entries.into())
+    }
+
+    /// How many decks the build teaches (at least one).
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    /// The decks, the words deck first.
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Entry> {
+        self.0.iter()
+    }
+
+    /// The entry of `id`, if the build teaches it.
+    pub(crate) fn get(&self, id: &DeckId) -> Option<&Entry> {
+        self.0.iter().find(|entry| &entry.id == id)
+    }
+
+    /// The entry of `id`; the words entry when `id` is none or unknown (an
+    /// id from a newer build, a stale setting).
+    pub(crate) fn resolve(&self, id: Option<&DeckId>) -> &Entry {
+        id.and_then(|id| self.get(id)).unwrap_or(&self.0[0])
+    }
+}
+
+/// The build's decks: the words deck alone in 063a.
+pub(crate) fn registry() -> Decks {
+    Decks::new(vec![Entry {
+        id: DeckId::words(),
+        deck: deck(),
+    }])
 }
 
 /// The terms of added words already pinned, one per distinct content.
@@ -54,7 +116,54 @@ pub(crate) fn pinned(term: &Term) -> &'static Term {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::second_deck;
     use learn_core::deck::TermId;
+
+    fn zz() -> Entry {
+        Entry {
+            id: DeckId("zz".into()),
+            deck: second_deck(),
+        }
+    }
+
+    fn words_entry() -> Entry {
+        Entry {
+            id: DeckId::words(),
+            deck: deck(),
+        }
+    }
+
+    #[test]
+    fn the_registry_holds_the_words_deck_alone() {
+        let decks = registry();
+        assert_eq!(decks.len(), 1);
+        assert!(std::ptr::eq(decks.resolve(None).deck, deck()));
+        assert_eq!(decks.iter().count(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "starts with the words deck")]
+    fn a_registry_refuses_an_empty_list() {
+        let _ = Decks::new(Vec::new());
+    }
+
+    #[test]
+    #[should_panic(expected = "starts with the words deck")]
+    fn a_registry_refuses_a_first_entry_that_is_not_words() {
+        let _ = Decks::new(vec![zz(), words_entry()]);
+    }
+
+    #[test]
+    fn a_registry_resolves_a_known_id_and_falls_back_to_words() {
+        let decks = Decks::new(vec![words_entry(), zz()]);
+        assert_eq!(decks.len(), 2);
+        let zz_id = DeckId("zz".into());
+        assert_eq!(decks.get(&zz_id).map(|entry| &entry.id), Some(&zz_id));
+        assert_eq!(decks.resolve(Some(&zz_id)).id, zz_id);
+        assert!(decks.resolve(Some(&DeckId("nope".into()))).id.is_words());
+        assert!(decks.resolve(None).id.is_words());
+        assert!(decks.get(&DeckId("nope".into())).is_none());
+    }
 
     #[test]
     fn the_embedded_deck_parses_with_its_fifty_terms() {

@@ -18,6 +18,8 @@
   "cta_practice_ahead_label_n": "S’entraîner en avance, {{ count }} termes",
   "cta_practice_label_1": "S’entraîner, {{ count }} carte à revoir",
   "cta_practice_label_n": "S’entraîner, {{ count }} cartes à revoir",
+  "deck_chooser_label": "Paquet",
+  "deck_words": "Mots",
   "detail_due": "Prochaine révision",
   "detail_lapses": "Oublis",
   "detail_stage": "Étape",

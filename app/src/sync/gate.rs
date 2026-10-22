@@ -168,6 +168,7 @@ mod tests {
     use std::rc::Rc;
     use std::time::Duration;
 
+    use learn_core::book::Book;
     use learn_core::progress::State;
     use leptos::prelude::*;
 
@@ -308,7 +309,7 @@ mod tests {
         match kind {
             "newer" => rig
                 .transport
-                .set_drive(Some(r#"{"version": 3, "progress": []}"#)),
+                .set_drive(Some(r#"{"version": 4, "decks": {}}"#)),
             "unreadable" => rig.transport.set_drive(Some("{not json")),
             _ => {}
         }
@@ -365,7 +366,7 @@ mod tests {
         Owner::new().with(|| {
             let rig = Rig::signed_in();
             rig.transport
-                .set_drive(Some(r#"{"version": 3, "progress": []}"#));
+                .set_drive(Some(r#"{"version": 4, "decks": {}}"#));
             rig.sync.run();
             rig.sync.ask(Reason::Tick);
             rig.end(false);
@@ -922,7 +923,11 @@ mod tests {
             (started, 1, "a word and its progress are one term"),
             (lapsed_n(2), 2, "two terms ahead"),
         ] {
-            assert_eq!(terms_changed(&base, &merged), expected, "{what}");
+            assert_eq!(
+                terms_changed(&Book::from_state(base.clone()), &Book::from_state(merged)),
+                expected,
+                "{what}"
+            );
         }
     }
 

@@ -16,8 +16,8 @@
 //! reads the store again: the store's own `on_change` is for changes it did
 //! not make through `save`.
 
+use learn_core::book::Book;
 use learn_core::date::Date;
-use learn_core::progress::State;
 use leptos::prelude::*;
 use leptos_i18n::td_string;
 use palicanon_ui_lib::{Button, Dialog, DialogSection, Disclosed, Disclosure, ShellState, Variant};
@@ -26,15 +26,15 @@ use crate::backend::{Backend, SaveError};
 use crate::catalogue::strings;
 use crate::components::save_strip::failure;
 use crate::components::sync_panel::SyncPanel;
-use crate::store::{ImportError, Load, export_name, validate_import};
-use crate::today::{browser_today, session_today};
+use crate::store::{ImportError, Load, book_today, export_name, validate_import};
+use crate::today::browser_today;
 
 /// What the section offers, read from the store.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Stored {
-    /// What Export downloads, with the session's today (the file's name);
-    /// none: nothing saved, Export is off.
-    export: Option<(State, Date)>,
+    /// What Export downloads, the whole Book, with the session's today (the
+    /// file's name); none: nothing saved, Export is off.
+    export: Option<(Book, Date)>,
     /// The progress was saved by a newer version: it is never replaced
     /// (Q3), Import is off.
     newer: bool,
@@ -44,13 +44,14 @@ pub(crate) struct Stored {
 }
 
 /// What the section offers for `load`, `browser` the browser's date: the
-/// export of a progress this build reads and that holds a term; Import off
+/// export of a progress this build reads and that holds a term in any
+/// deck; Import off
 /// for a progress saved by a newer version or one that could not be read
 /// (a missing or damaged one may be replaced).
-pub(crate) fn stored(load: &Load, browser: Date) -> Stored {
+pub(crate) fn stored(load: &Load<Book>, browser: Date) -> Stored {
     match load {
-        Load::Ok(state) if !state.progress.is_empty() => Stored {
-            export: Some((state.clone(), session_today(browser, state))),
+        Load::Ok(book) if book.decks().any(|(_, state)| !state.progress.is_empty()) => Stored {
+            export: Some((book.clone(), book_today(browser, book))),
             ..Stored::default()
         },
         Load::NewerVersion { .. } => Stored {
@@ -84,8 +85,8 @@ pub(crate) struct ProgressData {
     pub(crate) failure: Memo<Option<SaveError>>,
     /// The confirmation Dialog.
     dialog: Disclosed,
-    /// The validated state waiting for 'Replace'.
-    pending: RwSignal<Option<State>>,
+    /// The validated Book waiting for 'Replace'.
+    pending: RwSignal<Option<Book>>,
     /// Why the last file was refused.
     refusal: RwSignal<Option<ImportError>>,
     /// The last pick failed (no chooser, an unreadable file): its own
@@ -134,7 +135,7 @@ impl ProgressData {
 
     /// Reads the store and the clock again.
     pub(crate) fn read(self) {
-        let next = stored(&self.backend.load(), browser_today());
+        let next = stored(&self.backend.load_book(), browser_today());
         if self.stored.with_untracked(|stored| *stored != next) {
             self.stored.set(next);
         }
@@ -238,8 +239,8 @@ fn ExportButton(
 /// host's file transfer; nothing when there is nothing to export.
 fn export_stored(data: ProgressData) {
     data.stored.with_untracked(|stored| {
-        if let Some((state, today)) = &stored.export {
-            data.backend.export(&export_name(*today), &state.to_json());
+        if let Some((book, today)) = &stored.export {
+            data.backend.export(&export_name(*today), &book.to_json());
         }
     });
 }
@@ -269,8 +270,8 @@ fn begin_import(data: ProgressData) {
         // chooser calls nothing back and leaves it.
         refusal.set(None);
         match validate_import(&text) {
-            Ok(state) => {
-                pending.set(Some(state));
+            Ok(book) => {
+                pending.set(Some(book));
                 dialog.set_open(true);
             }
             Err(error) => refusal.set(Some(error)),
@@ -373,34 +374,35 @@ pub(crate) fn ImportConfirm(
     }
 }
 
-/// 'Replace': the pending state is forgotten and the confirmation closed
+/// 'Replace': the pending Book is forgotten and the confirmation closed
 /// before the home reads the store again; it is saved over the stored
 /// progress unless the store must keep it ([`replace_stored`]), and only
 /// then the writes counter moves.
 fn confirm_replace(data: ProgressData) {
-    let state = data.pending.get_untracked();
+    let book = data.pending.get_untracked();
     data.pending.set(None);
     data.dialog.set_open(false);
-    if let Some(state) = state {
-        if replace_stored(data.backend, &state) {
+    if let Some(book) = book {
+        if replace_stored(data.backend, &book) {
             data.moved();
         }
         data.read();
     }
 }
 
-/// Saves `state` over the stored progress, unless the store holds one
+/// Saves `book` over the stored progress, every deck of it (an import is an
+/// explicit replace by the whole file), unless the store holds one
 /// saved by a newer version (Q3: never overwritten, even when another tab
 /// wrote it after Settings read the store) or could not read it; whether it
 /// was saved.
-fn replace_stored(backend: Backend, state: &State) -> bool {
+fn replace_stored(backend: Backend, book: &Book) -> bool {
     if matches!(
-        backend.load(),
+        backend.load_book(),
         Load::NewerVersion { .. } | Load::Unreadable(_)
     ) {
         return false;
     }
-    backend.save(state);
+    backend.save_book(book);
     true
 }
 
@@ -414,10 +416,24 @@ mod tests {
         button_labelled, position, progress_fixture, provide_fakes, tag_around, today,
     };
 
+    /// The fixture progress as the Book of a learner of the words deck alone.
+    fn book() -> Book {
+        Book::from_state(progress_fixture())
+    }
+
+    /// The fixture's Book with a started term in the deck `zz` too.
+    fn two_decks() -> Book {
+        let mut other = progress_fixture();
+        other.progress[0].term = learn_core::deck::TermId("zz-1".into());
+        let mut book = book();
+        book.set(learn_core::book::DeckId("zz".into()), other);
+        book
+    }
+
     /// The stored progress of the fixture, exported on `today`.
     fn saved() -> Stored {
         Stored {
-            export: Some((progress_fixture(), today())),
+            export: Some((book(), today())),
             ..Stored::default()
         }
     }
@@ -603,23 +619,23 @@ mod tests {
     /// What the store holds, as the section offers it.
     #[test]
     fn the_store_decides_export_and_import() {
-        let state = progress_fixture();
         assert_eq!(
-            stored(&Load::Ok(state.clone()), today()),
+            stored(&Load::Ok(book()), today()),
             Stored {
-                export: Some((state, today())),
+                export: Some((book(), today())),
                 ..Stored::default()
             }
         );
         let mut later = progress_fixture();
         later.last_today = Some(today() + 2);
+        let later = Book::from_state(later);
         assert_eq!(
             stored(&Load::Ok(later.clone()), today()).export,
             Some((later, today() + 2)),
             "the file is named after the session's today"
         );
         for nothing in [
-            Load::Ok(State::empty()),
+            Load::Ok(Book::empty()),
             Load::Empty,
             Load::Invalid { raw: "x".into() },
         ] {
@@ -722,8 +738,52 @@ mod tests {
                 [(
                     "pc_learn-2026-10-05.json".to_owned(),
                     progress_fixture().to_json()
-                )]
+                )],
+                "a learner of the words deck alone exports today's file, byte for byte"
             );
+        });
+    }
+
+    /// Export writes the Book: with a second deck started, every deck is in
+    /// the file, and the section offers it even when `words` is empty.
+    #[test]
+    fn export_writes_every_deck_of_the_book() {
+        Owner::new().with(|| {
+            let (_store, files) = provide_fakes(Load::Empty);
+            let data = ProgressData::new();
+            data.stored.set(stored(&Load::Ok(two_decks()), today()));
+            export_stored(data);
+            let exported = files.exported();
+            assert_eq!(exported.len(), 1);
+            assert_eq!(exported[0].1, two_decks().to_json());
+            assert!(exported[0].1.contains("\"zz\""), "{}", exported[0].1);
+            let mut only_zz = Book::empty();
+            only_zz.set(
+                learn_core::book::DeckId("zz".into()),
+                two_decks()
+                    .get(&learn_core::book::DeckId("zz".into()))
+                    .unwrap()
+                    .clone(),
+            );
+            assert!(stored(&Load::Ok(only_zz), today()).export.is_some());
+        });
+    }
+
+    /// An import is an explicit replace by the whole file: an old flat
+    /// backup returns the Book to flat, the second deck gone.
+    #[test]
+    fn replacing_by_a_flat_file_returns_the_book_to_flat() {
+        Owner::new().with(|| {
+            let (store, files) = provide_fakes(Load::Empty);
+            store.changed_to_book(Load::Ok(two_decks()));
+            let data = ProgressData::new();
+            begin_import(data);
+            files.choose(&progress_fixture().to_json());
+            confirm_replace(data);
+            let saved = store.saved_books();
+            assert_eq!(saved, [book()], "words alone, no zz");
+            assert_eq!(saved[0].to_json(), progress_fixture().to_json());
+            assert_eq!(data.writes.0.get_untracked(), 1);
         });
     }
 
@@ -742,7 +802,7 @@ mod tests {
             begin_import(data);
             files.choose(&progress_fixture().to_json());
             assert_eq!(data.refusal.get_untracked(), None, "a new choice clears it");
-            assert_eq!(data.pending.get_untracked(), Some(progress_fixture()));
+            assert_eq!(data.pending.get_untracked(), Some(book()));
             assert!(
                 data.dialog.signal().get_untracked(),
                 "the confirmation opens"
@@ -770,12 +830,12 @@ mod tests {
             );
             assert_eq!(data.pending.get_untracked(), None);
             begin_import(data);
-            files.choose(&format!(r#"{{"version": {}}}"#, State::VERSION + 1));
+            files.choose(&format!(r#"{{"version": {}}}"#, Book::VERSION + 1));
             assert_eq!(data.refusal.get_untracked(), Some(ImportError::Newer));
             begin_import(data);
             files.choose(&progress_fixture().to_json());
             assert_eq!(data.refusal.get_untracked(), None, "a read clears it");
-            assert_eq!(data.pending.get_untracked(), Some(progress_fixture()));
+            assert_eq!(data.pending.get_untracked(), Some(book()));
         });
     }
 
@@ -846,7 +906,7 @@ mod tests {
         Owner::new().with(|| {
             let (store, _files) = provide_fakes(Load::Empty);
             let data = ProgressData::new();
-            data.pending.set(Some(progress_fixture()));
+            data.pending.set(Some(book()));
             confirm_replace(data);
             assert_eq!(store.saved(), [progress_fixture()]);
             assert_eq!(data.writes.0.get_untracked(), 1);
@@ -857,7 +917,7 @@ mod tests {
             ] {
                 let (store, _files) = provide_fakes(kept);
                 let data = ProgressData::new();
-                data.pending.set(Some(progress_fixture()));
+                data.pending.set(Some(book()));
                 data.dialog.set_open(true);
                 confirm_replace(data);
                 assert_eq!(store.saved().len(), 0);
@@ -875,14 +935,14 @@ mod tests {
         Owner::new().with(|| {
             let (store, _files) = provide_fakes(Load::Empty);
             let backend = Backend::current();
-            assert!(replace_stored(backend, &progress_fixture()));
+            assert!(replace_stored(backend, &book()));
             assert_eq!(store.saved(), [progress_fixture()]);
             for kept in [
                 Load::NewerVersion { raw: "x".into() },
                 Load::Unreadable("denied".into()),
             ] {
                 let (store, _files) = provide_fakes(kept);
-                assert!(!replace_stored(Backend::current(), &progress_fixture()));
+                assert!(!replace_stored(Backend::current(), &book()));
                 assert_eq!(store.saved().len(), 0);
             }
         });

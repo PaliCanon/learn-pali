@@ -18,6 +18,8 @@
   "cta_practice_ahead_label_n": "Practice ahead, {{ count }} terms",
   "cta_practice_label_1": "Practice, {{ count }} card due",
   "cta_practice_label_n": "Practice, {{ count }} cards due",
+  "deck_chooser_label": "Deck",
+  "deck_words": "Words",
   "detail_due": "Next review",
   "detail_lapses": "Lapses",
   "detail_stage": "Stage",

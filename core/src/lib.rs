@@ -4,7 +4,8 @@
 //! with its meaning, forms and an example. A term is learned through its
 //! [`facet`]s: Meaning (pāli to sense) and Recall (sense to pāli) always,
 //! Forms when it has a regular inflected form, Context when its example has a
-//! blank.
+//! blank. A deck has a [`kind`] that owns its facet rule (words: the four;
+//! script: read and write).
 //!
 //! **Stages and the two transitions.** A term sits in one Leitner [`stage`]
 //! (Day, Week, Month, Quarter, `HalfYear`, Year). When every facet has been
@@ -28,11 +29,13 @@
 pub mod added;
 #[cfg(test)]
 mod added_sites;
+pub mod book;
 pub mod date;
 pub mod deck;
 pub mod facet;
 pub mod forms;
 pub mod grow;
+pub mod kind;
 pub mod merge;
 pub mod progress;
 pub mod session;

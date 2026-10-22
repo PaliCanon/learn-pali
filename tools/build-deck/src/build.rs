@@ -10,6 +10,7 @@ use std::fmt;
 use std::collections::HashSet;
 
 use learn_core::deck::{Deck, Example, Meaning, Pos, Term, TermId};
+use learn_core::kind::DeckKind;
 use rusqlite::Connection;
 
 use crate::blank::blank_example;
@@ -133,6 +134,7 @@ pub fn build(
         source,
         terms,
         words: words.words,
+        kind: DeckKind::Words,
     };
     Ok((deck, report))
 }

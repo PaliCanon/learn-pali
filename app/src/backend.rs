@@ -14,9 +14,12 @@
 
 use std::rc::Rc;
 
+use learn_core::book::{Book, DeckId};
+use learn_core::deck::Deck;
 use learn_core::progress::State;
 use leptos::prelude::*;
 
+use crate::deck::Decks;
 use crate::store::Load;
 
 /// Whether the progress is on disk, as a store reports it
@@ -45,27 +48,29 @@ pub enum SaveError {
     /// Export of it. The store then answers [`Load::NewerVersion`] and
     /// calls [`ProgressStore::on_change`].
     NewerVersion {
-        /// The progress the file did not take.
-        unsaved: State,
+        /// The progress the file did not take: the whole Book.
+        unsaved: Book,
     },
 }
 
 /// Where the learner's progress lives. The fragment calls it from the UI
 /// thread only; it answers at once from the implementation's own memory.
+/// It holds the whole [`Book`], every deck's progress; the fragment's
+/// `Backend` of the fragment maps it to the selected deck's `State`.
 pub trait ProgressStore {
     /// The progress, read now from the implementation's memory (never a
     /// wait). [`Load::Unreadable`] when its read failed with the stored
     /// progress untouched.
-    fn load(&self) -> Load;
+    fn load(&self) -> Load<Book>;
 
-    /// Accepts `state` as the new progress, at once: it returns nothing and
+    /// Accepts `book` as the new progress, at once: it returns nothing and
     /// promises nothing about durability (see [`ProgressStore::status`]).
     /// The implementation owns its queue and its page-hide hook. It refuses
     /// the write, and the exit write too, while its [`load`](Self::load)
     /// answers [`Load::Unreadable`], and after a [`SaveError::NewerVersion`]
     /// conflict (its load then answers [`Load::NewerVersion`]): the guard is
     /// the store's, not the fragment's buttons'.
-    fn save(&self, state: &State);
+    fn save(&self, book: &Book);
 
     /// Whether what [`save`](Self::save) accepted is written. The same
     /// signal every time it is called; the fragment reads it reactively.
@@ -78,6 +83,17 @@ pub trait ProgressStore {
     /// [`status`](Self::status) again. Called under the fragment's reactive
     /// owner: a listener should be removed with `on_cleanup`.
     fn on_change(&self, callback: Box<dyn Fn()>);
+
+    /// The deck the learner chose on this device, if the host remembers
+    /// one. A device setting, not part of the progress file and never
+    /// synced. An id this build does not teach is read as the words deck.
+    /// Nothing by default: the selection then lives in memory for the page.
+    fn selected(&self) -> Option<DeckId> {
+        None
+    }
+
+    /// Remembers `deck` as the chosen one. Nothing by default.
+    fn select(&self, _deck: &DeckId) {}
 }
 
 /// How a file moves between the learner and the host (the browser's
@@ -253,15 +269,30 @@ pub(crate) struct Backend {
     /// [`save_merge`](Self::save_merge)): the sync's 'a change was saved'
     /// ask.
     saved: StoredValue<Option<Rc<dyn Fn()>>, LocalStorage>,
+    /// The decks this build teaches.
+    decks: StoredValue<Decks, LocalStorage>,
+    /// The id of the selected deck, always one `decks` holds.
+    selected: RwSignal<DeckId>,
 }
 
 impl Backend {
-    /// A handle over `store` and `files`.
+    /// A handle over `store` and `files`, teaching the build's decks
+    /// ([`crate::deck::registry`]).
     pub(crate) fn new(store: SharedStore, files: SharedFiles) -> Self {
+        Backend::with_decks(store, files, crate::deck::registry())
+    }
+
+    /// A handle over `store` and `files` teaching `decks`. The selected
+    /// deck is the store's remembered one when the registry knows it, else
+    /// the words deck.
+    pub(crate) fn with_decks(store: SharedStore, files: SharedFiles, decks: Decks) -> Self {
+        let selected = decks.resolve(store.selected().as_ref()).id.clone();
         Backend {
             store: StoredValue::new_local(store),
             files: StoredValue::new_local(files),
             saved: StoredValue::new_local(None),
+            decks: StoredValue::new_local(decks),
+            selected: RwSignal::new(selected),
         }
     }
 
@@ -275,26 +306,88 @@ impl Backend {
         use_context::<Backend>().expect("Learn needs a LearnProvider above it")
     }
 
-    /// [`ProgressStore::load`].
+    /// The decks this build teaches.
+    pub(crate) fn decks(self) -> Decks {
+        self.decks.get_value()
+    }
+
+    /// The selected deck's id. Reactive: a tracked read.
+    pub(crate) fn selected(self) -> DeckId {
+        self.selected.get()
+    }
+
+    /// Selects `id` (the words deck when this build does not teach it): the
+    /// signal changes and the store remembers it. A device setting: no Book
+    /// is written.
+    pub(crate) fn select(self, id: &DeckId) {
+        let id = self.decks.get_value().resolve(Some(id)).id.clone();
+        self.store.get_value().select(&id);
+        self.selected.set(id);
+    }
+
+    /// The selected deck. Reactive like [`selected`](Self::selected).
+    pub(crate) fn deck(self) -> &'static Deck {
+        let id = self.selected();
+        self.decks.get_value().resolve(Some(&id)).deck
+    }
+
+    /// The selected deck's progress: the store's Book mapped to that deck's
+    /// `State`, empty when the Book has no entry for it.
     pub(crate) fn load(self) -> Load {
+        let id = self.selected.get_untracked();
+        self.store.get_value().load().map(|book| book.state(&id))
+    }
+
+    /// [`ProgressStore::load`]: the whole Book.
+    pub(crate) fn load_book(self) -> Load<Book> {
         self.store.get_value().load()
     }
 
-    /// [`ProgressStore::save`], a change the learner made: the listener
-    /// of [`on_saved`](Self::on_saved) runs after it. Any new save path
-    /// asks the sync by default.
+    /// [`ProgressStore::save`] of the selected deck's `state`, a change the
+    /// learner made: the listener of [`on_saved`](Self::on_saved) runs after
+    /// it. Any new save path asks the sync by default.
     pub(crate) fn save(self, state: &State) {
         self.save_merge(state);
+        self.ask_sync();
+    }
+
+    /// [`ProgressStore::save`] of the selected deck's `state`, the sync
+    /// cycle's own merge: the cycle carries the origin 'sync' and never asks
+    /// itself for another cycle (two devices cannot ping-pong). The other
+    /// decks' entries are the stored Book's, untouched.
+    pub(crate) fn save_merge(self, state: &State) {
+        let store = self.store.get_value();
+        let mut book = match store.load() {
+            Load::Ok(book) => book,
+            // Nothing readable to keep: the store refuses a write over an
+            // unreadable or newer file by itself.
+            Load::Empty
+            | Load::Invalid { .. }
+            | Load::NewerVersion { .. }
+            | Load::Unreadable(_) => Book::empty(),
+        };
+        book.set(self.selected.get_untracked(), state.clone());
+        store.save(&book);
+    }
+
+    /// [`ProgressStore::save`] of a whole Book the learner chose (an
+    /// import): the listener of [`on_saved`](Self::on_saved) runs after it.
+    pub(crate) fn save_book(self, book: &Book) {
+        self.save_merge_book(book);
+        self.ask_sync();
+    }
+
+    /// [`ProgressStore::save`] of a whole Book, the sync cycle's own merge:
+    /// no listener.
+    pub(crate) fn save_merge_book(self, book: &Book) {
+        self.store.get_value().save(book);
+    }
+
+    /// Runs the listener of [`on_saved`](Self::on_saved), if any.
+    fn ask_sync(self) {
         if let Some(saved) = self.saved.get_value() {
             saved();
         }
-    }
-
-    /// [`ProgressStore::save`], the sync cycle's own merge: the cycle
-    /// carries the origin 'sync' and never asks itself for another cycle
-    /// (two devices cannot ping-pong).
-    pub(crate) fn save_merge(self, state: &State) {
-        self.store.get_value().save(state);
     }
 
     /// Registers the listener of [`save`](Self::save): one per backend,
@@ -330,7 +423,10 @@ mod tests {
     use leptos::prelude::{GetUntracked, Owner};
 
     use super::*;
-    use crate::test_support::{FakeFiles, FakeStore, backend_of};
+    use crate::test_support::{
+        FakeFiles, FakeStore, backend_of, backend_with_decks, progress_fixture, second_deck,
+        two_decks,
+    };
 
     /// The handle forwards every call to the store and the transfer it was
     /// given, and returns the store's own answers.
@@ -393,6 +489,188 @@ mod tests {
             let backend = backend_of(&store, &FakeFiles::default());
             backend.save(&State::empty());
             assert_eq!(store.saved().len(), 1);
+        });
+    }
+
+    /// A Book holding a started term in `words` and another in `zz`.
+    fn two_deck_book() -> Book {
+        let mut zz = progress_fixture();
+        zz.progress[0].term = learn_core::deck::TermId("zz-1".into());
+        let mut book = Book::from_state(progress_fixture());
+        book.set(zz_id(), zz);
+        book
+    }
+
+    fn zz_id() -> DeckId {
+        DeckId("zz".into())
+    }
+
+    /// A backend over a store holding `book`, teaching words and `zz`.
+    fn two_deck_backend(store: &FakeStore) -> Backend {
+        backend_with_decks(store, &FakeFiles::default(), two_decks())
+    }
+
+    /// The one rule of the wrapper, first direction: a save through the
+    /// facade on `zz` leaves the `words` entry as it was.
+    #[test]
+    fn a_save_on_another_deck_leaves_words_untouched() {
+        Owner::new().with(|| {
+            let store = FakeStore::with_book(Load::Ok(two_deck_book()));
+            let backend = two_deck_backend(&store);
+            backend.select(&zz_id());
+            let mut changed = two_deck_book().state(&zz_id());
+            changed.progress[0].lapses += 5;
+            backend.save(&changed);
+            let saved = store.saved_books();
+            assert_eq!(saved.len(), 1);
+            assert_eq!(saved[0].words(), &progress_fixture(), "words untouched");
+            assert_eq!(saved[0].state(&zz_id()), changed, "zz is the changed one");
+        });
+    }
+
+    /// The reverse: a save on `words` leaves `zz` as it was.
+    #[test]
+    fn a_save_on_words_leaves_another_deck_untouched() {
+        Owner::new().with(|| {
+            let store = FakeStore::with_book(Load::Ok(two_deck_book()));
+            let backend = two_deck_backend(&store);
+            let mut changed = progress_fixture();
+            changed.progress[0].lapses += 5;
+            backend.save(&changed);
+            let saved = store.saved_books();
+            assert_eq!(saved[0].words(), &changed);
+            assert_eq!(
+                saved[0].state(&zz_id()),
+                two_deck_book().state(&zz_id()),
+                "zz untouched"
+            );
+        });
+    }
+
+    /// A Book with no entry for the selected deck loads as an empty state,
+    /// not as nothing; a store with nothing stays empty.
+    #[test]
+    fn a_missing_entry_loads_empty_and_no_file_stays_empty() {
+        Owner::new().with(|| {
+            let store = FakeStore::with_book(Load::Ok(Book::from_state(progress_fixture())));
+            let backend = two_deck_backend(&store);
+            assert_eq!(backend.load(), Load::Ok(progress_fixture()));
+            backend.select(&zz_id());
+            assert_eq!(backend.load(), Load::Ok(State::empty()));
+            let nothing = FakeStore::new(Load::Empty);
+            assert_eq!(two_deck_backend(&nothing).load(), Load::Empty);
+            let newer = FakeStore::with_book(Load::NewerVersion { raw: "x".into() });
+            assert_eq!(
+                two_deck_backend(&newer).load(),
+                Load::NewerVersion { raw: "x".into() }
+            );
+        });
+    }
+
+    /// The selection: words by default; `select` is read back by
+    /// `selected()` and `deck()`; the store's `select` is called.
+    #[test]
+    fn selecting_a_deck_is_read_back_and_remembered_by_the_store() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            let backend = two_deck_backend(&store);
+            assert_eq!(backend.selected(), DeckId::words());
+            assert!(std::ptr::eq(backend.deck(), crate::deck::deck()));
+            backend.select(&zz_id());
+            assert_eq!(backend.selected(), zz_id());
+            assert!(std::ptr::eq(backend.deck(), second_deck()));
+            assert_eq!(store.selects(), [zz_id()]);
+            assert_eq!(backend.decks().len(), 2);
+        });
+    }
+
+    /// The selection starts from the device's setting.
+    #[test]
+    fn the_device_setting_starts_the_selection() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            store.remember_selected("zz");
+            assert_eq!(two_deck_backend(&store).selected(), zz_id());
+        });
+    }
+
+    /// An id this build does not teach falls back to words, whether it is
+    /// selected or the device remembered it.
+    #[test]
+    fn an_unknown_deck_falls_back_to_words() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            store.remember_selected("from-a-newer-build");
+            let backend = two_deck_backend(&store);
+            assert_eq!(backend.selected(), DeckId::words(), "a stale setting");
+            backend.select(&zz_id());
+            backend.select(&DeckId("nope".into()));
+            assert_eq!(backend.selected(), DeckId::words());
+            assert!(std::ptr::eq(backend.deck(), crate::deck::deck()));
+            assert_eq!(store.selects().last(), Some(&DeckId::words()));
+            // The build with one deck knows no other.
+            let one = backend_of(&store, &FakeFiles::default());
+            assert_eq!(one.selected(), DeckId::words());
+            one.select(&zz_id());
+            assert_eq!(one.selected(), DeckId::words());
+        });
+    }
+
+    /// The selection is a device setting: selecting writes no Book.
+    #[test]
+    fn selecting_writes_no_book() {
+        Owner::new().with(|| {
+            let store = FakeStore::with_book(Load::Ok(two_deck_book()));
+            let backend = two_deck_backend(&store);
+            backend.select(&zz_id());
+            backend.select(&DeckId::words());
+            assert_eq!(store.saved_books().len(), 0);
+            assert_eq!(store.written_books().len(), 0);
+        });
+    }
+
+    /// The reactive read follows a selection.
+    #[test]
+    fn the_selected_deck_is_a_tracked_read() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            let backend = two_deck_backend(&store);
+            let seen = Memo::new(move |_| backend.selected());
+            assert_eq!(seen.get_untracked(), DeckId::words());
+            backend.select(&zz_id());
+            assert_eq!(seen.get_untracked(), zz_id());
+        });
+    }
+
+    /// Saves over an unreadable or newer file build a Book from the answer
+    /// alone; the store refuses to write it.
+    #[test]
+    fn a_save_over_what_the_store_keeps_is_the_stores_to_refuse() {
+        Owner::new().with(|| {
+            let store = FakeStore::with_book(Load::NewerVersion { raw: "x".into() });
+            let backend = two_deck_backend(&store);
+            backend.save(&progress_fixture());
+            assert_eq!(store.written_books().len(), 0, "nothing reaches the file");
+            assert_eq!(store.book_now(), Load::NewerVersion { raw: "x".into() });
+        });
+    }
+
+    /// Origin rule for a whole Book: an import asks the sync, the sync's own
+    /// merge does not.
+    #[test]
+    fn a_book_save_asks_and_a_merge_book_save_does_not() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            let backend = two_deck_backend(&store);
+            let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+            let seen = std::rc::Rc::clone(&asked);
+            backend.on_saved(move || seen.set(seen.get() + 1));
+            backend.save_book(&two_deck_book());
+            assert_eq!(asked.get(), 1);
+            backend.save_merge_book(&two_deck_book());
+            assert_eq!(asked.get(), 1);
+            assert_eq!(store.saved_books(), [two_deck_book(), two_deck_book()]);
+            assert_eq!(backend.load_book(), Load::Ok(two_deck_book()));
         });
     }
 

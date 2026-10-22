@@ -14,7 +14,7 @@
 //! settles it:
 //!
 //! - **Pass** on a queue question adds the facet to `passed`; once the
-//!   effective passed facets (`passed ∩ facets_of(term)`) cover every facet of
+//!   effective passed facets (`passed ∩ facets_of(deck, term)`) cover every facet of
 //!   the term, the term moves to the next stage, `passed` is cleared and
 //!   `due = today + interval(new stage)` (a late review counts from today).
 //! - **Fail** on a queue question sends the term back to Day: `passed`
@@ -206,7 +206,7 @@ impl<'d> Session<'d> {
             .filter(|id| state.get(id).is_some())
             .filter_map(|id| state.term(deck, id))
             .flat_map(|term| {
-                facets_of(term)
+                facets_of(deck, term)
                     .iter()
                     .map(|facet| Question {
                         term: term.id.clone(),
@@ -322,7 +322,7 @@ impl<'d> Session<'d> {
             .find(|entry| entry.term == question.term)
             .ok_or_else(|| SessionError::UnknownTerm(question.term.clone()))?;
         match answer {
-            Answer::Pass => pass(progress, term, question.facet, today),
+            Answer::Pass => pass(progress, self.deck, term, question.facet, today),
             Answer::Fail => {
                 fail(progress, today);
                 self.queue.retain(|queued| queued.term != question.term);
@@ -362,9 +362,9 @@ pub fn nearest(state: &State, deck: &Deck, only: Option<Stage>, n: usize) -> Vec
 /// The pass transition: the facet is passed; when every facet of the term
 /// is, the term moves up and is due again after the new stage's interval,
 /// counted from `today`.
-fn pass(progress: &mut Progress, term: &Term, facet: Facet, today: Date) {
+fn pass(progress: &mut Progress, deck: &Deck, term: &Term, facet: Facet, today: Date) {
     progress.passed.insert(facet);
-    if State::effective_passed(progress, term).is_superset(&facets_of(term)) {
+    if State::effective_passed(progress, deck, term).is_superset(&facets_of(deck, term)) {
         promote(progress, today);
     }
 }
@@ -395,7 +395,7 @@ fn settle_complete(deck: &Deck, state: &mut State, today: Date) -> bool {
     for progress in progress {
         if progress.due <= today
             && let Some(term) = find_term(deck, added, &progress.term)
-            && unpassed_questions(term, progress).is_empty()
+            && unpassed_questions(deck, term, progress).is_empty()
         {
             promote(progress, today);
             changed = true;
@@ -419,15 +419,15 @@ fn due_queue(deck: &Deck, state: &State, today: Date) -> VecDeque<Question> {
         .collect();
     due.sort_by_key(|(progress, term)| (progress.due, term.rank));
     due.into_iter()
-        .flat_map(|(progress, term)| unpassed_questions(term, progress))
+        .flat_map(|(progress, term)| unpassed_questions(deck, term, progress))
         .collect()
 }
 
 /// The facets of `term` that `progress` has not passed, as queue questions,
 /// in [`Facet`] order.
-pub(crate) fn unpassed_questions(term: &Term, progress: &Progress) -> Vec<Question> {
-    facets_of(term)
-        .difference(&State::effective_passed(progress, term))
+pub(crate) fn unpassed_questions(deck: &Deck, term: &Term, progress: &Progress) -> Vec<Question> {
+    facets_of(deck, term)
+        .difference(&State::effective_passed(progress, deck, term))
         .iter()
         .map(|facet| Question {
             term: term.id.clone(),
@@ -1509,5 +1509,63 @@ mod tests {
         let mut more = old;
         more.passed.insert(Facet::Meaning);
         assert!(never_behind(&state_of(vec![more]), &state_of(vec![fewer])).is_err());
+    }
+
+    // ---- a script deck asks read and write only ----
+
+    /// A script deck of two nouns: each carries regular forms and an example
+    /// with a blank, which a words deck would ask as Forms and Context.
+    fn script_deck() -> Deck {
+        Deck {
+            kind: crate::kind::DeckKind::Script,
+            ..deck_of(vec![noun("a", 1), noun("b", 2)])
+        }
+    }
+
+    #[test]
+    fn a_script_term_is_promoted_when_meaning_and_recall_are_passed() {
+        let deck = script_deck();
+        let mut session = Session::start_with(&deck, State::empty(), day(TODAY), |_| {}).unwrap();
+        assert_eq!(session.request_new(2), 2);
+        let seen = drain(&mut session, Answer::Pass);
+        assert_eq!(
+            seen,
+            vec![
+                ("a".to_string(), Facet::Meaning, false),
+                ("a".to_string(), Facet::Recall, false),
+                ("b".to_string(), Facet::Meaning, false),
+                ("b".to_string(), Facet::Recall, false),
+            ],
+            "exactly two questions per term"
+        );
+        for progress in session.snapshot().progress {
+            assert_eq!(progress.stage, Stage::Week, "{}", progress.term);
+            assert_eq!(progress.passed, FacetSet::empty());
+        }
+        // The same terms in a words deck are still waiting for Forms and
+        // Context after Meaning and Recall.
+        let words = deck_of(vec![noun("a", 1), noun("b", 2)]);
+        let mut session = Session::start_with(&words, State::empty(), day(TODAY), |_| {}).unwrap();
+        session.request_new(2);
+        assert_eq!(drain(&mut session, Answer::Pass).len(), 8);
+    }
+
+    #[test]
+    fn a_script_practice_asks_two_questions_per_term() {
+        let deck = script_deck();
+        let state = dated(vec![
+            entry("a", Stage::Week, day(TODAY + 3)),
+            entry("b", Stage::Month, day(TODAY + 9)),
+        ]);
+        let mut session = practice_in_order(&deck, &state, day(TODAY), &[id("a"), id("b")]);
+        assert_eq!(
+            drain(&mut session, Answer::Pass),
+            vec![
+                ("a".to_string(), Facet::Meaning, true),
+                ("a".to_string(), Facet::Recall, true),
+                ("b".to_string(), Facet::Meaning, true),
+                ("b".to_string(), Facet::Recall, true),
+            ]
+        );
     }
 }

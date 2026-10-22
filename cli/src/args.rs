@@ -1,8 +1,10 @@
 //! Argument parsing.
 //!
 //! `learn-cli --deck deck.json --state state.json [--today YYYY-MM-DD]
-//! [--seed N] <review | stats | new N | advance K>`. Options may come before
-//! or after the command. `--seed` sets the random order of a session's
+//! [--seed N] [--deck-id ID] <review | stats | new N | advance K>`. Options may come before
+//! or after the command. `--deck-id` (default `words`) names the entry of
+//! the state file's Book the commands act on; `--deck` stays the deck file.
+//! `--seed` sets the random order of a session's
 //! questions (default: drawn from the system clock, so each run differs;
 //! the same seed repeats an order). `today` defaults to the UTC calendar date of the system
 //! clock ([`utc_today`]); the standard library has no time zone, so the
@@ -12,6 +14,7 @@ use std::fmt;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use learn_core::book::DeckId;
 use learn_core::date::Date;
 
 /// What the command line asks for.
@@ -21,6 +24,9 @@ pub struct Args {
     pub deck: PathBuf,
     /// The state file (`--state`); it may not exist yet.
     pub state: PathBuf,
+    /// The Book entry the state file's commands act on (`--deck-id`,
+    /// default `words`).
+    pub deck_id: DeckId,
     /// The day given with `--today`, if any.
     pub today: Option<Date>,
     /// The seed given with `--seed`, if any ([`Args::seed_or_now`]).
@@ -54,6 +60,8 @@ pub enum ArgsError {
     /// The `--seed` value is not a whole number from 0 to 2^64 - 1 (the
     /// text given).
     BadSeed(String),
+    /// The `--deck-id` value is empty (the text given).
+    BadDeckId(String),
     /// The count of `new` or `advance` is not a positive whole number
     /// (empty when it is absent).
     BadCount(String),
@@ -75,6 +83,9 @@ impl fmt::Display for ArgsError {
                 f,
                 "bad --seed: {text:?} is not a whole number from 0 to 18446744073709551615"
             ),
+            ArgsError::BadDeckId(text) => {
+                write!(f, "bad --deck-id: {text:?} is not a deck id (it is empty)")
+            }
             ArgsError::BadCount(text) if text.is_empty() => {
                 f.write_str("this command needs a count (a positive whole number)")
             }
@@ -93,14 +104,15 @@ impl std::error::Error for ArgsError {}
 /// The synopsis and one line per command.
 pub fn usage() -> &'static str {
     "learn-cli --deck deck.json --state state.json [--today YYYY-MM-DD] \
-[--seed N] <review | stats | new N | advance K>
+[--seed N] [--deck-id ID] <review | stats | new N | advance K>
   review      ask the questions that are due
   stats       print the terms per stage, what is due and what is new
   new N       start N new terms (by rank)
   advance K   bring K terms forward after a pause (only when nothing is due)
   --today     the day to use (default: today's UTC date)
   --seed      the number that sets the random order of the questions
-              (default: from the clock; the same seed, the same order)"
+              (default: from the clock; the same seed, the same order)
+  --deck-id   the deck of the state file to act on (default: words)"
 }
 
 /// Reads the command line (the arguments without the program name).
@@ -115,6 +127,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
     }
     let mut deck = None;
     let mut state = None;
+    let mut deck_id = DeckId::words();
     let mut today = None;
     let mut seed = None;
     let mut words = Vec::new();
@@ -123,6 +136,13 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
         match arg.as_str() {
             "--deck" => deck = Some(PathBuf::from(value(&mut rest, "--deck")?)),
             "--state" => state = Some(PathBuf::from(value(&mut rest, "--state")?)),
+            "--deck-id" => {
+                let text = value(&mut rest, "--deck-id")?;
+                if text.is_empty() {
+                    return Err(ArgsError::BadDeckId(text));
+                }
+                deck_id = DeckId(text);
+            }
             "--today" => {
                 let text = value(&mut rest, "--today")?;
                 today = Some(Date::parse(&text).map_err(|e| ArgsError::BadDate(e.to_string()))?);
@@ -139,6 +159,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Args, ArgsE
     Ok(Args {
         deck: deck.ok_or(ArgsError::Missing("--deck"))?,
         state: state.ok_or(ArgsError::Missing("--state"))?,
+        deck_id,
         today,
         seed,
         command,
@@ -260,6 +281,45 @@ mod tests {
         assert_eq!(args.state, PathBuf::from("s.json"));
         assert_eq!(args.today, None);
         assert_eq!(args.command, Command::Review);
+    }
+
+    #[test]
+    fn deck_id_defaults_to_words_and_is_read_before_or_after_the_command() {
+        assert_eq!(ok("--deck d --state s review").deck_id, DeckId::words());
+        let zz = DeckId("devanagari".to_owned());
+        assert_eq!(
+            ok("--deck d --state s --deck-id devanagari review").deck_id,
+            zz
+        );
+        assert_eq!(
+            ok("review --deck d --state s --deck-id devanagari").deck_id,
+            zz
+        );
+        assert_eq!(
+            ok("--deck d --state s --deck-id words new 1").deck_id,
+            DeckId::words()
+        );
+    }
+
+    #[test]
+    fn deck_id_without_its_value_is_missing() {
+        assert_eq!(
+            parse("--deck d --state s review --deck-id"),
+            Err(ArgsError::Missing("--deck-id"))
+        );
+    }
+
+    #[test]
+    fn an_empty_deck_id_is_refused_naming_the_option() {
+        let line = ["--deck", "d", "--state", "s", "--deck-id", "", "review"];
+        let error = parse_args(line.map(str::to_owned)).unwrap_err();
+        assert_eq!(error, ArgsError::BadDeckId(String::new()));
+        assert!(error.to_string().contains("--deck-id"), "{error}");
+        assert!(
+            ArgsError::BadDeckId("x".to_owned())
+                .to_string()
+                .contains("--deck-id")
+        );
     }
 
     #[test]
@@ -481,7 +541,15 @@ mod tests {
     fn usage_names_every_command() {
         let text = usage();
         assert!(text.starts_with("learn-cli --deck deck.json --state state.json"));
-        for word in ["review", "stats", "new N", "advance K", "--today", "--seed"] {
+        for word in [
+            "review",
+            "stats",
+            "new N",
+            "advance K",
+            "--today",
+            "--seed",
+            "--deck-id",
+        ] {
             assert!(text.contains(word), "{word}");
         }
     }
