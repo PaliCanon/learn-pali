@@ -454,6 +454,14 @@ pub(crate) fn backend_with_decks(
     Backend::with_decks(store, files, decks)
 }
 
+/// The registry of the words deck alone (the site before 063b).
+pub(crate) fn one_deck() -> crate::deck::Decks {
+    crate::deck::Decks::new(vec![crate::deck::Entry {
+        id: DeckId::words(),
+        deck: deck(),
+    }])
+}
+
 /// The registry of the words deck and [`second_deck`] (`zz`).
 pub(crate) fn two_decks() -> crate::deck::Decks {
     crate::deck::Decks::new(vec![

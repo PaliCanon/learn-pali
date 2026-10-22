@@ -18,6 +18,7 @@ pub mod blank;
 pub mod build;
 pub mod inflections;
 pub mod reader;
+pub mod script;
 pub mod segments;
 pub mod source;
 pub mod translate;
@@ -101,6 +102,15 @@ pub fn run(args: &[String], err: &mut dyn Write) -> i32 {
 
 /// [`run`] with the API token given (only read with `--api`).
 pub fn run_with_token(args: &[String], token: Option<String>, err: &mut dyn Write) -> i32 {
+    if args.first().is_some_and(|first| first == "devanagari") {
+        return match build_script(&args[1..]) {
+            Ok(()) => 0,
+            Err(message) => {
+                let _ = writeln!(err, "build-deck: {message}\n{SCRIPT_USAGE}");
+                2
+            }
+        };
+    }
     let args = match parse_args(args) {
         Ok(args) => args,
         Err(message) => {
@@ -119,6 +129,34 @@ pub fn run_with_token(args: &[String], token: Option<String>, err: &mut dyn Writ
 
 /// Reads the inputs, builds, prints the report, writes the deck. A
 /// `--strict` failure writes nothing.
+/// The usage of the `devanagari` subcommand (063b: a script deck from the
+/// reviewed inventory table, no DPD and no API).
+pub const SCRIPT_USAGE: &str = "usage: build-deck devanagari --inventory <table.tsv> -o <out.json>";
+
+/// `build-deck devanagari --inventory <tsv> -o <out.json>`: the script deck
+/// of the table, written as the site's deck JSON.
+fn build_script(args: &[String]) -> Result<(), String> {
+    let (mut inventory, mut out) = (None, None);
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let value = rest.next().ok_or_else(|| format!("{arg} needs a value"))?;
+        match arg.as_str() {
+            "--inventory" => inventory = Some(PathBuf::from(value)),
+            "-o" => out = Some(PathBuf::from(value)),
+            other => return Err(format!("unknown option {other}")),
+        }
+    }
+    let inventory = inventory.ok_or("missing --inventory <table.tsv>")?;
+    let out = out.ok_or("missing -o <out.json>")?;
+    let text = std::fs::read_to_string(&inventory)
+        .map_err(|e| format!("cannot read {}: {e}", inventory.display()))?;
+    let items = script::parse_inventory(&text)?;
+    let source = format!("Devanāgarī inventory {}", inventory.display());
+    let deck = script::script_deck(&items, &source);
+    std::fs::write(&out, deck.to_json() + "\n")
+        .map_err(|e| format!("cannot write {}: {e}", out.display()))
+}
+
 fn build_file(args: &Args, token: Option<String>, err: &mut dyn Write) -> Result<(), String> {
     let fetch = match &args.api {
         Some(base) => Some(api_fetch(base, token, args.cache.as_ref())?),

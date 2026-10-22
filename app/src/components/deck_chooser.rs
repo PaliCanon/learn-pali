@@ -27,6 +27,8 @@ use crate::today::{browser_today, session_today};
 pub(crate) fn deck_label(id: &DeckId, language: Language) -> String {
     if id.is_words() {
         td_string!(Locale::from(language), deck_words).to_owned()
+    } else if *id == DeckId::devanagari() {
+        td_string!(Locale::from(language), deck_devanagari).to_owned()
     } else {
         id.0.clone()
     }
@@ -152,7 +154,7 @@ mod tests {
 
     use super::*;
     use crate::components::data_block::StoreWrites;
-    use crate::deck::{Decks, deck, registry};
+    use crate::deck::{Decks, deck};
     use crate::learn::home_state::due_cards;
     use crate::store::Load;
     use crate::test_support::{
@@ -210,7 +212,7 @@ mod tests {
 
     #[test]
     fn with_one_deck_the_chooser_renders_nothing() {
-        let html = render(registry(), Load::Ok(book()), None);
+        let html = render(crate::test_support::one_deck(), Load::Ok(book()), None);
         assert!(!html.contains(r#"role="group""#), "{html}");
         assert_eq!(chips(&html).len(), 0, "{html}");
     }
@@ -219,7 +221,11 @@ mod tests {
     fn the_chooser_is_offered_from_two_decks() {
         Owner::new().with(|| {
             let (store, files) = (FakeStore::with_book(Load::Empty), FakeFiles::default());
-            assert!(!offered(backend_with_decks(&store, &files, registry())));
+            assert!(!offered(backend_with_decks(
+                &store,
+                &files,
+                crate::test_support::one_deck()
+            )));
             assert!(offered(backend_with_decks(&store, &files, two_decks())));
         });
     }
@@ -313,6 +319,10 @@ mod tests {
         assert_eq!(deck_label(&words, Language::En), "Words");
         assert_eq!(deck_label(&words, Language::Fr), "Mots");
         assert_eq!(deck_label(&words, Language::Vi), "Từ");
+        let devanagari = DeckId::devanagari();
+        assert_eq!(deck_label(&devanagari, Language::En), "Devanāgarī");
+        assert_eq!(deck_label(&devanagari, Language::Fr), "Dévanāgarī");
+        assert_eq!(deck_label(&devanagari, Language::Vi), "Chữ Devanāgarī");
         assert_eq!(deck_label(&zz(), Language::En), "zz");
     }
 

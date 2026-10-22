@@ -44,8 +44,8 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::{
-    Button, Dialog, DialogSize, Disclosed, DisclosureButton, Language, Size, Slider, Variant,
-    language_signal,
+    Button, Dialog, DialogSize, Disclosed, DisclosureButton, Icon, IconName, Language, Size,
+    Slider, Variant, language_signal,
 };
 
 use crate::backend::Backend;
@@ -1124,7 +1124,7 @@ fn AddTermsButton(
                 label_open=label
                 layout="shadow-md"
             >
-                <span class="text-lg leading-none">"+"</span>
+                <Icon name=IconName::Plus size=18 />
             </DisclosureButton>
         }
     })
@@ -1167,6 +1167,7 @@ fn NewTermsDialog(
                 controls=Disclosed::new(NEW_TERMS_ID, open)
                 title=Signal::derive(move || td_string!(t.locale(), add_terms).to_owned())
                 footer=footer
+                size=DialogSize::Popup
             >
                 <NewTermsPicker pick=pick new_left=new_left />
             </Dialog>
@@ -1636,8 +1637,11 @@ mod tests {
             assert!(add.contains(&format!(r#"title="{name}""#)), "{add}");
             let from = html.find(&add).expect(&html) + add.len();
             let inner = &html[from..from + html[from..].find("</button>").expect(&html)];
-            assert!(inner.contains(r#"leading-none">+</span>"#), "{inner}");
-            assert!(inner.contains("text-lg"), "{inner}");
+            // A drawn plus, centred in its box (the user, 2026-10-22: «centrer un
+            // peu mieux la croix»), not a text glyph.
+            assert!(inner.contains("<svg"), "{inner}");
+            assert!(inner.contains(r#"d="M12 5v14""#), "{inner}");
+            assert!(!inner.contains(">+<"), "{inner}");
             assert!(!inner.contains(name), "the name is the label only: {inner}");
         }
     }
@@ -1660,6 +1664,10 @@ mod tests {
         assert!(add.contains(r#"aria-controls="pc-new-terms""#), "{add}");
         let panel = tag_around(&html, r#"id="pc-new-terms""#);
         assert!(panel.contains(r#"role="dialog""#), "{panel}");
+        // A popup on the phone too (the user, 2026-10-22: «+ pour ajouter des
+        // items ne devrait être qu'un pop up»), not a full-screen sheet.
+        assert!(panel.contains("max-w-md"), "a popup: {panel}");
+        assert!(!panel.contains("h-full"), "a popup, not a sheet: {panel}");
         let dialog = element_at(&html, at(&html, r#"id="pc-new-terms""#));
         assert!(dialog.contains(">New terms</h2>"), "{dialog}");
         assert!(dialog.contains(r#"role="radiogroup""#), "{dialog}");
@@ -3153,8 +3161,10 @@ mod tests {
     #[test]
     fn with_one_deck_the_home_shows_no_chooser() {
         Owner::new().with(|| {
-            provide_fakes(Load::Ok(progress_fixture()));
-            let html = home_screen(Backend::current());
+            let (store, files) = provide_fakes(Load::Ok(progress_fixture()));
+            let backend = backend_with_decks(&store, &files, crate::test_support::one_deck());
+            provide_context(backend);
+            let html = home_screen(backend);
             assert!(!html.contains(r#"role="group""#), "{html}");
             assert!(!html.contains(r#"aria-label="Deck""#), "{html}");
             assert!(html.contains("Daily"), "the stage counts are there: {html}");

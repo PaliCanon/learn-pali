@@ -20,6 +20,7 @@
   "cta_practice_label_n": "Practice, {{ count }} cards due",
   "deck_chooser_label": "Deck",
   "deck_words": "Words",
+  "deck_devanagari": "Devanāgarī",
   "detail_due": "Next review",
   "detail_lapses": "Lapses",
   "detail_stage": "Stage",

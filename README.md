@@ -135,6 +135,17 @@ binary and the wasm with `include_str!` and parsed once on first use: the
 page fetches nothing. The deck is part of the build, so changing it is a new
 build of the site.
 
+A second deck, the Devanāgarī alphabet for Pāli (`core/fixtures/devanagari.json`,
+063b), is embedded the same way and offered by the home's deck chooser. It is a
+`script` deck (two facets: read the sign, write it) built from the reviewed
+inventory table `tools/build-deck/devanagari.tsv` (8 vowels, 32 consonants and
+the niggahīta, 7 vowel signs on क, the 40 conjuncts most frequent in the Pāli
+of 20 suttas served by the API):
+
+```sh
+cargo run -p build_deck -- devanagari --inventory tools/build-deck/devanagari.tsv -o core/fixtures/devanagari.json
+```
+
 ## Try the loop at the terminal
 
 ```sh

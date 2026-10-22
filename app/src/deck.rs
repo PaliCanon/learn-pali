@@ -21,6 +21,17 @@ pub(crate) fn deck() -> &'static Deck {
     &DECK
 }
 
+static DEVANAGARI: LazyLock<Deck> = LazyLock::new(|| {
+    Deck::from_json(include_str!("../../core/fixtures/devanagari.json"))
+        .expect("the embedded Devanāgarī deck parses (its test says so)")
+});
+
+/// The Devanāgarī alphabet deck (063b): a script deck built by
+/// `build-deck devanagari` from the reviewed inventory table.
+pub(crate) fn devanagari() -> &'static Deck {
+    &DEVANAGARI
+}
+
 /// One deck this build teaches: its id in the progress [`Book`](learn_core::book::Book)
 /// and the deck itself.
 #[derive(Debug, Clone)]
@@ -75,10 +86,16 @@ impl Decks {
 
 /// The build's decks: the words deck alone in 063a.
 pub(crate) fn registry() -> Decks {
-    Decks::new(vec![Entry {
-        id: DeckId::words(),
-        deck: deck(),
-    }])
+    Decks::new(vec![
+        Entry {
+            id: DeckId::words(),
+            deck: deck(),
+        },
+        Entry {
+            id: DeckId::devanagari(),
+            deck: devanagari(),
+        },
+    ])
 }
 
 /// The terms of added words already pinned, one per distinct content.
@@ -134,11 +151,27 @@ mod tests {
     }
 
     #[test]
-    fn the_registry_holds_the_words_deck_alone() {
+    fn the_registry_holds_words_first_then_devanagari() {
         let decks = registry();
-        assert_eq!(decks.len(), 1);
+        assert_eq!(decks.len(), 2);
         assert!(std::ptr::eq(decks.resolve(None).deck, deck()));
-        assert_eq!(decks.iter().count(), 1);
+        let ids: Vec<&str> = decks.iter().map(|entry| entry.id.0.as_str()).collect();
+        assert_eq!(ids, ["words", "devanagari"]);
+        assert!(std::ptr::eq(
+            decks.get(&DeckId::devanagari()).unwrap().deck,
+            devanagari()
+        ));
+    }
+
+    #[test]
+    fn the_embedded_devanagari_deck_is_a_script_deck_of_88_signs() {
+        let deck = devanagari();
+        assert_eq!(deck.kind, learn_core::kind::DeckKind::Script);
+        assert_eq!(deck.terms.len(), 88);
+        assert_eq!(deck.terms[0].lemma, "अ");
+        assert_eq!(deck.terms[0].meaning.en, "a");
+        assert!(deck.terms.iter().all(|term| term.example.is_none()));
+        assert!(deck.terms.iter().all(|term| term.lemma == term.id.0));
     }
 
     #[test]

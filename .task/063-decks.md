@@ -82,3 +82,9 @@ Worktrees `wt/063/<lane>/learn-pali`, branch `feat/decks-<lane>`, each from the 
 
 ## Merge
 063a: be2465d
+| Build 063b | done | orchestrator by hand (no agents): the builder's devanagari subcommand and the inventory table (test first in script.rs: 6 tests, red by compile), the second compiled deck, the names and group words; 4 tests adapted to a two-deck build |
+| Verify 063b | done | test_core 0, test_app 0 (746), test_cli 0, build_deck 118, clippy ssr/rest 0, fmt 0, doc (CI's command) 0; deviation from the design, ruled by the orchestrator (the user: start simple): the write facet is a reveal card like the words' Recall, the 4-choice answer and the shipped Noto font are follow-ups (followup-script-choice-answer, followup-devanagari-font); the example word in both scripts not built |
+| Check 063b | doing | on learn.dev (feat/devanagari-deck · dd994ae, run 39785300562): headless Chrome: hydrated, no panic, the chooser with Words (pressed) and Devanāgarī; waiting for the user |
+| Fix 063b (check) | done | the New terms dialog a popup (dae89d0); ui-lib v0.4.1 (7169752 af45254 ): Pāli one size bigger, the + a drawn icon centred; 746 app tests, clippy ssr, fmt green |
+| Check 063b | doing | on learn.dev (feat/devanagari-deck · 9aec18e, runs 39796681223 and 39797603446): the chooser, the Devanāgarī deck, the New terms popup, Pāli one size bigger, the drawn +; waiting for the user |
+| Check 063b | done | the user, 2026-10-22: «tag et prod !» on 9aec18e |

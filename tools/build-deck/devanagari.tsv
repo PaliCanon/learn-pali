@@ -1,0 +1,92 @@
+# The Devanāgarī inventory for Pāli (063b), reviewed by the user 2026-10-22.
+# sign, romanisation, group, and for a conjunct its count in the Pāli of 20 suttas served by the API
+# (MN 1-10, DN 1, 2, 16, 22, SN 12.1, 22.59, 56.11, AN 3.65, Snp 1.8, Dhp 1; 52,048 words; source: api).
+sign	roman	group	count
+अ	a	vowel	
+आ	ā	vowel	
+इ	i	vowel	
+ई	ī	vowel	
+उ	u	vowel	
+ऊ	ū	vowel	
+ए	e	vowel	
+ओ	o	vowel	
+क	ka	velar	
+ख	kha	velar	
+ग	ga	velar	
+घ	gha	velar	
+ङ	ṅa	velar	
+च	ca	palatal	
+छ	cha	palatal	
+ज	ja	palatal	
+झ	jha	palatal	
+ञ	ña	palatal	
+ट	ṭa	retroflex	
+ठ	ṭha	retroflex	
+ड	ḍa	retroflex	
+ढ	ḍha	retroflex	
+ण	ṇa	retroflex	
+त	ta	dental	
+थ	tha	dental	
+द	da	dental	
+ध	dha	dental	
+न	na	dental	
+प	pa	labial	
+फ	pha	labial	
+ब	ba	labial	
+भ	bha	labial	
+म	ma	labial	
+य	ya	semivowel	
+र	ra	semivowel	
+ल	la	semivowel	
+व	va	semivowel	
+स	sa	sibilant	
+ह	ha	aspirate	
+ळ	ḷa	lateral	
+अं	aṃ	niggahita	
+का	kā	vowel-sign	
+कि	ki	vowel-sign	
+की	kī	vowel-sign	
+कु	ku	vowel-sign	
+कू	kū	vowel-sign	
+के	ke	vowel-sign	
+को	ko	vowel-sign	
+स्स	ss	conjunct	3895
+त्त	tt	conjunct	2886
+न्त	nt	conjunct	2848
+क्ख	kkh	conjunct	2251
+म्म	mm	conjunct	1587
+ञ्ञ	ññ	conjunct	1547
+प्प	pp	conjunct	1186
+ट्ठ	ṭṭh	conjunct	1137
+त्थ	tth	conjunct	1132
+ब्ब	bb	conjunct	991
+न्द	nd	conjunct	903
+ञ्च	ñc	conjunct	891
+य्य	yy	conjunct	865
+च्च	cc	conjunct	821
+द्ध	ddh	conjunct	784
+ज्ज	jj	conjunct	743
+त्व	tv	conjunct	723
+न्न	nn	conjunct	708
+च्छ	cch	conjunct	656
+क्क	kk	conjunct	581
+म्प	mp	conjunct	575
+ग्ग	gg	conjunct	536
+ज्झ	jjh	conjunct	509
+ब्र	br	conjunct	482
+ह्म	hm	conjunct	465
+स्म	sm	conjunct	448
+ङ्ग	ṅg	conjunct	365
+म्ब	mb	conjunct	292
+ङ्क	ṅk	conjunct	257
+ण्ण	ṇṇ	conjunct	239
+ङ्ख	ṅkh	conjunct	239
+ल्ल	ll	conjunct	222
+द्द	dd	conjunct	211
+ब्भ	bbh	conjunct	193
+ण्ह	ṇh	conjunct	193
+त्र	tr	conjunct	189
+ञ्ज	ñj	conjunct	157
+म्ह	mh	conjunct	155
+न्ध	ndh	conjunct	152
+ण्ड	ṇḍ	conjunct	147

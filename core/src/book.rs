@@ -48,6 +48,15 @@ impl DeckId {
         DeckId(DeckId::WORDS.to_string())
     }
 
+    /// The id of the Devanāgarī alphabet deck (063b), fixed like `words`.
+    pub const DEVANAGARI: &'static str = "devanagari";
+
+    /// The Devanāgarī deck's id.
+    #[must_use]
+    pub fn devanagari() -> DeckId {
+        DeckId(DeckId::DEVANAGARI.to_string())
+    }
+
     /// Whether this is the words deck.
     pub fn is_words(&self) -> bool {
         self.0 == DeckId::WORDS

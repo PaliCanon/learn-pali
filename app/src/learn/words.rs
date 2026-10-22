@@ -14,6 +14,49 @@ type Words = [&'static str; 3];
 /// moods, the participles, the particles.
 const POS: &[(&str, Words)] = &[
     ("ind", ["indeclinable", "indéclinable", "bất biến từ"]),
+    // The Devanāgarī deck's groups (063b).
+    ("vowel", ["vowel", "voyelle", "nguyên âm"]),
+    (
+        "velar",
+        ["velar consonant", "consonne vélaire", "phụ âm ngạc mềm"],
+    ),
+    (
+        "palatal",
+        ["palatal consonant", "consonne palatale", "phụ âm ngạc cứng"],
+    ),
+    (
+        "retroflex",
+        [
+            "retroflex consonant",
+            "consonne rétroflexe",
+            "phụ âm quặt lưỡi",
+        ],
+    ),
+    (
+        "dental",
+        ["dental consonant", "consonne dentale", "phụ âm răng"],
+    ),
+    (
+        "labial",
+        ["labial consonant", "consonne labiale", "phụ âm môi"],
+    ),
+    ("semivowel", ["semivowel", "semi-voyelle", "bán nguyên âm"]),
+    ("sibilant", ["sibilant", "sifflante", "âm xuýt"]),
+    ("aspirate", ["aspirate", "aspirée", "âm bật hơi"]),
+    (
+        "lateral",
+        [
+            "retroflex lateral",
+            "latérale rétroflexe",
+            "âm bên quặt lưỡi",
+        ],
+    ),
+    ("niggahita", ["niggahīta", "niggahīta", "niggahīta"]),
+    (
+        "vowel-sign",
+        ["vowel sign", "signe vocalique", "dấu nguyên âm"],
+    ),
+    ("conjunct", ["conjunct", "ligature", "phụ âm ghép"]),
     (
         "masc",
         ["masculine noun", "nom masculin", "danh từ giống đực"],
