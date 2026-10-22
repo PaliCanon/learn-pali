@@ -44,7 +44,8 @@ use leptos::ev::MouseEvent;
 use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::{
-    Button, Dialog, Disclosed, DisclosureButton, Language, Size, Slider, Variant, language_signal,
+    Button, Dialog, DialogSize, Disclosed, DisclosureButton, Language, Size, Slider, Variant,
+    language_signal,
 };
 
 use crate::backend::Backend;
@@ -614,6 +615,7 @@ fn nothing_due_cta(
             batch,
             stage,
             next,
+            open: RwSignal::new(false),
         }))
     } else {
         next.map(CtaSlot::NextReview)
@@ -673,9 +675,9 @@ fn DueBlock(
     }
 }
 
-/// Nothing due: the CTA row ('▶ Practice' ahead with its slider and the
-/// next review's date when a term is started, else the date); no row when
-/// it would be empty; the 'New terms' dialog; then `children` (the
+/// Nothing due: the CTA row ('▶ Practice' ahead and the next review's
+/// date when a term is started, else the date); no row when it would be
+/// empty; the practice popup holding the slider; the 'New terms' dialog; then `children` (the
 /// progress, whose list holds the '+').
 #[component]
 fn NothingDueBlock(
@@ -684,9 +686,14 @@ fn NothingDueBlock(
     act: Callback<HomeAction>,
     children: Children,
 ) -> impl IntoView {
+    let popup = match cta {
+        Some(CtaSlot::Ahead(ahead)) => Some(view! { <PracticeDialog ahead=ahead act=act /> }),
+        _ => None,
+    };
     view! {
         <div data-home-state="nothing-due" class=FRAME>
             <CtaBox cta=cta act=act />
+            {popup}
             <NewTermsDialog new_terms=new_terms />
             {children()}
         </div>
@@ -699,8 +706,8 @@ fn NothingDueBlock(
 enum CtaSlot {
     /// '▶ Practice · N', N the cards due: the review.
     Practice(usize),
-    /// '▶ Practice', its batch slider and the next review's date (nothing
-    /// due, terms started): a practice ahead.
+    /// '▶ Practice', which opens the popup of the batch slider, and the
+    /// next review's date (nothing due, terms started): a practice ahead.
     Ahead(Ahead),
     /// 'Next review: <date>' (nothing due, nothing started), muted.
     NextReview(Date),
@@ -717,6 +724,8 @@ struct Ahead {
     stage: RwSignal<Option<Stage>>,
     /// The next review's date, shown beside.
     next: Option<Date>,
+    /// The popup holding the slider is open.
+    open: RwSignal<bool>,
 }
 
 /// The terms a practice ahead asks for a slider at `batch`: at least 1, at
@@ -727,9 +736,9 @@ fn batch_of(started: usize, batch: u32) -> usize {
         .clamp(1, started.max(1))
 }
 
-/// What a click on the CTA asks: the review while cards are due, else a
-/// practice ahead of the slider's batch in the selected stage; the date
-/// asks nothing.
+/// What the CTA asks: the review while cards are due, else a practice
+/// ahead of the slider's batch in the selected stage (what the popup's
+/// Start asks); the date asks nothing.
 fn cta_action(cta: CtaSlot) -> Option<HomeAction> {
     match cta {
         CtaSlot::Practice(_) => Some(HomeAction::Review),
@@ -738,6 +747,19 @@ fn cta_action(cta: CtaSlot) -> Option<HomeAction> {
             only: ahead.stage.get_untracked(),
         }),
         CtaSlot::NextReview(_) => None,
+    }
+}
+
+/// A tap on Practice: the review at once while cards are due; nothing due,
+/// the popup opens (Start asks the practice); the date asks nothing.
+fn press(cta: CtaSlot, act: Callback<HomeAction>) {
+    match cta {
+        CtaSlot::Ahead(ahead) => ahead.open.set(true),
+        _ => {
+            if let Some(action) = cta_action(cta) {
+                act.run(action);
+            }
+        }
     }
 }
 
@@ -816,8 +838,8 @@ fn next_review_line(language: Language, date: Date) -> AnyView {
 }
 
 /// Nothing due: '▶ Practice', named 'Practice ahead, N terms' (N follows
-/// the slider), then ui-lib's `Slider` (1 to the started terms), then the
-/// next review's date.
+/// the slider), which opens [`PracticeDialog`], then the next review's
+/// date. The row keeps room at Practice's right for the search icon.
 #[component]
 fn PracticeAhead(
     /// The batch, the stage, the started terms, the date.
@@ -839,15 +861,57 @@ fn PracticeAhead(
     };
     view! {
         {button}
-        <Slider
-            value=ahead.batch
-            min=1
-            max=u32::try_from(ahead.started).unwrap_or(u32::MAX)
-            label=Signal::derive(move || {
-                td_string!(Locale::from(language.get()), practice_batch_label).to_owned()
-            })
-        />
         {move || ahead.next.map(|date| next_review_line(language.get(), date))}
+    }
+}
+
+/// The id of the practice popup, which Practice opens.
+const PRACTICE_AHEAD_ID: &str = "pc-practice-ahead";
+
+/// The popup Practice opens when nothing is due (ui-lib
+/// `DialogSize::Popup`, the small card on a phone too): ui-lib's `Slider`
+/// (1 to the started terms, the remembered batch), and 'Start', which
+/// closes it, then asks the practice. Escape and the close button close it
+/// without starting.
+#[component]
+fn PracticeDialog(
+    /// The batch, the stage, the started terms, the popup's state.
+    ahead: Ahead,
+    /// Performs the practice.
+    act: Callback<HomeAction>,
+) -> impl IntoView {
+    let language = language_signal();
+    let open = ahead.open;
+    let on_start = move |_| {
+        open.set(false);
+        if let Some(action) = cta_action(CtaSlot::Ahead(ahead)) {
+            act.run(action);
+        }
+    };
+    view! {
+        <Dialog
+            controls=Disclosed::new(PRACTICE_AHEAD_ID, open)
+            title=Signal::derive(move || {
+                td_string!(Locale::from(language.get()), practice_ahead_title).to_owned()
+            })
+            size=DialogSize::Popup
+            footer=move || {
+                view! {
+                    <Button variant=Variant::Primary on_click=on_start>
+                        {move || td_string!(Locale::from(language.get()), practice_start)}
+                    </Button>
+                }
+            }
+        >
+            <Slider
+                value=ahead.batch
+                min=1
+                max=u32::try_from(ahead.started).unwrap_or(u32::MAX)
+                label=Signal::derive(move || {
+                    td_string!(Locale::from(language.get()), practice_batch_label).to_owned()
+                })
+            />
+        </Dialog>
     }
 }
 
@@ -868,11 +932,7 @@ fn CompactCta(
     /// Performs it.
     act: Callback<HomeAction>,
 ) -> impl IntoView {
-    let on_click = move |_| {
-        if let Some(action) = cta_action(cta) {
-            act.run(action);
-        }
-    };
+    let on_click = move |_| press(cta, act);
     let body = move || {
         view! {
             <span aria-hidden="true">"▶"</span>
@@ -1788,8 +1848,8 @@ mod tests {
     }
 
     /// Nothing due, terms started: '▶ Practice' (compact, no count), named
-    /// 'Practice ahead, 5 terms', then ui-lib's `Slider` at 5 (1 to the
-    /// started terms, step 1, its value shown).
+    /// 'Practice ahead, 5 terms'; ui-lib's `Slider` at 5 (1 to the started
+    /// terms, step 1, its value shown) sits in the popup, not the row.
     #[test]
     fn nothing_due_offers_practice_ahead_with_the_slider_at_five() {
         let html = view_of(Language::En, NOTHING_DUE, 10, STARTED);
@@ -1803,7 +1863,8 @@ mod tests {
         );
         assert!(!button.contains(">·<"), "no count: {button}");
         let row = element_at(&html, at(&html, "data-cta-row"));
-        let slider = tag_before(row, "input", r#"type="range""#);
+        let (popup, _) = ahead_popup(&html);
+        let slider = tag_before(popup, "input", r#"type="range""#);
         for attr in [
             r#"type="range""#,
             r#"min="1""#,
@@ -1815,14 +1876,105 @@ mod tests {
             assert!(slider.contains(attr), "{attr}: {slider}");
         }
         assert!(
-            row.contains(r#"<span class="tabular-nums text-sm text-heading">5</span>"#),
-            "ui-lib's Slider shows its value: {row}"
-        );
-        assert!(
-            at(row, ">Practice<") < at(row, r#"type="range""#),
-            "Practice, then the slider: {row}"
+            popup.contains(r#"<span class="tabular-nums text-sm text-heading">5</span>"#),
+            "ui-lib's Slider shows its value: {popup}"
         );
         assert!(!row.contains("New terms"), "no '+' on the row: {row}");
+    }
+
+    /// Nothing due, a store remembering `batch`: the home, with the
+    /// practice-ahead batch given.
+    fn ahead_html(language: Language, batch: u32, counts: [usize; 6]) -> String {
+        Owner::new()
+            .with(|| {
+                palicanon_ui_lib::provide_language().set(language);
+                let batch = RwSignal::new(batch);
+                view! { <HomeView state=NOTHING_DUE new_left=10 counts=counts batch=batch /> }
+                    .to_html()
+            })
+            .replace("<!>", "")
+    }
+
+    /// The practice-ahead popup's panel, and whether it is closed.
+    fn ahead_popup(html: &str) -> (&str, bool) {
+        let id = at(html, r#"id="pc-practice-ahead""#);
+        let wrapper = html[..id].rfind("fixed inset-0 z-50").expect(html);
+        let tag = &html[html[..wrapper].rfind('<').expect(html)..];
+        let closed = has_attr(&tag[..=tag.find('>').expect(tag)], "hidden");
+        (element_at(html, id), closed)
+    }
+
+    /// Nothing due: the slider leaves the row. Practice sits alone there
+    /// and the slider lives in a popup (ui-lib `DialogSize::Popup`, the
+    /// small centred card, never the sheet), closed at first, with a
+    /// Start button.
+    #[test]
+    fn nothing_due_puts_the_slider_in_a_closed_popup_not_in_the_row() {
+        let html = ahead_html(Language::En, 5, STARTED);
+        let row = element_at(&html, at(&html, "data-cta-row"));
+        assert!(row.contains(">Practice<"), "{row}");
+        assert!(
+            !row.contains(r#"type="range""#),
+            "no slider in the row: {row}"
+        );
+        let (panel, closed) = ahead_popup(&html);
+        assert!(closed, "closed by default: {html}");
+        let head = &panel[..=panel.find('>').expect(panel)];
+        assert!(head.contains(r#"role="dialog""#), "{head}");
+        let classes: Vec<&str> = head
+            .split(r#"class=""#)
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect(head)
+            .split_whitespace()
+            .collect();
+        assert!(classes.contains(&"max-w-md"), "{head}");
+        assert!(!classes.contains(&"h-full"), "a popup, not a sheet: {head}");
+        assert!(panel.contains(r#"type="range""#), "the slider: {panel}");
+        let start = button_with(panel, ">Start<");
+        assert!(start.contains("bg-primary"), "Start is Primary: {start}");
+        assert!(panel.contains("Practice ahead"), "its title: {panel}");
+    }
+
+    /// Cards due: Practice starts the review at once, no popup.
+    #[test]
+    fn cards_due_have_no_practice_popup() {
+        let html = view_of(Language::En, HomeState::Due(3), 10, STARTED);
+        assert!(!html.contains("pc-practice-ahead"), "{html}");
+        assert!(!html.contains(r#"type="range""#), "{html}");
+        assert!(html.contains(">Practice<"), "{html}");
+    }
+
+    /// The popup's slider holds the remembered batch and the started
+    /// terms as its bounds; Practice names that batch.
+    #[test]
+    fn the_popup_slider_holds_the_remembered_batch_and_bounds() {
+        let html = ahead_html(Language::En, 7, STARTED);
+        let (panel, _) = ahead_popup(&html);
+        let slider = tag_before(panel, "input", r#"type="range""#);
+        for attr in [r#"min="1""#, r#"max="21""#, r#"step="1""#, r#"value="7""#] {
+            assert!(slider.contains(attr), "{attr}: {slider}");
+        }
+        assert!(
+            slider.contains(r#"aria-label="Terms to practise""#),
+            "{slider}"
+        );
+        let button = button_with(&html, ">Practice<");
+        assert!(button.contains("Practice ahead, 7 terms"), "{button}");
+    }
+
+    /// The popup's title and Start read in French and Vietnamese.
+    #[test]
+    fn the_practice_popup_reads_in_french_and_vietnamese() {
+        for (language, title, start) in [
+            (Language::Fr, "S’entraîner en avance", ">Commencer<"),
+            (Language::Vi, "Luyện tập trước", ">Bắt đầu<"),
+        ] {
+            let html = ahead_html(language, 5, STARTED);
+            let (panel, _) = ahead_popup(&html);
+            assert!(panel.contains(title), "{title}: {panel}");
+            assert!(panel.contains(start), "{start}: {panel}");
+        }
     }
 
     /// Fewer started terms than the batch: the name counts what will be
@@ -1893,12 +2045,8 @@ mod tests {
             let row = element_at(&html, at(&html, "data-cta-row"));
             let p = tag_before(row, "p", text);
             assert!(p.contains(r#"class="text-muted""#), "{p}");
-            let order = [
-                at(row, "bg-primary"),
-                at(row, r#"type="range""#),
-                at(row, text),
-            ];
-            assert!(order.is_sorted(), "Practice, slider, date: {row}");
+            let order = [at(row, "bg-primary"), at(row, text)];
+            assert!(order.is_sorted(), "Practice, then the date: {row}");
             assert!(!row.contains("pc-new-terms"), "no '+' on the row: {row}");
         }
     }
@@ -1917,6 +2065,7 @@ mod tests {
                     batch,
                     stage,
                     next: None,
+                    open: RwSignal::new(false),
                 })
             };
             assert_eq!(
@@ -1934,6 +2083,32 @@ mod tests {
             );
         });
         assert_eq!(cta_action(CtaSlot::NextReview(today())), None);
+    }
+
+    /// A tap on Practice: due cards run the review at once; nothing due
+    /// only opens the popup, and Start (the practice ahead's action) is
+    /// what asks the session.
+    #[test]
+    fn a_tap_on_practice_opens_the_popup_when_nothing_is_due() {
+        use std::sync::{Arc, Mutex};
+        Owner::new().with(|| {
+            let calls = Arc::new(Mutex::new(Vec::new()));
+            let sink = Arc::clone(&calls);
+            let act = Callback::new(move |action| sink.lock().unwrap().push(action));
+            press(CtaSlot::Practice(3), act);
+            assert_eq!(calls.lock().unwrap().as_slice(), [HomeAction::Review]);
+            let open = RwSignal::new(false);
+            let ahead = CtaSlot::Ahead(Ahead {
+                started: 9,
+                batch: RwSignal::new(5),
+                stage: RwSignal::new(None),
+                next: None,
+                open,
+            });
+            press(ahead, act);
+            assert!(open.get_untracked(), "the popup opens");
+            assert_eq!(calls.lock().unwrap().len(), 1, "and asks nothing yet");
+        });
     }
 
     /// `perform`: a review starts the normal session, a practice ahead
