@@ -1,6 +1,6 @@
 # 055 A branch can be deployed to dev by the CI
 
-status: building · rank: 2 · level: simple · type: ci · request: user, 2026-10-17 («learn-pali est pas public ? on peut pas utiliser la CI plutôt ?») · light path
+status: merged · rank: 2 · level: simple · type: ci · request: user, 2026-10-17 («learn-pali est pas public ? on peut pas utiliser la CI plutôt ?») · light path
 
 ## Summary
 Rank: difficulty 2 (a trigger and the env expressions of deploy.yml), impact 2 (branch deploys to dev for user checks, no more laptop deploys) → 2.
@@ -11,3 +11,7 @@ deploy.yml runs on a push to main (dev) and on a tag v* (prod). The orchestrator
 | --- | --- | --- |
 | Build | done | 762bf3f; YAML validation 0 |
 | Check | done | orchestrator: a workflow change, nothing visible; the dispatch deploys a branch to dev only (ENV/HOST/concurrency prod only on a tag push); held until 054 left dev |
+| Merge | done | aa4354c on main, pushed |
+
+## Retro
+One line (light path): a branch deployed to dev is overwritten by the next push to main (rule in deploy.md since 050); this workflow waited for the dev check of 054 to end before merging.
