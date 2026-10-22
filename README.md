@@ -249,6 +249,8 @@ CI or pushed.
 | dev | a push to `main` | `learn.dev.palicanon.app` (Cloud Run `learn-pali-dev`) |
 | prod | a tag `v*` | `learn.palicanon.app` (Cloud Run `learn-pali-prod`, once added) |
 
+A branch can be deployed to dev by hand for the user's check: `gh workflow run deploy.yml -R PaliCanon/learn-pali --ref <branch>` runs the same checks as a main deploy and serves the result at `learn.dev.palicanon.app`. A push to `main` redeploys the main branch over it, which does not take long if the image was already built.
+
 - `app/Dockerfile` builds the server and the site in one image (`cargo leptos
   build --release`, then `debian:bookworm-slim`, a non-root user, port 8080).
   Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, and
