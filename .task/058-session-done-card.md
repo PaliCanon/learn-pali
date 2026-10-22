@@ -1,6 +1,6 @@
 # 058 The end of a session as a centred card
 
-status: building · rank: 2 · level: simple · type: feat · request: the user, 2026-10-18 (desktop app check: «faudrait refaire un peu le display !» on the Session done screen) · light path
+status: merged · rank: 2 · level: simple · type: feat · request: the user, 2026-10-18 (desktop app check: «faudrait refaire un peu le display !» on the Session done screen) · light path
 
 ## Summary
 Rank: difficulty 2 (one component's layout, its two siblings, one optional prop), impact 2 (one screen, web and app) → 2.
@@ -21,3 +21,7 @@ Ruled out: tiles, removing the end screen (the user's other two options).
 | Check | fail | the user on the phone (2026-10-22): the card must be centred vertically; back to Build |
 | Fix | done | 01c27a5; red: the_done_card_is_centred_in_the_height_under_the_brand and the_home_sits_in_one_centred_column FAILED (521 passed); green: cargo test ssr exit 0 (523 passed), clippy ssr/csr/hydrate exit 0, cargo fmt --check exit 0, leptosfmt --check exit 0; served on :3058 (restarted: watch keeps a stale hash file), phone 390x844 scrollWidth == innerWidth 390, desktop 1280 == 1280; area 136-706 and card 227-614 on the phone (centres 421 / 420.5) |
 | Check | done | the user, 2026-10-22, after the recentred captures (done-phone.png, practice-phone.png; scrollWidth == innerWidth at 390 and 1280): «On va déjà finir les fix du learn.palicanon.app» (go); orchestrator: captures looked at, branch tip 61dc82d, ui-lib v0.3.1 |
+| Merge | done | c7f17e1 on main, pushed (dev deploys) |
+
+## Retro
+One line (light path): `cargo leptos watch` serves a stale hashed wasm after some rebuilds (target/debug/hash.txt): restart it before a capture; and a wasm front build (`cargo leptos build`) belongs in the check list, hydrate clippy missed an `AnyView: Clone` bound.
