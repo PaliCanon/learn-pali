@@ -142,6 +142,12 @@ jobs:
         run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr,web-store --target wasm32-unknown-unknown --test web_add
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      # tests/release_document.rs (task 060): the hydrate entry reads the
+      # release metas (learn-release-env, learn-release-sha) of the document.
+      - working-directory: learn-pali
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test release_document
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
       - working-directory: learn-pali
         run: bash scripts/csr-without-web-store.sh
 
@@ -222,7 +228,7 @@ jobs:
   # The infrastructure and its scripts (034 round 1): nothing else in CI runs
   # them. No ui-lib checkout and no Rust: OpenTofu formats and validates
   # `infra/` (init without the backend: no credential, the providers only),
-  # node runs the Worker's tests, bash the two script suites (python3 with
+  # node runs the Worker's tests, bash the script suites (python3 with
   # PyYAML, curl and jq are on the runner; the first suite also reads
   # deploy.yml and ci.yml). OpenTofu 1.10.0: versions.tf asks 1.8 or later and
   # the cross-variable validation in variables.tf needs 1.9.
@@ -246,4 +252,6 @@ jobs:
       - run: node --test infra/worker/proxy.test.mjs
       - run: python3 -c 'import yaml' || sudo apt-get install -y python3-yaml
       - run: bash scripts/rollout-check.test.sh
+      - run: bash scripts/release-values.test.sh
       - run: bash infra/scripts/origin-secret.test.sh
+      - run: bash infra/scripts/lifecycle.test.sh

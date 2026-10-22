@@ -5,35 +5,23 @@
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
-use leptos_meta::{HashedStylesheet, MetaTags, Title, provide_meta_context};
+#[cfg(feature = "ssr")]
+use leptos_meta::{HashedStylesheet, MetaTags};
+use leptos_meta::{Title, provide_meta_context};
 use leptos_router::components::{Router, Routes};
 use leptos_router::hooks::use_location;
-use palicanon_ui_lib::{
-    AppShell, EnvBadgeInfo, HydrationRoot, IconName, NavEntry, NavList, NavSection,
-    language_attribute, provide_language, theme_attribute,
-};
+use palicanon_ui_lib::{AppShell, IconName, NavEntry, NavList, NavSection, provide_language};
+#[cfg(feature = "ssr")]
+use palicanon_ui_lib::{HydrationRoot, language_attribute, theme_attribute};
 
 use crate::catalogue::strings;
 use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
+#[cfg(feature = "ssr")]
+use crate::release::{ENV_META, ReleaseInfo, SHA_META};
 use crate::{web_files, web_store, web_sync};
 
 mod site_footer;
 use site_footer::SiteFooter;
-
-/// The branch this build came from (`build.rs`, `LEARN_PALI_GIT_BRANCH`):
-/// `main`, `feat/…` — this service's own `env` for [`EnvBadgeInfo`]
-/// (replaced by `dev` / `prod` once this deploys, like every other service).
-pub(crate) const BUILD_BRANCH: &str = env!("LEARN_PALI_GIT_BRANCH");
-/// The short commit this build came from (`build.rs`, `LEARN_PALI_GIT_SHA`),
-/// a trailing `*` when the worktree had uncommitted changes at build time.
-pub(crate) const BUILD_SHA: &str = env!("LEARN_PALI_GIT_SHA");
-
-/// This build, as the footer's badge shows it (at the footer's left;
-/// nothing on the shell's panel).
-pub(crate) const BADGE: EnvBadgeInfo = EnvBadgeInfo {
-    env: BUILD_BRANCH,
-    sha: BUILD_SHA,
-};
 
 /// The HTML document around the app, rendered on the server. `data-theme`
 /// and `lang` follow the request's cookies ([`theme_attribute`],
@@ -44,13 +32,28 @@ pub(crate) const BADGE: EnvBadgeInfo = EnvBadgeInfo {
 /// (`<div id="pc-app">`), where the browser's entry (`hydrate` in
 /// `lib.rs`) starts: what Cloudflare adds to `<body>` before or after it
 /// (a decoy link first, the beacon after) is never visited (task 040).
+/// The deploy's release ([`ReleaseInfo::server`]) is provided to the app
+/// (the footer's badge) and written in `<head>` for the browser.
+#[cfg(feature = "ssr")]
 pub fn shell(options: LeptosOptions) -> impl IntoView {
+    document(options, ReleaseInfo::server().clone())
+}
+
+/// [`shell`] for a given release (a function of its argument, so a test
+/// renders every case): `release` is provided to the app, written in
+/// `<head>` as two plain metas ([`ENV_META`], [`SHA_META`]; the sha one
+/// always, empty for a tag) and read back by the browser before it mounts.
+#[cfg(feature = "ssr")]
+fn document(options: LeptosOptions, release: ReleaseInfo) -> impl IntoView {
+    provide_context(release.clone());
     view! {
         <!DOCTYPE html>
         <html lang=language_attribute() data-theme=theme_attribute()>
             <head>
                 <meta charset="utf-8" />
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <meta name=ENV_META content=release.env />
+                <meta name=SHA_META content=release.sha />
                 <link rel="icon" href="/favicon.ico" />
                 <AutoReload options=options.clone() />
                 <HashedStylesheet id="leptos" options=options.clone() />
@@ -157,6 +160,10 @@ mod tests {
             palicanon_ui_lib::provide_language().set(language);
             provide_meta_context();
             provide_context(RequestUrl::new(path));
+            provide_context(ReleaseInfo::from_vars(
+                Some("main".to_owned()),
+                Some("34c489c".to_owned()),
+            ));
             view! {
                 <Router>
                     <Layout />
@@ -166,16 +173,28 @@ mod tests {
         })
     }
 
-    /// The whole document of [`shell`] for `path`, `cookie` as the request's
-    /// `Cookie` header, with the head the meta context collected injected
-    /// the way `leptos_axum` does.
+    /// The whole document of [`document`] for `path`, `cookie` as the
+    /// request's `Cookie` header, on a local run's release, with the head
+    /// the meta context collected injected the way `leptos_axum` does.
     fn render_document(path: &str, cookie: Option<&str>) -> String {
         let options = LeptosOptions::builder().output_name("learn-pali").build();
-        render_document_with(options, path, cookie)
+        render_document_with(options, path, cookie, ReleaseInfo::from_vars(None, None))
     }
 
-    /// [`render_document`] with the given options.
-    fn render_document_with(options: LeptosOptions, path: &str, cookie: Option<&str>) -> String {
+    /// [`render_document`] on `path` `/`, for the given release.
+    fn render_release(env: &str, sha: &str) -> String {
+        let options = LeptosOptions::builder().output_name("learn-pali").build();
+        let release = ReleaseInfo::from_vars(Some(env.to_owned()), Some(sha.to_owned()));
+        render_document_with(options, "/", None, release)
+    }
+
+    /// [`render_document`] with the given options and release.
+    fn render_document_with(
+        options: LeptosOptions,
+        path: &str,
+        cookie: Option<&str>,
+        release: ReleaseInfo,
+    ) -> String {
         let (server, output) = ServerMetaContext::new();
         let body = Owner::new().with(|| {
             let mut request = axum::http::Request::builder().uri(path);
@@ -185,7 +204,7 @@ mod tests {
             provide_context(request.body(()).expect("a request").into_parts().0);
             provide_context(server);
             provide_context(RequestUrl::new(path));
-            shell(options).to_html()
+            document(options, release).to_html()
         });
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
@@ -375,7 +394,8 @@ mod tests {
 
     /// The one page leads to neither `/progress` nor `/review`. Read on its
     /// link targets (`href`, `action`), never on its text: the footer's
-    /// badge prints the branch, and a branch may be named `…/progress-…`.
+    /// badge prints the release's name, and a dispatched branch may be named
+    /// `…/progress-…`.
     #[test]
     fn the_page_links_to_no_removed_path() {
         let html = render_layout(Language::En, "/");
@@ -447,7 +467,7 @@ mod tests {
             .hash_files(true)
             .hash_file(hash_file.to_string_lossy().as_ref().into())
             .build();
-        let html = render_document_with(options, "/", None);
+        let html = render_document_with(options, "/", None, ReleaseInfo::from_vars(None, None));
         assert!(
             html.contains(r#"href="/pkg/learn-pali.ccc333.css""#),
             "{html}"
@@ -487,6 +507,75 @@ mod tests {
         let open = html_tag(&html);
         assert!(open.contains(r#"lang="en""#), "{open}");
         assert!(!open.contains("data-theme"), "{open}");
+    }
+
+    /// The `<meta name content>` of the document's head, as the server
+    /// writes it.
+    fn meta(name: &str, content: &str) -> String {
+        format!(r#"<meta name="{name}" content="{content}">"#)
+    }
+
+    /// The document's `<head>` … `</head>`.
+    fn head(html: &str) -> &str {
+        let start = crate::test_support::position(html, "<head>");
+        &html[start..crate::test_support::position(html, "</head>")]
+    }
+
+    /// The release's four cases, the deploy's variables to the metas and
+    /// the badge's title: a tag (no sha), `main`, a dispatched branch, a
+    /// local run (a blank env drops a sha with it).
+    const CASES: [(&str, &str, &str, &str, &str); 5] = [
+        ("v0.1.8", "", "v0.1.8", "", "v0.1.8"),
+        ("main", "34c489c", "main", "34c489c", "main · 34c489c"),
+        ("feat/x", "34c489c", "feat/x", "34c489c", "feat/x · 34c489c"),
+        ("", "", "dev", "", "dev"),
+        ("  ", "34c489c", "dev", "", "dev"),
+    ];
+
+    #[test]
+    fn the_head_carries_the_release_in_two_metas_after_the_viewport() {
+        for (env, sha, want_env, want_sha, _) in CASES {
+            let html = render_release(env, sha);
+            let head = head(&html);
+            let viewport = head.find(r#"name="viewport""#).expect(head);
+            let env_at = head.find(&meta(ENV_META, want_env)).expect(head);
+            let sha_at = head.find(&meta(SHA_META, want_sha)).expect(head);
+            assert!(viewport < env_at && env_at < sha_at, "{env}: {head}");
+            assert_eq!(head.matches(r#"name="learn-release-"#).count(), 2, "{head}");
+        }
+    }
+
+    /// A tag has no sha, and the sha meta is there all the same: the client
+    /// tells "a tag" from "no metas" by its presence.
+    #[test]
+    fn a_tag_writes_the_sha_meta_empty() {
+        let html = render_release("v0.1.8", "");
+        assert!(
+            head(&html).contains(r#"<meta name="learn-release-sha" content="">"#),
+            "{html}"
+        );
+    }
+
+    /// The badge is rendered from the same value as the metas: on the whole
+    /// document, a tag's has no sha and no separator, `main` and a branch
+    /// have both, a local run is `dev`.
+    #[test]
+    fn the_footer_badge_shows_the_same_release() {
+        for (env, sha, _, _, title) in CASES {
+            let html = render_release(env, sha);
+            let footer = html.find("<footer").expect(&html);
+            let at = footer + html[footer..].find("title=").expect(&html);
+            assert!(
+                html[at..].starts_with(&format!(r#"title="{title}""#)),
+                "{title}: {html}"
+            );
+            let nav = footer + html[footer..].find("<nav").expect(&html);
+            if !sha.is_empty() && !env.trim().is_empty() {
+                assert!(html[at..nav].contains(sha), "{html}");
+            } else {
+                assert!(!html[at..nav].contains('·'), "no separator: {html}");
+            }
+        }
     }
 
     /// The byte just past the `</div>` that closes the `<div` opened at

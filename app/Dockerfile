@@ -60,13 +60,6 @@ COPY learn-pali/app ./learn-pali/app
 COPY learn-pali/core ./learn-pali/core
 COPY learn-pali/cli ./learn-pali/cli
 COPY learn-pali/tools ./learn-pali/tools
-# The footer badge shows the branch and short commit the build came from.
-# app/build.rs reads them from these two variables when both are set: the
-# image has no .git (a checkout's .git/config can hold a token, and the build
-# cache exports layers), so CI passes them as build args. A build without
-# them shows "unknown".
-ARG LEARN_PALI_GIT_BRANCH=unknown
-ARG LEARN_PALI_GIT_COMMIT=unknown
 WORKDIR /src/learn-pali
 # The build needs no credential only while the lock holds no git source.
 RUN ! grep -q '^source = "git+' Cargo.lock \

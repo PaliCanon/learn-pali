@@ -7,6 +7,11 @@
 #       a revision's own URL (the tagged *.run.app, origin guard on). The
 #       secret comes from HEADER_FILE, one line `x-origin-auth: <secret>`,
 #       handed to curl as `-H @file`: never on a command line, never printed.
+#       The release it must serve (task 060) comes from the environment:
+#       ROLLOUT_EXPECT_ENV (non-empty: `main`, a branch name, or a tag) and
+#       ROLLOUT_EXPECT_SHA (must be SET; empty for a tag, which has no sha).
+#       Either missing is a usage error (64) before any request: a gate that
+#       silently skips is no gate. The other modes neither read nor need them.
 #   scripts/rollout-check.sh --refused URL
 #       the bare service URL (*.run.app), as anyone who learned it would call
 #       it: 403 with an EMPTY body without the header and with a wrong one (a
@@ -39,14 +44,19 @@
 #       follows nothing.
 #
 # `revision` checks, each named in the output: `root` (/ is 200 and names
-# PaliLearn), `wasm` (the .wasm the page links is served), `token` (no token
+# PaliLearn), `release` (the page's `<meta name="learn-release-env">` and
+# `<meta name="learn-release-sha">` carry the intended values: what a browser
+# gets, not what the workflow computed; the attributes may come in any order),
+# `wasm` (the .wasm the page links is served), `token` (no token
 # shape in the bodies and headers of / and the wasm), `secret` (the origin
 # secret itself, read from HEADER_FILE, is in none of them; its value is
 # never printed), `guard` (without the header, with a wrong one, or with two
 # x-origin-auth headers, the right one and a wrong one: 403 and an empty body).
 #
 # Exit codes
-#   revision, --refused: 0 all good; 1 a check failed (named); 64 usage.
+#   revision, --refused: 0 all good; 1 a check failed (named); 8 the served
+#     release metas differ from the intended ones (revision only: a wrong
+#     release is not a flaky curl); 64 usage.
 #   --via-worker: 0 all good; 1 a check failed (named); 3 Cloudflare answered
 #     with a challenge (cf-mitigated): the runner is not allowed, which says
 #     nothing about the service; 4 the Worker itself answered 500, whose body
@@ -113,6 +123,15 @@ if [ "$mode" = revision ]; then
     echo "rollout-check: usage: the header file must hold one line, x-origin-auth: <secret>" >&2
     exit 64
   fi
+  if [ -z "${ROLLOUT_EXPECT_ENV:-}" ]; then
+    echo "rollout-check: usage: revision needs ROLLOUT_EXPECT_ENV, the intended release env (non-empty: main, a branch name or a tag)" >&2
+    exit 64
+  fi
+  if [ -z "${ROLLOUT_EXPECT_SHA+set}" ]; then
+    echo "rollout-check: usage: revision needs ROLLOUT_EXPECT_SHA set (empty for a tag, which has no sha)" >&2
+    exit 64
+  fi
+  sed -E 's/^[Xx]-[Oo]rigin-[Aa]uth:[[:space:]]*//; s/[[:space:]]*$//' "$header_file" > "$work/secret.value"
 elif [ "$#" -gt 1 ]; then
   echo "rollout-check: usage: this mode never sends the origin secret: give none" >&2
   exit 64
@@ -290,6 +309,54 @@ want_200 root root / "$status"
 grep -aFq 'PaliLearn' "$work/root.body" || fail root "/ does not name the page"
 echo "rollout-check: root ok"
 
+# meta_content NAME: prints the content attribute of the first <meta> tag whose
+# name attribute is NAME, whatever the order of its attributes (the tag may
+# span lines). Returns 1 when there is no such tag, 2 when it has no content.
+meta_content() {
+  local tag found=""
+  while IFS= read -r tag; do
+    if grep -Eq "[[:space:]]name=(\"$1\"|'$1')" <<<"$tag"; then
+      found=$tag
+      break
+    fi
+  done < <(tr '\r\n' '  ' < "$work/root.body" | grep -aEo '<meta[[:space:]][^>]*>')
+  [ -n "$found" ] || return 1
+  local attr
+  attr="$(grep -aEo "[[:space:]]content=(\"[^\"]*\"|'[^']*')" <<<"$found" | head -n 1)"
+  [ -n "$attr" ] || return 2
+  attr="${attr#*content=}"
+  printf '%s' "${attr:1:${#attr}-2}"
+}
+
+# shown VALUE: a served value for a message: printable, short, and never the
+# origin secret (the secret check comes later; a page that echoes it must not
+# print it here).
+shown() {
+  if grep -aFq -f "$work/secret.value" <<<"$1"; then
+    printf '<the origin secret>'
+  else
+    printf '%s' "$1" | tr -cd '[:print:]' | head -c 100
+  fi
+}
+
+# check_release META WANT: the served meta must equal the intended value.
+check_release() {
+  local served rc=0
+  served="$(meta_content "$1")" || rc=$?
+  case "$rc" in
+    1) die 8 release "the page has no <meta name=\"$1\"> (intended '$2')" ;;
+    2) die 8 release "the <meta name=\"$1\"> has no content attribute (intended '$2')" ;;
+  esac
+  [ "$served" = "$2" ] \
+    || die 8 release "$1: expected '$2', the page serves '$(shown "$served")'"
+}
+
+if [ "$mode" = revision ]; then
+  check_release learn-release-env "$ROLLOUT_EXPECT_ENV"
+  check_release learn-release-sha "$ROLLOUT_EXPECT_SHA"
+  echo "rollout-check: release ok"
+fi
+
 wasm="$(grep -aEo '/pkg/[^"'"'"' <>]*\.wasm' "$work/root.body" | head -n 1)"
 [ -n "$wasm" ] || fail wasm "the page links no .wasm"
 status="$(fetch "$wasm" wasm "$who")"
@@ -356,9 +423,9 @@ if [ "$mode" = --via-worker ]; then
 fi
 
 # What must never be served is the origin secret itself (learn-pali has no
-# API token): grep -F with the value in a file, so it is on no command line
+# API token): grep -F with the value in $work/secret.value (written at the
+# top, for the release check's messages too), so it is on no command line
 # and in no message.
-sed -E 's/^[Xx]-[Oo]rigin-[Aa]uth:[[:space:]]*//; s/[[:space:]]*$//' "$header_file" > "$work/secret.value"
 for name in root wasm; do
   for part in body head; do
     if grep -aFq -f "$work/secret.value" "$work/$name.$part"; then

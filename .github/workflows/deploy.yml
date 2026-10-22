@@ -58,9 +58,9 @@ jobs:
   site:
     runs-on: ubuntu-latest
     steps:
-      # persist-credentials: false — the Dockerfile copies learn-pali/.git
-      # (the footer badge asks git), and a persisted token would sit in
-      # .git/config, in a layer that the build cache exports.
+      # persist-credentials: false — the Docker context is the folder holding
+      # learn-pali/, so its .git is sent to the build, and a persisted token
+      # would sit in .git/config, readable there.
       - uses: actions/checkout@v7
         with:
           path: learn-pali
@@ -121,11 +121,9 @@ jobs:
           # No `ssh:`, no `secrets:`: the build takes no credential (ui-lib
           # is COPYed and the lock holds no git source).
           push: true
-          # The badge's branch and commit: the image has no .git. A tag
-          # build passes the tag name as the branch.
-          build-args: |
-            LEARN_PALI_GIT_BRANCH=${{ github.ref_name }}
-            LEARN_PALI_GIT_COMMIT=${{ github.sha }}
+          # No build args: the release (the footer badge's tag or branch, and
+          # commit) is not in the image, so its hash does not change with the
+          # ref. Step 2 writes it onto the revision (scripts/release-values.sh).
           tags: |
             ${{ steps.vars.outputs.image_hash }}
             ${{ steps.vars.outputs.image }}:${{ github.sha }}
@@ -142,6 +140,13 @@ jobs:
       #    revision (what tofu creates) names none: then the latest ready one.
       #    No revision at 100% (a split, a hand-made canary) fails, named: a
       #    split is never this pipeline's state, and guessing PREV is worse.
+      #    "Already running" means the serving revision has this image AND this
+      #    release (its LEARN_PALI_ENV and LEARN_PALI_SHA, absent == empty): the
+      #    image no longer changes with the ref, so every push to main, and a
+      #    tag on main's image, still makes a revision (same image, new env).
+      #    A revision whose JSON does not parse, that names no image, or whose
+      #    env is not a list falls open to a deploy and the log says why (never
+      #    a skip, never a dead job).
       - name: Is that image already running?
         id: current
         env:
@@ -165,22 +170,57 @@ jobs:
             fi
             exit 1
           fi
-          CURRENT=$(gcloud run revisions describe "$SERVING" --project "$PROJECT" --region "$REGION" \
-            --format='value(spec.containers[0].image)')
+          # The release this run intends (a refused ref fails the step here).
+          INTENDED=$(scripts/release-values.sh)
+          REVISION_JSON=$(gcloud run revisions describe "$SERVING" --project "$PROJECT" --region "$REGION" --format json)
+          CURRENT=$(printf '%s' "$REVISION_JSON" | jq -r '.spec.containers[0].image // empty' 2>/dev/null) || CURRENT=""
           echo "serving=$SERVING" >> "$GITHUB_OUTPUT"
-          if [ "$CURRENT" = "$IMAGE_HASH" ]; then
-            echo "running=true" >> "$GITHUB_OUTPUT"
-            echo "learn-pali: $SERVICE already serves $IMAGE_HASH (revision $SERVING), nothing to deploy"
-          else
+          # An unreadable revision JSON (empty, not JSON, no image) fails OPEN
+          # to a deploy (an extra revision is the worst case) and says why; it
+          # never kills the step. The `gcloud run revisions describe` call
+          # above still fails the step: a transient failure is re-run by hand.
+          if [ -z "$CURRENT" ]; then
+            if printf '%s' "$REVISION_JSON" | jq -e . >/dev/null 2>&1; then
+              REASON="the revision JSON names no image"
+            else
+              REASON="the revision JSON is empty or does not parse"
+            fi
             echo "running=false" >> "$GITHUB_OUTPUT"
+            echo "learn-pali: could not read the serving revision's image/release ($REASON): deploying a new revision"
+          elif [ "$CURRENT" != "$IMAGE_HASH" ]; then
+            echo "running=false" >> "$GITHUB_OUTPUT"
+          else
+            # `same`: 0 = this image and this release, 1 = another release,
+            # 2 = a revision whose env it cannot read (a wrong type): that one
+            # deploys too and says so, never "another release".
+            RELEASE_RC=0
+            scripts/release-values.sh same <<<"$REVISION_JSON" || RELEASE_RC=$?
+            case "$RELEASE_RC" in
+              0)
+                echo "running=true" >> "$GITHUB_OUTPUT"
+                echo "learn-pali: $SERVICE already serves $IMAGE_HASH as $INTENDED (revision $SERVING), nothing to deploy"
+                ;;
+              2)
+                echo "running=false" >> "$GITHUB_OUTPUT"
+                echo "learn-pali: could not read the serving revision's release (its env is not a list): deploying a new revision"
+                ;;
+              *)
+                echo "running=false" >> "$GITHUB_OUTPUT"
+                echo "learn-pali: $SERVICE serves the image but another release ($INTENDED intended): a new revision with the new env"
+                ;;
+            esac
           fi
 
-      # 2. A revision under a tag, with no traffic. One that never becomes
-      #    ready (the usual cause: the origin secret has no version, so the
-      #    container cannot start) fails here with the traffic untouched. Its
-      #    name is read right after, checked to be the one that carries the
-      #    tag, and handed to step 5: the traffic goes to THAT revision, not
-      #    to whatever is newest by then.
+      # 2. A revision under a tag, with no traffic, carrying the release: the
+      #    two env values LEARN_PALI_ENV and LEARN_PALI_SHA, written here and
+      #    nowhere else, with the flag that updates the variables one by one
+      #    (the flag that replaces them all would wipe RUST_LOG and the origin
+      #    secret reference, and every request would then be refused). A
+      #    revision that never becomes ready (the usual cause: the origin
+      #    secret has no version, so the container cannot start) fails here
+      #    with the traffic untouched. Its name is read right after, checked
+      #    to be the one that carries the tag, and handed to step 5: the
+      #    traffic goes to THAT revision, not to whatever is newest by then.
       - name: Deploy the revision without traffic
         id: deploy
         if: steps.current.outputs.running != 'true'
@@ -191,6 +231,7 @@ jobs:
           SERVICE="learn-pali-$ENV"
           TAG="sha-${GITHUB_SHA::7}"
           gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE_HASH" \
+            --update-env-vars "$(scripts/release-values.sh)" \
             --no-traffic --tag "$TAG" --quiet \
             || { echo "::error::gcloud could not deploy a ready revision of $SERVICE: read its error above (usual causes: the startup probe, or the origin secret has no version: infra/scripts/origin-secret create $ENV); the traffic is untouched"; exit 1; }
           DESCRIBED=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json)
@@ -251,8 +292,19 @@ jobs:
         run: |
           set -euo pipefail
           HEADER_FILE="$RUNNER_TEMP/origin-header"
-          scripts/rollout-check.sh revision "$URL" "$HEADER_FILE" \
-            || { echo "::error::the revision at its tagged URL failed rollout-check.sh; the traffic is untouched"; exit 1; }
+          # The release step 2 wrote: the page's learn-release metas must say it.
+          ROLLOUT_EXPECT_ENV="$(scripts/release-values.sh env)"
+          ROLLOUT_EXPECT_SHA="$(scripts/release-values.sh sha)"
+          export ROLLOUT_EXPECT_ENV ROLLOUT_EXPECT_SHA
+          RC=0
+          scripts/rollout-check.sh revision "$URL" "$HEADER_FILE" || RC=$?
+          if [ "$RC" = 8 ]; then
+            echo "::error::the revision at its tagged URL serves another release than the one deployed (its learn-release metas are not env '$ROLLOUT_EXPECT_ENV', sha '$ROLLOUT_EXPECT_SHA'); the traffic is untouched"
+            exit 1
+          elif [ "$RC" != 0 ]; then
+            echo "::error::the revision at its tagged URL failed rollout-check.sh; the traffic is untouched"
+            exit 1
+          fi
 
       # 5. The traffic, to the revision step 2 created and step 4 checked,
       #    by name: a revision made meanwhile (tofu, a hand deploy) gets none.

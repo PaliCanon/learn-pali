@@ -17,14 +17,14 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | Folder | What it holds |
 | --- | --- |
 | `app/` | Crate `learn_pali`, the site: Leptos SSR + hydrate on ui-lib. |
-| `app/src/` | The site's frame (app.rs: the document, the rail, the footer in app/site_footer.rs), entry point (main.rs), origin guard (origin.rs); the Learn fragment (fragment.rs: LearnRoutes, LearnProvider, LearnSettings), the host's plug-ins (backend.rs: the ProgressStore and FileTransfer traits; web.rs: the site's localStorage store and file transfer), the progress decisions (store.rs: Load, classify, validate_import), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), build info (git_info.rs). |
+| `app/src/` | The site's frame (app.rs: the document, the rail, the footer in app/site_footer.rs), entry point (main.rs), origin guard (origin.rs); the Learn fragment (fragment.rs: LearnRoutes, LearnProvider, LearnSettings), the host's plug-ins (backend.rs: the ProgressStore and FileTransfer traits; web.rs: the site's localStorage store and file transfer), the progress decisions (store.rs: Load, classify, validate_import), embedded deck (deck.rs), the UI strings' catalogue (catalogue.rs), the seed of a session's random order (seed.rs), the release the footer badge shows (release.rs: `ReleaseInfo`, read from `LEARN_PALI_ENV` / `LEARN_PALI_SHA` at start, written as the metas `learn-release-env` / `learn-release-sha` in the SSR head, read back by the hydrate entry). |
 | `app/src/pages/` | Page views, the home at `/`. |
 | `app/src/components/` | UI components: progress blocks, the 'not saved' strip, new terms picker, review session, term list, the SuttaCentral badge of a passage (passage_badge.rs), 'Add to practice' under each entry of a passage's word panel (add_word.rs). |
 | `app/src/learn/` | Learning session logic: home state, session run, Leitner stages, card summary, word lookups, the Context front's window around the blank, which translation shows. |
 | `app/locales/` | UI translations: en.json, fr.json, vi.json. |
 | `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |
 | `app/public/` | Static assets: favicon and logo. |
-| `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and the fragment in a real browser (csr.rs, wasm32 only). |
+| `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and of the build (no_build_git.rs: the image reads no git), the release read from the document and the fragment in a real browser (release_document.rs and csr.rs, wasm32 only). |
 | `app/Dockerfile` | Container image build: cargo leptos build, debian runtime, non-root user, port 8080. |
 | `core/` | Crate `learn_core`, the learning loop library. `serde` only; builds for native and wasm32. |
 | `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math, the SuttaCentral link of a passage by language (suttacentral.rs). |
@@ -38,8 +38,8 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `tools/build-deck/fixtures/` | Test fixtures for build and translation. |
 | `infra/` | OpenTofu: Cloud Run service, Secret Manager, Cloudflare Worker and custom domain, per environment. |
 | `infra/worker/` | Cloudflare Worker: origin proxy (proxy.js) with node tests. |
-| `infra/scripts/` | Origin secret generation script and its test. |
-| `scripts/` | Repository scripts: deploy health check and rollout, Cloudflare access redirect pattern. |
+| `infra/scripts/` | Origin secret generation script and its test; the test that tofu ignores the container env the deploy writes (lifecycle.test.sh). |
+| `scripts/` | Repository scripts: deploy health check and rollout (rollout-check.sh), the release values a deploy writes (release-values.sh), their tests (rollout-check.test.sh, release-values.test.sh), Cloudflare access redirect pattern. |
 | `.github/workflows/` | CI: format, lint, test, doc, MSRV, coverage, deny checks (ci.yml). Deploy: image build, Cloud Run deploy, health check (deploy.yml). |
 | `.github/actions/ui-lib/` | Composite GitHub Action: checks out ui-lib at the pinned Cargo.toml tag with the palicanon-ci app token. |
 | `.task/` | Task definitions and records: one markdown file per task, its design, log and retro. |
@@ -227,7 +227,12 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER
 # The site's Google Drive sync against a fake Google, same runner (task 050):
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
   cargo test -p learn_pali --features csr,web-sync --target wasm32-unknown-unknown --test web_sync
+# The release read from the document's metas, same runner (task 060):
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
+  cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test release_document
 bash scripts/csr-without-web-store.sh   # the csr build holds nothing of the web store
+bash scripts/rollout-check.test.sh && bash scripts/release-values.test.sh
+bash infra/scripts/origin-secret.test.sh && bash infra/scripts/lifecycle.test.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 cargo leptos build
 cargo deny check advisories bans sources licenses
@@ -264,11 +269,29 @@ A branch can be deployed to dev by hand for the user's check: `gh workflow run d
   only when the registry lacks it, deploys it with no traffic under a tag,
   checks it, then moves the traffic. The checks: `/` answers 200 and names
   PaliLearn; the hashed `.wasm` that `/` references answers 200; the retired
-  review route answers 404.
+  review route answers 404. It also writes the release onto the revision (below).
 - On the public host, `scripts/rollout-check.sh --via-worker` also loads `/` in
   headless Chrome and fails on a hydration panic or a missing `<html
   data-hydrated>` (task 040); by hand on a Mac (Google Chrome.app is found):
   `scripts/rollout-check.sh --via-worker https://learn.dev.palicanon.app`.
+
+The footer badge is the deploy's, not the image's: it says which ref was
+rolled out, not which ref built the image, so the image is identical across
+refs (`app/tests/no_build_git.rs`: the build reads no git). `deploy.yml` writes
+`LEARN_PALI_ENV` and `LEARN_PALI_SHA` onto the Cloud Run revision with `gcloud
+run deploy --update-env-vars`, the value from `scripts/release-values.sh`. A
+prod tag `v0.1.8` shows `v0.1.8` alone; `main` shows `main · <sha7>`; a
+dispatched branch `feat/x · <sha7>`; a local run `dev`; a page whose metas are
+missing shows `unknown` in the browser. Every push to `main` makes a new
+revision (another commit, another release), even when the image is the same.
+The rollout gate (`rollout-check.sh revision`, which needs `ROLLOUT_EXPECT_ENV`
+and `ROLLOUT_EXPECT_SHA`) fails with exit 8 when the served metas differ from
+the intended release: `ROLLOUT_EXPECT_ENV` is non-empty, `ROLLOUT_EXPECT_SHA`
+must be set but may be empty (a tag has no sha). The deploy uses
+`--update-env-vars` and never `--set-env-vars`: the set variant replaces the whole
+env, wipes `RUST_LOG` and the `ORIGIN_SECRET` reference, and every request is
+then refused. Tofu ignores the container env, so its apply must come
+before the first deploy that writes it (`infra/README.md`).
 
 Before the first deploy, the user:
 

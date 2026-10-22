@@ -17,10 +17,25 @@ project it shares with the site and the API (`palicanon-app`,
 | A Workers Custom Domain per host | `cloudflare.tf` | `learn.palicanon.app` (prod), `learn.dev.palicanon.app` (dev). Cloudflare creates the DNS record and issues the certificate for the exact host, whatever its depth: `learn.dev.palicanon.app` is outside Universal SSL (`*.palicanon.app`), a route on a plain record would not serve it over TLS. For an env with Access it `depends_on` the application and its policy: there is no moment when that host is public. |
 | `scripts/origin-secret` | `scripts/` | `create`, `push`, `check` the origin secret; tested with stub `gcloud`/`curl` (`bash infra/scripts/origin-secret.test.sh`). |
 
-CI owns the image: tofu ignores `image`, `scaling`, `client` and
-`client_version` of the service (`lifecycle.ignore_changes`, the API's rule),
-so a deploy never shows up as drift, and CI never touches the environment or
-the secrets. The consequence of ignoring `scaling`: a changed `max_instances`
+CI owns the image: tofu ignores `image`, the container `env`, `scaling`,
+`client` and `client_version` of the service (`lifecycle.ignore_changes`, the
+API's rule), so a deploy never shows up as drift, and CI never touches the
+secrets. The deploy writes `LEARN_PALI_ENV` and `LEARN_PALI_SHA` into the env
+(`gcloud run deploy --update-env-vars`, the version badge reads them), never
+tofu. The `env` ignore must be applied (`tofu apply`) before the first deploy
+that writes the env, or the next apply strips both variables and the badge
+reads "dev" with no diff shown. The consequence of ignoring `env`: a changed
+`RUST_LOG` or `ORIGIN_SECRET` reference is not applied to an existing service;
+change it with `gcloud run services update` or `tofu apply -replace`. A
+`tofu apply -replace` of the service also drops `LEARN_PALI_ENV` and
+`LEARN_PALI_SHA`: the badge reads `dev` until the next deploy. A tag release
+is restored by re-running the tag's deploy
+(`gh workflow run deploy.yml --ref v0.1.8`); a dispatch of a branch writes
+`<branch> · <sha7>` instead, and the next push to main writes
+`main · <sha7>`. The deploy uses `--update-env-vars` and
+never `--set-env-vars`: the set variant replaces the whole env and wipes
+`RUST_LOG` and the `ORIGIN_SECRET` reference, so every request would be
+refused. The consequence of ignoring `scaling`: a changed `max_instances`
 is not applied to an existing service; change it with
 `gcloud run services update --max-instances` and keep `variables.tf` in step.
 

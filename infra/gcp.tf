@@ -154,7 +154,14 @@ resource "google_cloud_run_v2_service" "app" {
     # gcloud update, written down in infra/README.md.
     # gcloud run deploy names each revision; without ignoring it, every apply
     # after a deploy creates a new revision with the same image and no traffic.
-    ignore_changes = [template[0].containers[0].image, template[0].revision, scaling, client, client_version]
+    # The container env is ignored as well: deploy.yml writes LEARN_PALI_ENV
+    # and LEARN_PALI_SHA with `gcloud run deploy --update-env-vars` (the
+    # version badge reads them), never tofu. This ignore must be applied
+    # (`tofu apply`) before the first deploy that writes them, or the next
+    # apply strips them and the badge reads "dev" with no diff shown. A later
+    # RUST_LOG or ORIGIN_SECRET edit is a gcloud update or `tofu apply -replace`,
+    # written down in infra/README.md.
+    ignore_changes = [template[0].containers[0].image, template[0].revision, template[0].containers[0].env, scaling, client, client_version]
   }
   depends_on = [
     google_secret_manager_secret_iam_member.app_reads_origin,

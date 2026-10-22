@@ -20,9 +20,21 @@ set -uo pipefail
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root="$(cd "$here/.." && pwd)"
-script="$here/rollout-check.sh"
+# ROLLOUT_TEST_SCRIPT points the suite at a copy of rollout-check.sh (a
+# mutation run).
+script="${ROLLOUT_TEST_SCRIPT:-$here/rollout-check.sh}"
 dockerfile="$root/app/Dockerfile"
-workflow="$root/.github/workflows/deploy.yml"
+# ROLLOUT_TEST_WORKFLOW points the suite at a copy of deploy.yml (a mutation
+# run); unset, it reads the real one.
+workflow="${ROLLOUT_TEST_WORKFLOW:-$root/.github/workflows/deploy.yml}"
+# A hook is a local mutation tool: set in CI it would make this suite test a
+# copy, so it is refused (060 fix 3, H5).
+for hook in ROLLOUT_TEST_SCRIPT ROLLOUT_TEST_WORKFLOW; do
+  if [ -n "${CI:-}" ] && [ -n "${!hook:-}" ]; then
+    echo "$(basename "$0"): the test hook $hook is refused when CI is set (it points the suite at a copy)" >&2
+    exit 64
+  fi
+done
 
 work="$(mktemp -d)"
 SRV_PID=""
@@ -54,7 +66,7 @@ assert_file_lacks() { # name file pattern
 
 # ------------------------------------------------------------ the fake server
 cat > "$work/fake.py" <<'PY'
-import http.server, socket, socketserver, sys, time
+import http.server, os, socket, socketserver, sys, time
 
 scenario, portfile, logfile = sys.argv[1:4]
 SECRET = "origin_canary_rollout_9d41c7"
@@ -64,9 +76,41 @@ WASM = "/pkg/learn-pali.4f2a9c.wasm"
 ACCESS = "https://team.cloudflareaccess.com/cdn-cgi/access/login/learn.dev.palicanon.app?kid=1"
 
 
+# The SSR head writes the release metas (task 060). META_ENV and META_SHA are
+# their values (a tag serves an empty sha); META_MODE bends the markup.
+META_ENV = os.environ.get("META_ENV", "main")
+META_SHA = os.environ.get("META_SHA", "34c489c")
+META_MODE = os.environ.get("META_MODE", "normal")
+
+
+def metas():
+    env = SECRET if META_MODE == "echo_secret" else META_ENV
+    e = '<meta name="learn-release-env" content="%s">' % env
+    h = '<meta name="learn-release-sha" content="%s">' % META_SHA
+    if META_MODE == "swapped":
+        e = '<meta content="%s" name="learn-release-env">' % env
+        h = '<meta content="%s" name="learn-release-sha"/>' % META_SHA
+    if META_MODE == "single":
+        e = "<meta name='learn-release-env' content='%s'>" % env
+        h = "<meta name='learn-release-sha' content='%s'>" % META_SHA
+    if META_MODE == "multiline":
+        e = '<meta\n  name="learn-release-env"\n  content="%s"\n>' % env
+        h = '<meta\n  name="learn-release-sha"\n  content="%s"\n>' % META_SHA
+    if META_MODE == "noenv": e = ""
+    if META_MODE == "nosha": h = ""
+    if META_MODE == "nocontent_env": e = '<meta name="learn-release-env">'
+    if META_MODE == "nocontent_sha": h = '<meta name="learn-release-sha">'
+    # decoys: the name must match exactly, in the name attribute
+    decoy = ('<meta name="description" content="learn-release-env main">'
+             '<meta name="learn-release-env-x" content="zzz">'
+             '<meta property="learn-release-env" content="zzz">'
+             '<meta data-name="learn-release-env" content="zzz">') if META_MODE == "decoys" else ""
+    return decoy + e + h
+
+
 def page(name, link, extra):
-    return ('<!DOCTYPE html><html><head><title>%s</title>%s</head><body>%s</body></html>'
-            % (name, '<link rel="preload" href="%s" as="fetch" type="application/wasm">' % link if link else "", extra)).encode()
+    return ('<!DOCTYPE html><html><head><title>%s</title>%s%s</head><body>%s</body></html>'
+            % (name, '<link rel="preload" href="%s" as="fetch" type="application/wasm">' % link if link else "", metas(), extra)).encode()
 
 
 WORKER500 = b"The origin secret is not configured."
@@ -290,8 +334,16 @@ run_case() {
   for a in "$@"; do args+=("${a//@URL/$URL}"); done
   : > "$work/curl-argv"
   : > "$work/chrome-argv"
-  out="$(PATH="$shim:$PATH" ROLLOUT_MAX_TIME="${MAXT:-10}" CHROME="$fake_chrome" \
-    FAKE_CHROME="${FAKE_CHROME:-ok}" ROLLOUT_CHROME_TIMEOUT="${CHROME_TIME:-30}" bash "$script" "${args[@]}" 2>&1)"
+  # The intended release (task 060): EXPECT_ENV and EXPECT_SHA, default
+  # main / 34c489c (an empty EXPECT_SHA is a tag); NO_EXPECT_ENV and
+  # NO_EXPECT_SHA leave the variable unset.
+  out="$(
+    unset ROLLOUT_EXPECT_ENV ROLLOUT_EXPECT_SHA
+    [ -n "${NO_EXPECT_ENV:-}" ] || export ROLLOUT_EXPECT_ENV="${EXPECT_ENV-main}"
+    [ -n "${NO_EXPECT_SHA:-}" ] || export ROLLOUT_EXPECT_SHA="${EXPECT_SHA-34c489c}"
+    PATH="$shim:$PATH" ROLLOUT_MAX_TIME="${MAXT:-10}" CHROME="$fake_chrome" \
+      FAKE_CHROME="${FAKE_CHROME:-ok}" ROLLOUT_CHROME_TIMEOUT="${CHROME_TIME:-30}" bash "$script" "${args[@]}" 2>&1
+  )"
   rc=$?
   stop
   assert_eq "$name: exit code" "$want" "$rc"
@@ -329,6 +381,61 @@ run_case "the secret echoed in the page" echo_body 1 "FAIL secret.*root" revisio
 run_case "the secret echoed in a header of the page" echo_head 1 "FAIL secret.*root" revision @URL "$header"
 run_case "the secret in the wasm" echo_wasm 1 "FAIL secret.*wasm" revision @URL "$header"
 run_case "the secret in a header of the wasm" echo_wasm_head 1 "FAIL secret.*wasm" revision @URL "$header"
+
+# The release gate (task 060): the page's learn-release metas must be the
+# intended ones; a wrong release is exit 8, never a flaky curl (1).
+echo "== rollout-check.sh: revision, the release metas (exit 8)"
+run_case "release: the metas match" healthy 0 "release ok" revision @URL "$header"
+log_rel="$(cat "$SLOG")"
+assert_match "release: read from the revision's own URL, with the header" "GET / auth=right" "$log_rel"
+EXPECT_ENV=v0.1.8 EXPECT_SHA= META_ENV=v0.1.8 META_SHA= \
+  run_case "release: a tag (no dot in the env, an empty sha)" healthy 0 "release ok" revision @URL "$header"
+EXPECT_ENV=feat/x META_ENV=feat/x \
+  run_case "release: a branch name with a slash" healthy 0 "release ok" revision @URL "$header"
+META_MODE=swapped run_case "release: content before name, a self-closing tag" healthy 0 "release ok" revision @URL "$header"
+META_MODE=single run_case "release: single-quoted attributes" healthy 0 "release ok" revision @URL "$header"
+META_MODE=multiline run_case "release: a tag split over lines" healthy 0 "release ok" revision @URL "$header"
+META_MODE=decoys run_case "release: lookalike metas are not the metas" healthy 0 "release ok" revision @URL "$header"
+META_ENV=dev run_case "release: env wrong" healthy 8 "FAIL release.*learn-release-env.*main.*dev" revision @URL "$header"
+META_SHA=deadbee run_case "release: sha wrong" healthy 8 "FAIL release.*learn-release-sha.*34c489c.*deadbee" revision @URL "$header"
+EXPECT_ENV=v0.1.8 EXPECT_SHA= META_ENV=v0.1.8 \
+  run_case "release: a tag expected, the page serves main's sha" healthy 8 "FAIL release.*learn-release-sha" revision @URL "$header"
+META_SHA= run_case "release: a sha expected, the page serves an empty one" healthy 8 "FAIL release.*learn-release-sha" revision @URL "$header"
+EXPECT_ENV=feat/x META_ENV=feat run_case "release: a prefix of the env is not the env" healthy 8 "FAIL release.*learn-release-env" revision @URL "$header"
+META_MODE=noenv run_case "release: the env meta is missing" healthy 8 "FAIL release.*learn-release-env" revision @URL "$header"
+EXPECT_SHA= META_SHA= META_MODE=nosha run_case "release: the sha meta is missing while an empty sha is expected" healthy 8 "FAIL release.*learn-release-sha" revision @URL "$header"
+# 060 fix 3 (H4): one literal for the no-content message, in every pattern
+# below (rollout-check.sh check_release says exactly this).
+NO_CONTENT='has no content attribute'
+META_MODE=nocontent_env run_case "release: the env meta has no content" healthy 8 "FAIL release.*learn-release-env.*$NO_CONTENT" revision @URL "$header"
+EXPECT_SHA= META_SHA= META_MODE=nocontent_sha run_case "release: the sha meta has no content attribute" healthy 8 "FAIL release.*learn-release-sha.*$NO_CONTENT" revision @URL "$header"
+# 060 fix round 2 (F10): the same on the tag path (env v0.1.8, empty sha): a sha
+# meta with NO content attribute is a broken page, not an empty sha (the pair
+# with content="" is the tag case above, which passes).
+EXPECT_ENV=v0.1.8 EXPECT_SHA= META_ENV=v0.1.8 META_SHA= META_MODE=nocontent_sha \
+  run_case "release: a tag, the sha meta has no content attribute at all" healthy 8 "FAIL release.*learn-release-sha.*$NO_CONTENT" revision @URL "$header"
+META_MODE=echo_secret run_case "release: the secret served as the env is never printed" healthy 8 "FAIL release.*learn-release-env" revision @URL "$header"
+# The release is judged after the page is named and before the wasm.
+META_ENV=dev run_case "release: a wrong release fails before the wasm is asked" healthy 8 "FAIL release" revision @URL "$header"
+assert_absent "release: the wasm was not asked" ".wasm" "$(cat "$SLOG")"
+META_ENV=dev run_case "release: a wrong env on a page that does not name PaliLearn is the root's failure" noname 1 "FAIL root" revision @URL "$header"
+
+echo "== rollout-check.sh: revision, the intended release is required (64)"
+NO_EXPECT_ENV=1 run_case "release: ROLLOUT_EXPECT_ENV unset" healthy 64 "usage.*ROLLOUT_EXPECT_ENV" revision @URL "$header"
+assert_eq "release: ROLLOUT_EXPECT_ENV unset: no request was made" "0" "$(grep -c '^GET' "$SLOG")"
+EXPECT_ENV= run_case "release: ROLLOUT_EXPECT_ENV empty" healthy 64 "usage.*ROLLOUT_EXPECT_ENV" revision @URL "$header"
+assert_eq "release: ROLLOUT_EXPECT_ENV empty: no request was made" "0" "$(grep -c '^GET' "$SLOG")"
+NO_EXPECT_SHA=1 run_case "release: ROLLOUT_EXPECT_SHA unset (empty is fine, unset is not)" healthy 64 "usage.*ROLLOUT_EXPECT_SHA" revision @URL "$header"
+assert_eq "release: ROLLOUT_EXPECT_SHA unset: no request was made" "0" "$(grep -c '^GET' "$SLOG")"
+NO_EXPECT_ENV=1 NO_EXPECT_SHA=1 run_case "release: both unset" healthy 64 "usage" revision @URL "$header"
+assert_eq "release: both unset: no request was made" "0" "$(grep -c '^GET' "$SLOG")"
+
+echo "== rollout-check.sh: the other modes neither read nor require the intended release"
+NO_EXPECT_ENV=1 NO_EXPECT_SHA=1 run_case "release: --refused needs no intended release" refused_ok 0 "refused ok" --refused @URL
+NO_EXPECT_ENV=1 NO_EXPECT_SHA=1 run_case "release: --access needs no intended release" access_ok 0 "access ok" --access @URL
+NO_EXPECT_ENV=1 NO_EXPECT_SHA=1 run_case "release: --via-worker needs no intended release" via_ok 0 "hydrate ok" --via-worker @URL
+assert_absent "release: --via-worker runs no release check" "release" "$out"
+META_ENV=dev run_case "release: --via-worker does not judge the metas" via_ok 0 "hydrate ok" --via-worker @URL
 
 echo "== rollout-check.sh: --refused URL"
 run_case "refused: 403" refused_ok 0 "refused ok" --refused @URL
@@ -417,7 +524,7 @@ MAXT=2 run_case "via-worker: the server never answers (timeout)" via_hang 6 "FAI
 run_case "revision mode: the connection is closed with no HTTP answer (1, never 6)" via_close 1 "FAIL root" revision @URL "$header"
 assert_eq "revision mode: a 500 with the Worker's words is a plain failure (1), never 4" "1" "$(
   serve root500
-  PATH="$shim:$PATH" bash "$script" revision "$URL" "$header" >/dev/null 2>&1; echo $?
+  PATH="$shim:$PATH" ROLLOUT_EXPECT_ENV=main ROLLOUT_EXPECT_SHA=34c489c bash "$script" revision "$URL" "$header" >/dev/null 2>&1; echo $?
   stop
 )"
 
@@ -757,6 +864,14 @@ for id in current deploy secret check traffic refused host; do
   assert_file_lacks "deploy.yml: '$id' has no \${{ }} in its script" "$work/step-$id.sh" '\$\{\{'
   assert_file_lacks "deploy.yml: '$id' never runs set -x" "$work/step-$id.sh" 'set -[a-z]*x'
 done
+# 060 fix round 2 (F7), reworded in fix 3 (H2): the `SAME_RC` arm of fix round 1
+# was dead, since it sat behind a jq that fails first on JSON that does not
+# parse (the same bytes `same` would reject with exit 2). `same` exit 2 is
+# reachable now, for an env of the wrong type, and step current handles it as
+# RELEASE_RC (tested above). The name SAME_RC must not come back: a second
+# handler of the exit code would be that dead arm again.
+assert_file_lacks "deploy.yml: step current holds no SAME_RC (the dead arm of fix round 1)" "$work/step-current.sh" 'SAME_RC'
+assert_file_has "deploy.yml: step current reads the exit code of 'same' as RELEASE_RC" "$work/step-current.sh" 'release-values\.sh same <<<"\$REVISION_JSON" \|\| RELEASE_RC=\$\?'
 assert_file_has "deploy.yml: the message names the usual causes (startup probe, origin secret)" "$work/step-deploy.sh" 'read its error above.*startup probe.*origin secret'
 assert_file_has "deploy.yml: the deploy has no traffic" "$work/step-deploy.sh" '--no-traffic'
 assert_file_lacks "deploy.yml: --to-latest appears nowhere" "$workflow" '--to-latest'
@@ -825,7 +940,17 @@ case "$1 $2 $3" in
           "$(cat "$STUB/service-url")" "$(cat "$STUB/latest-ready")" "$created" "$entry" "$tagged"
         ;;
     esac ;;
-  "run revisions describe") cat "$STUB/image-$4" ;;
+  "run revisions describe")
+    # `--format json` (task 060): the image and, when env-<rev> exists, the env array.
+    case "$all" in *"--format json"*) ;; *) echo "stub gcloud: revisions describe needs --format json" >&2; exit 97 ;; esac
+    # raw-<rev>: the answer verbatim (a malformed or image-less revision).
+    if [ -f "$STUB/raw-$4" ]; then cat "$STUB/raw-$4"; exit 0; fi
+    img=$(cat "$STUB/image-$4")
+    if [ -f "$STUB/env-$4" ]; then
+      printf '{"spec":{"containers":[{"image":"%s","env":%s}]}}' "$img" "$(cat "$STUB/env-$4")"
+    else
+      printf '{"spec":{"containers":[{"image":"%s"}]}}' "$img"
+    fi ;;
   "run deploy"*)
     if [ -f "$STUB/deploy-fails" ]; then echo "ERROR: revision is not ready: secret version not found" >&2; exit 1; fi
     # A re-run at the same SHA: before the deploy the tag sits on the older
@@ -854,6 +979,7 @@ cat > "$proj/scripts/rollout-check.sh" <<'SH'
 # A stub: logs its arguments and the header file's mode, exits with the code in $STUB/rc-<mode>.
 mode="${1#--}"
 echo "rollout-check $*" >> "$STUB/calls"
+echo "rollout-check-expect env=${ROLLOUT_EXPECT_ENV-<unset>} sha=${ROLLOUT_EXPECT_SHA-<unset>}" >> "$STUB/calls"
 if [ "$mode" = revision ] && [ -f "$3" ]; then
   echo "header-file $(ls -l "$3" | cut -c1-10) $(cut -c1-16 "$3" | head -n 1)" >> "$STUB/calls"
 fi
@@ -872,7 +998,8 @@ cat > "$stub/bin/sleep" <<'SH'
 #!/usr/bin/env bash
 echo "sleep $*" >> "$STUB/calls"
 SH
-chmod +x "$stub/bin/gcloud" "$stub/bin/sleep" "$proj/scripts/rollout-check.sh"
+cp "$here/release-values.sh" "$proj/scripts/release-values.sh"
+chmod +x "$stub/bin/gcloud" "$stub/bin/sleep" "$proj/scripts/rollout-check.sh" "$proj/scripts/release-values.sh"
 
 reset_stub() { # image-of-the-serving-revision
   rm -rf "$stub/state"
@@ -900,6 +1027,7 @@ step() {
     cd "$proj" || exit 99
     env PATH="$stub/bin:$PATH" STUB="$STUB" GITHUB_OUTPUT="$STUB/out" RUNNER_TEMP="$RUNNER_TEMP" \
       ENV=dev REGION=europe-west1 PROJECT=proj GITHUB_SHA=abc1234def5678 \
+      GITHUB_REF_TYPE=branch GITHUB_REF_NAME=main \
       ACCESS_dev=false ACCESS_prod=false \
       IMAGE_HASH=registry/learn-pali:h-new HOST=learn.dev.palicanon.app "$@" \
       bash -e "$work/step-$id.sh"
@@ -908,14 +1036,113 @@ step() {
 calls() { cat "$STUB/calls"; }
 output() { sed -n "s/^$1=//p" "$STUB/out" | head -n 1; }
 
+# The env array of a revision that serves the push to main of abc1234def5678.
+MAIN_ENV='[{"name":"RUST_LOG","value":"info"},{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"abc1234"}]'
 echo "== deploy.yml: step 1 (PREV, skip)"
 reset_stub "registry/learn-pali:h-old"
 out="$(step current)"
 assert_eq "current: PREV is the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
 assert_eq "current: another image is running, so deploy" "false" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
 out="$(step current)"
 assert_eq "current: the same image serves, so skip" "true" "$(output running)"
+# 060: the skip also needs the same release; the image alone is not enough.
+reset_stub "registry/learn-pali:h-new"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "current (same image, same release): serving is PREV" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_absent "current (same image, same release): nothing is deployed" "run deploy" "$(calls)"
+assert_match "current (same image, same release): says nothing to deploy" "nothing to deploy" "$out"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "current (same image, another push): a new revision is wanted" "false" "$(output running)"
+assert_eq "current (same image, another push): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_match "current (same image, another push): the message says another release" "serves the image but another release .*new revision with the new env" "$out"
+# 060 fix round 2 (F8): the image is the intended one AND the sha7 is the
+# intended one, but the revision was rolled out for another ref (a dispatch of
+# feat/x): the push to main is still another release, so a new revision.
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"feat/x"},{"name":"LEARN_PALI_SHA","value":"abc1234"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "current (same image, another ref's env, same sha7): a new revision is wanted" "false" "$(output running)"
+assert_eq "current (same image, another ref's env, same sha7): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_match "current (same image, another ref's env, same sha7): the message says another release" "serves the image but another release .*new revision with the new env" "$out"
+assert_absent "current (same image, another ref's env, same sha7): not the skip message" "nothing to deploy" "$out"
+out="$(step deploy)"
+assert_match "current (same image, another ref's env, same sha7): the deploy writes LEARN_PALI_ENV=main" "run deploy learn-pali-dev .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
+reset_stub "registry/learn-pali:h-new"
+out="$(step current)"
+assert_eq "current (same image, no env on the revision): a new revision is wanted" "false" "$(output running)"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"RUST_LOG","value":"info"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "current (same image, an env array with RUST_LOG only): a new revision is wanted" "false" "$(output running)"
+# a tag: absent sha == empty sha, so v0.1.8 already served is a skip; a tag
+# v0.1.9 on the main-built image of the same hash still deploys.
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
+assert_eq "current (tag, env equal, sha absent): absent == empty, so skip" "true" "$(output running)"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"},{"name":"LEARN_PALI_SHA","value":""}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
+assert_eq "current (tag, env equal, sha empty): skip" "true" "$(output running)"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.9)"
+assert_eq "current (v0.1.9 tag, the revision serves main's inputs): a new revision" "false" "$(output running)"
+reset_stub "registry/learn-pali:h-new"
+out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.9)"
+assert_eq "current (v0.1.9 tag, no env on the same image): a new revision" "false" "$(output running)"
+reset_stub "registry/learn-pali:h-new"
+out="$(step current GITHUB_REF_TYPE=branch GITHUB_REF_NAME=feat/x GITHUB_SHA=zz)"
+rc=$?
+assert_eq "current: inputs release-values.sh refuses fail the step" "1" "$rc"
+# 060 fix round 1 (F2, F4): a serving revision whose JSON cannot be read, or
+# that names no image, never kills the step and never skips: it falls open to
+# a deploy and the log says why.
+reset_stub "registry/learn-pali:h-new"
+printf 'not json' > "$STUB/raw-learn-pali-dev-00001-aaa"
+out="$(step current)"
+rc=$?
+assert_eq "current (revision JSON malformed): the step still exits 0" "0" "$rc"
+assert_eq "current (revision JSON malformed): a new revision is wanted" "false" "$(output running)"
+assert_eq "current (revision JSON malformed): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_match "current (revision JSON malformed): the log names the reason" "could not read the serving revision's image/release \\(.*\\): deploying a new revision" "$out"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '{"spec":{"containers":[{}]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+out="$(step current)"
+rc=$?
+assert_eq "current (revision names no image): the step still exits 0" "0" "$rc"
+assert_eq "current (revision names no image): a new revision is wanted" "false" "$(output running)"
+assert_match "current (revision names no image): the log names the reason" "could not read the serving revision's image/release \\(.*image.*\\): deploying a new revision" "$out"
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '{"spec":{"containers":[]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+out="$(step current)"
+rc=$?
+assert_eq "current (revision with no container): the step still exits 0" "0" "$rc"
+assert_eq "current (revision with no container): a new revision is wanted" "false" "$(output running)"
+# 060 fix 3 (H1): the image is the one to run, but the revision's env is of the
+# wrong type (a string, not a list): `release-values.sh same` cannot read it
+# (exit 2). The step deploys (fail open), says the read failed in its own line,
+# and never claims "another release" (that is the exit 1 case, tested above).
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '{"spec":{"containers":[{"image":"registry/learn-pali:h-new","env":"oops"}]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+out="$(step current)"
+rc=$?
+assert_eq "current (good image, env of the wrong type): the step still exits 0" "0" "$rc"
+assert_eq "current (good image, env of the wrong type): a new revision is wanted" "false" "$(output running)"
+assert_eq "current (good image, env of the wrong type): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_match "current (good image, env of the wrong type): its own line says the release could not be read" "could not read the serving revision's release.*: deploying a new revision" "$out"
+assert_absent "current (good image, env of the wrong type): never 'another release'" "another release" "$out"
+# The happy skip stays a skip (the pair of the two above).
+reset_stub "registry/learn-pali:h-new"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "current (readable, same image and release): still a skip" "true" "$(output running)"
+assert_absent "current (readable, same image and release): no could-not-read message" "could not read" "$out"
 reset_stub "registry/learn-pali:h-old"
 touch "$STUB/follow-latest"
 printf 'registry/learn-pali:h-old' > "$STUB/image-learn-pali-dev-00002-bbb"
@@ -949,8 +1176,27 @@ out="$(step deploy)"
 rc=$?
 assert_eq "deploy: succeeds" "0" "$rc"
 assert_match "deploy: --no-traffic with the tag" "run deploy learn-pali-dev .*--no-traffic --tag sha-abc1234" "$(calls)"
+assert_match "deploy: writes the release of a push to main onto the revision" "run deploy learn-pali-dev .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234( |$)" "$(calls)"
+assert_absent "deploy: never the set variant of the flag" "--set-env-vars" "$(calls)"
+assert_eq "deploy: one deploy call" "1" "$(grep -c '^gcloud run deploy' "$STUB/calls")"
 assert_eq "deploy: the tagged revision URL is an output" "https://sha-abc1234---x.a.run.app" "$(output url)"
 assert_eq "deploy: the new revision's name is an output" "learn-pali-dev-00002-bbb" "$(output revision)"
+# 060: a tag writes the tag and no sha; a dispatch of a branch writes both.
+reset_stub "registry/learn-pali:h-old"
+out="$(step deploy GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
+assert_match "deploy (tag v0.1.8): the release is the tag and an empty sha" "--update-env-vars LEARN_PALI_ENV=v0.1.8,LEARN_PALI_SHA=( |$)" "$(calls)"
+assert_absent "deploy (tag): never the set variant of the flag" "--set-env-vars" "$(calls)"
+reset_stub "registry/learn-pali:h-old"
+out="$(step deploy GITHUB_REF_TYPE=branch GITHUB_REF_NAME=feat/x)"
+assert_match "deploy (dispatch of feat/x): the release is the branch and the sha7" "--update-env-vars LEARN_PALI_ENV=feat/x,LEARN_PALI_SHA=abc1234( |$)" "$(calls)"
+# The same image already serving with another release: current says
+# running=false, and the deploy that follows writes the new env.
+reset_stub "registry/learn-pali:h-new"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+out="$(step current)"
+assert_eq "same image, another push: current wants a deploy" "false" "$(output running)"
+out="$(step deploy)"
+assert_match "same image, another push: the deploy writes the new sha, the image is the same" "run deploy learn-pali-dev .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
 reset_stub "registry/learn-pali:h-old"
 printf 'learn-pali-dev-00003-ccc' > "$STUB/latest-created"
 printf 'learn-pali-dev-00002-bbb' > "$STUB/tag-revision"
@@ -1044,6 +1290,31 @@ out="$(step check URL=https://sha-abc1234---x.a.run.app)"
 rc=$?
 assert_eq "check: a failed revision check fails the step" "1" "$rc"
 assert_absent "check: and the traffic is untouched" "update-traffic" "$(calls)"
+assert_absent "check: a plain failure does not claim another release" "another release" "$out"
+assert_match "check: the plain failure keeps its message" "failed rollout-check\\.sh" "$out"
+# 060: the gate is told the release deployed; exit 8 is a meta mismatch.
+assert_match "check: rollout-check gets the env and sha7 of a push to main" "^rollout-check-expect env=main sha=abc1234\$" "$(calls)"
+reset_stub "registry/learn-pali:h-old"
+step secret > /dev/null
+out="$(step check URL=https://sha-abc1234---x.a.run.app GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
+assert_match "check (tag): rollout-check gets the tag and an empty sha, the sha being set" "^rollout-check-expect env=v0.1.8 sha=\$" "$(calls)"
+reset_stub "registry/learn-pali:h-old"
+step secret > /dev/null
+printf '8' > "$STUB/rc-revision"
+out="$(step check URL=https://sha-abc1234---x.a.run.app)"
+rc=$?
+assert_eq "check (exit 8): fails the step" "1" "$rc"
+assert_match "check (exit 8): the message names the other release" "serves another release than the one deployed" "$out"
+assert_match "check (exit 8): and the metas it read" "learn-release" "$out"
+assert_absent "check (exit 8): the traffic is untouched" "update-traffic" "$(calls)"
+assert_eq "check (exit 8): one try, no retry" "1" "$(grep -c '^rollout-check revision' "$STUB/calls")"
+assert_absent "check (exit 8): not the plain message" "failed rollout-check" "$out"
+reset_stub "registry/learn-pali:h-old"
+step secret > /dev/null
+out="$(step check URL=https://sha-abc1234---x.a.run.app GITHUB_REF_NAME=)"
+rc=$?
+assert_eq "check: a refused release stops the step before the gate runs" "1" "$rc"
+assert_absent "check: and rollout-check is not called" "rollout-check revision" "$(calls)"
 rm -f "$STUB/rc-revision"
 printf 'learn-pali-dev-00003-zzz' > "$STUB/latest-ready"
 out="$(step traffic REVISION=learn-pali-dev-00002-bbb)"

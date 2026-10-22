@@ -19,6 +19,7 @@ async fn main() {
         }
     };
     println!("{}", origin.log_line());
+    println!("{}", learn_pali::release::ReleaseInfo::server().log_line());
 
     let conf = get_configuration(None).expect("leptos configuration");
     let options = conf.leptos_options;

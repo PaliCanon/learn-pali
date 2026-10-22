@@ -27,6 +27,7 @@ mod learn;
 pub mod origin;
 mod page;
 mod pages;
+pub mod release;
 mod seed;
 mod store;
 mod sync;
@@ -46,11 +47,6 @@ pub mod web_sync;
 #[cfg(any(feature = "ssr", feature = "web-sync"))]
 pub use web_sync::web_sync;
 
-// `build.rs` includes this same file (`#[path]`) for the env badge's pure
-// decisions; declared here too so `cargo test -p learn_pali` covers it.
-#[allow(dead_code)]
-mod git_info;
-
 // The placeholder-parity check `build.rs` runs on the locale files; built
 // here for the tests only, so its refusal is exercised
 // (`catalogue::tests`), not just its absence of a false alarm.
@@ -63,10 +59,18 @@ mod placeholders;
 /// from `<body>`: Cloudflare puts a decoy link before the app and scripts
 /// after it, and `hydrate_body` panics on the first (task 040, ui-lib
 /// 063). Sets `<html data-hydrated>` once done, which the deploy's
-/// rollout check reads.
+/// rollout check reads. The release the server wrote in `<head>` is read
+/// first and provided to the app (task 060).
 #[cfg(feature = "hydrate")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn hydrate() {
+    use leptos::prelude::*;
+
     console_error_panic_hook::set_once();
-    palicanon_ui_lib::hydrate(app::App);
+    // The release the server wrote in `<head>`, read before the app
+    // mounts: the badge is the server's, never recomputed here (task 060).
+    palicanon_ui_lib::hydrate(|| {
+        provide_context(release::ReleaseInfo::from_document());
+        view! { <app::App /> }
+    });
 }

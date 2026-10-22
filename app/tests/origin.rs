@@ -172,6 +172,7 @@ fn a_rejected_request_writes_nothing() {
     let wanted = [
         r#"eprintln!("learn-pali: {err}");"#,
         r#"println!("{}", origin.log_line());"#,
+        r#"println!("{}", learn_pali::release::ReleaseInfo::server().log_line());"#,
         r#"println!("learn-pali on http://{addr}");"#,
     ];
     assert_eq!(found.len(), wanted.len(), "main.rs writes: {found:?}");
