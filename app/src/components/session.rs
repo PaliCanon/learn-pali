@@ -40,8 +40,8 @@ use leptos::prelude::*;
 use leptos_i18n::{td, td_string};
 use palicanon_ui_lib::Language;
 use palicanon_ui_lib::{
-    Button, Dialog, Disclosed, Disclosure, EntryAction, Pali, PaliSize, PaliText, RevealCard,
-    SessionHeader, Size, Token, Variant, WordEntry, language_signal,
+    Button, Dialog, DialogSize, Disclosed, Disclosure, EntryAction, Pali, PaliSize, PaliText,
+    RevealCard, SessionHeader, Size, Token, Variant, WordEntry, language_signal,
 };
 
 use crate::backend::Backend;
@@ -415,7 +415,7 @@ fn StopDialog(
         <Dialog
             controls=stop
             title=title
-            layout="sm:max-w-md"
+            size=DialogSize::Popup
             footer=move || {
                 view! {
                     <Button variant=Variant::Chip on_click=move |_| stop.set_open(false)>
@@ -1608,6 +1608,27 @@ pub(crate) mod tests {
         let stop = &html[html[..at].rfind('<').expect(&html)..=at];
         assert!(stop.starts_with("<button"), "Stop is a button: {stop}");
         assert!(html.contains(r#"aria-label="Stop the session""#), "{html}");
+    }
+
+    /// 'Stop here?' is a popup, a small centred card on the phone as well
+    /// (ui-lib `DialogSize::Popup`), never the full-screen sheet.
+    #[test]
+    fn the_stop_dialog_is_a_popup_not_a_sheet() {
+        let html = render(kho(Facet::Meaning));
+        let panel = crate::test_support::tag_around(&html, r#"id="learn-review-stop""#);
+        assert!(panel.contains(r#"role="dialog""#), "{panel}");
+        let classes: Vec<&str> = panel
+            .split(r#"class=""#)
+            .nth(1)
+            .and_then(|rest| rest.split('"').next())
+            .expect(panel)
+            .split_whitespace()
+            .collect();
+        assert!(classes.contains(&"max-w-md"), "{panel}");
+        assert!(!classes.contains(&"h-full"), "{panel}");
+        assert!(!classes.contains(&"sm:max-w-md"), "{panel}");
+        let widths = classes.iter().filter(|c| c.contains("max-w-")).count();
+        assert_eq!(widths, 1, "exactly one max-w- utility: {panel}");
     }
 
     #[test]

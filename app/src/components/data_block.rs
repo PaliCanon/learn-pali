@@ -551,6 +551,16 @@ mod tests {
         assert!(!html.contains(">Replace<"), "{html}");
     }
 
+    /// The other dialogs of Learn stay full-screen sheets on the phone: only
+    /// 'Stop here?' is a popup.
+    #[test]
+    fn the_import_confirmation_stays_a_sheet() {
+        let html = confirm();
+        let panel = tag_around(&html, r#"id="pc-import""#);
+        assert!(panel.contains("h-full"), "{panel}");
+        assert!(!panel.contains("max-w-md"), "{panel}");
+    }
+
     #[test]
     fn the_import_confirmation_asks_before_replacing() {
         let html = confirm();
