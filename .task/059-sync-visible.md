@@ -1,11 +1,11 @@
 # 059 The sync says where it stands: automatic cycles, a status line, a hint
 
-status: review · rank: 6 · level: standard · type: feat · session: learn-pali-059-sync-visible · request: the user, 2026-10-18 (desktop check of the Drive sync) · after: []
+status: merged · rank: 6 · level: standard · type: feat · session: learn-pali-059-sync-visible · request: the user, 2026-10-18 (desktop check of the Drive sync) · after: []
 
 ## Workflow
 ```mermaid
 flowchart LR
-  Define["Define ✓ v5, user 2026-10-22"]:::done --> Plan["Plan ✓ 8 slices, 2 waves"]:::done --> Build["Build ✓ 8 slices, 6 lanes"]:::done --> Verify["Verify ✓ matrix on one tip (Log)"]:::done --> Review["Review ✓ 3 rounds, fix 3 checked"]:::done --> Fix1["Fix 1 ✓ F1-F12, matrix on 5bc1519"]:::done --> Review2["Review 2 ✗ G1-G7"]:::fail --> Fix2["Fix 2 ✓ matrix on 9d0c693"]:::done --> Review3["Review round 3 (last)"]:::todo --> Check["Check ✓ the user on dev"]:::done --> Merge:::todo --> Retro:::todo
+  Define["Define ✓ v5, user 2026-10-22"]:::done --> Plan["Plan ✓ 8 slices, 2 waves"]:::done --> Build["Build ✓ 8 slices, 6 lanes"]:::done --> Verify["Verify ✓ matrix on one tip (Log)"]:::done --> Review["Review ✓ 3 rounds, fix 3 checked"]:::done --> Fix1["Fix 1 ✓ F1-F12, matrix on 5bc1519"]:::done --> Review2["Review 2 ✗ G1-G7"]:::fail --> Fix2["Fix 2 ✓ matrix on 9d0c693"]:::done --> Review3["Review round 3 (last)"]:::todo --> Check["Check ✓ the user on dev"]:::done --> Merge["Merge ✓ 0ddfed7"]:::done --> Retro:::todo
   classDef done fill:#cfe8cf,stroke:#2e7d32
   classDef doing fill:#fff3bf,stroke:#b58900
   classDef todo fill:#eee,stroke:#999
@@ -123,5 +123,7 @@ F1 done (handle kept; premise did not hold for leptos 0.8.21), F2 done, F3 done,
 G1 done, G2 done, G3 done, G4 done (doc + four guards; G4(ii) pinned to the real behaviour), G5 done, G6 done, G7 done (once guard; the Effect reads the account through `cycle.mount()`, so it could not be promised untracked). Ruled-out list unchanged. Round 3 reads the fix diff only.
 
 ## Merge
+0ddfed7
 | Check (orchestrator) | done | fix 3 diff read: terminal reset after the held check, a held gesture sets pending and returns; the join comment; three hold tests, four mutations red; lib 679; branch deployed to dev by workflow_dispatch for the user's check |
 | Check | done | the user on dev (feat/sync-visible · 111dc4c, redeployed after the main push wiped it), 2026-10-22: «le sync du deck a l'air bien» (go) |
+| Merge | done | 0ddfed7 on main (squash), pushed (dev deploys); prod by tag v0.1.10 |
