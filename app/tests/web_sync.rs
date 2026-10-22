@@ -8,7 +8,8 @@
 //! the file is created once (multipart) then updated (media), every call
 //! with the Bearer token; a refused token turns the account remembered;
 //! the second sign-in passes the email as `login_hint`; a blocked window is
-//! `Popup`; sign out revokes the token and forgets the account; a reload
+//! `Popup`; an expired token pauses the account at `refresh`, with no
+//! request; sign out revokes the token and forgets the account; a reload
 //! finds the account remembered.
 //!
 //! Run with `wasm-bindgen-test-runner` and a headless Chrome:
@@ -81,7 +82,7 @@ const google = { accounts: { oauth2: {
       if (window.__drive.popupFails) {
         setTimeout(() => config.error_callback({ type: 'popup_failed_to_open' }), 0);
       } else {
-        setTimeout(() => config.callback({ access_token: 'fake-token', expires_in: 3599 }), 0);
+        setTimeout(() => config.callback({ access_token: 'fake-token', expires_in: window.__drive.expiresIn ?? 3599 }), 0);
       }
     } };
   },
@@ -304,6 +305,67 @@ async fn refused_then_signed_in_again(sync: &SharedSync) {
     );
 }
 
+/// Waits `ms` milliseconds of real time.
+async fn wait(ms: i32) {
+    let wait = Promise::new(&mut |resolve, _| {
+        web_sys::window()
+            .expect("a window")
+            .set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
+            .expect("a timer");
+    });
+    JsFuture::from(wait).await.expect("the timer");
+}
+
+/// The token's expiry pauses the account (task 059): `refresh` turns a
+/// SignedIn account whose token is no longer valid into Remembered, with
+/// no request and the remembered email untouched; the next call is
+/// refused at once, and a new sign-in works. Before the expiry `refresh`
+/// changes nothing. (A token of `expires_in: 61` lives one second.)
+async fn expiry_pauses_the_account(sync: &SharedSync) {
+    js("window.__drive.expiresIn = 61");
+    assert_eq!(sign_in(sync).await, Ok(()));
+    ticks().await;
+    sync.refresh();
+    assert_eq!(
+        sync.account().get_untracked(),
+        SyncAccount::SignedIn { email: email() },
+        "before the expiry refresh changes nothing"
+    );
+    wait(1200).await;
+    let calls = js("return window.__drive.calls.length");
+    sync.refresh();
+    assert_eq!(
+        sync.account().get_untracked(),
+        SyncAccount::Remembered { email: email() },
+        "the expired token pauses the account"
+    );
+    assert_eq!(
+        js("return window.__drive.calls.length"),
+        calls,
+        "no request is wasted"
+    );
+    assert_eq!(
+        js_string("return localStorage.getItem('pc_learn_sync')"),
+        email(),
+        "the remembered email is untouched"
+    );
+    assert_eq!(pull(sync).await, Err(SyncError::SignedOut));
+    assert_eq!(js("return window.__drive.calls.length"), calls, "no call");
+    js("window.__drive.expiresIn = undefined");
+    assert_eq!(sign_in(sync).await, Ok(()), "a new sign-in works");
+    ticks().await;
+    assert_eq!(
+        sync.account().get_untracked(),
+        SyncAccount::SignedIn { email: email() }
+    );
+    sync.refresh();
+    assert_eq!(
+        sync.account().get_untracked(),
+        SyncAccount::SignedIn { email: email() },
+        "the fresh token is valid"
+    );
+}
+
 /// A sign-out while a pull is on its way: the pull's late 401 neither
 /// brings the account back as remembered (no Sync chip after a sign-out)
 /// nor, after a new sign-in, drops the new token.
@@ -343,6 +405,7 @@ async fn the_web_transport_signs_in_syncs_and_signs_out_against_a_fake_google() 
     first_sign_in(&sync).await;
     create_read_update(&sync).await;
     refused_then_signed_in_again(&sync).await;
+    expiry_pauses_the_account(&sync).await;
 
     js("window.__drive.popupFails = true");
     assert_eq!(sign_in(&sync).await, Err(SyncError::Popup));

@@ -27,6 +27,9 @@
 //! ([`StoreWrites`], the same tab: the `storage` event reaches the others
 //! only).
 //!
+//! The sync status line and the one-time sync hint close the column, after
+//! the home's content (user, 2026-10-22: « sync, mets-le en bas »).
+//!
 //! The review runs in place: a CTA swaps the home's content for a session
 //! ([`crate::components::session`]) under the brand, and Stop or 'Back
 //! home' swap it back (no route, no history entry: the browser's Back
@@ -50,7 +53,8 @@ use crate::components::data_block::StoreWrites;
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
 use crate::components::save_strip::SaveStrip;
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
-use crate::components::sync_panel::SyncChip;
+use crate::components::sync_hint::SyncHint;
+use crate::components::sync_status::SyncStatusLine;
 use crate::components::term_list::{
     AddRow, Orphans, StageStrip, StageTerms, next_review, orphan_rows,
 };
@@ -160,13 +164,13 @@ pub(crate) fn Home(
     base: Signal<String>,
 ) -> impl IntoView {
     let page = Page::new();
+    let finished = session_finished(page.mode);
     view! {
         <div
             data-page="home"
             class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] flex-1 sm:justify-center"
         >
             <SaveStrip />
-            {move || matches!(page.mode.get(), Mode::Home).then(|| view! { <SyncChip /> })}
             {move || {
                 let mode = page.mode.get();
                 let model = match mode {
@@ -187,8 +191,43 @@ pub(crate) fn Home(
                     />
                 }
             }}
+            {move || {
+                matches!(page.mode.get(), Mode::Home)
+                    .then(|| {
+                        view! {
+                            <SyncStatusLine />
+                            <SyncHint finished=finished />
+                        }
+                    })
+            }}
         </div>
     }
+}
+
+/// Whether `mode` is a session that ran out of questions after at least
+/// one answer (the sync hint's 'finished'); false at home, on a progress
+/// that cannot be used, and for a session with nothing due, which ends
+/// before it asks anything.
+fn session_over(mode: Mode) -> bool {
+    match mode {
+        Mode::Session(Phase::Running(run)) => {
+            run.with(|run| run.current().is_none() && run.done() > 0)
+        }
+        Mode::Home | Mode::Session(Phase::Broken(_)) => false,
+    }
+}
+
+/// Whether a session was finished in this tab: latched at the first one,
+/// for the sync hint (shown after the first finished session). Stop before
+/// the end does not count.
+fn session_finished(mode: RwSignal<Mode>) -> Signal<bool> {
+    let seen = RwSignal::new(false);
+    Effect::new(move |_| {
+        if session_over(mode.get()) {
+            seen.set(true);
+        }
+    });
+    seen.into()
 }
 
 /// The page's state and what changes it.
@@ -1328,6 +1367,57 @@ mod tests {
         }
     }
 
+    /// [`Home`] at `/` with a mounted sync cycle over a fake transport, at
+    /// 'Syncing…': the status line renders.
+    fn render_synced() -> String {
+        use crate::backend::{SharedSync, SyncAccount};
+        use crate::sync::SyncStatus;
+        use crate::test_support::FakeTransport;
+        use std::rc::Rc;
+
+        Owner::new()
+            .with(|| {
+                palicanon_ui_lib::provide_language().set(Language::En);
+                provide_fakes(Load::Empty);
+                provide_context(RequestUrl::new("/"));
+                let transport: SharedSync =
+                    Rc::new(FakeTransport::new(SyncAccount::SignedIn { email: None }));
+                let cycle =
+                    SyncCycle::new(transport, Backend::current(), || {}, String::new, |_, _| {});
+                cycle.set_status(SyncStatus::Syncing);
+                cycle.set_mounted();
+                provide_context(cycle);
+                view! {
+                    <Router>
+                        <Home base=Signal::stored("/".to_owned()) />
+                    </Router>
+                }
+                .to_html()
+            })
+            .replace("<!>", "")
+    }
+
+    /// The sync status line sits at the bottom of the home's column (user,
+    /// 2026-10-22: « sync, mets-le en bas plutôt »): after the home's whole
+    /// content (the CTA row, and the strip and list of a loaded state, all
+    /// inside `data-home-state`), a quiet row with room above it, not under
+    /// the brand. The sync hint banner shares its place and moves with it.
+    #[test]
+    fn the_sync_status_line_sits_at_the_bottom_of_the_home() {
+        let html = render_synced();
+        let line = at(&html, "data-sync-line");
+        let state = at(&html, "data-home-state");
+        let content = element_at(&html, state);
+        let content_end = html[..state].rfind("<div").expect(&html) + content.len();
+        assert!(line >= content_end, "after the home's content: {html}");
+        assert!(line > at(&html, "data-cta-row"), "{html}");
+        assert!(line > at(&html, "PaliLearn"), "{html}");
+        let tag = tag_around(&html, "data-sync-line");
+        let classes: Vec<&str> = tag.split(['"', ' ']).collect();
+        assert!(classes.contains(&"mt-6"), "room above the line: {tag}");
+        assert!(html.contains(r#"role="status""#), "{html}");
+    }
+
     /// HC: no state has a headline; one button is enough.
     #[test]
     fn no_state_has_a_headline() {
@@ -2040,20 +2130,25 @@ mod tests {
         }
     }
 
+    /// The timers a sync cycle armed, waiting to be fired by the test.
+    type ArmedTimers = std::rc::Rc<std::cell::RefCell<Vec<Box<dyn FnOnce()>>>>;
+
     /// A session holds the sync (a cycle asked during it waits), and back
-    /// home releases it: the asked cycle runs then.
+    /// home releases it: the asked cycle arms, then runs.
     #[test]
     fn a_session_holds_the_sync_until_back_home() {
         use crate::test_support::FakeTransport;
         Owner::new().with(|| {
             let (_store, _files) = provide_fakes(Load::Ok(progress_fixture()));
             let transport = FakeTransport::signed_in();
+            let timers: ArmedTimers = std::rc::Rc::default();
+            let armed = std::rc::Rc::clone(&timers);
             let sync = SyncCycle::new(
                 std::rc::Rc::new(transport.clone()),
                 Backend::current(),
                 || (),
                 String::new,
-                |_, _| (),
+                move |_, callback| armed.borrow_mut().push(callback),
             );
             let owner = Owner::current().expect("an owner");
             let mode = RwSignal::new(Mode::Home);
@@ -2065,7 +2160,46 @@ mod tests {
             assert_eq!(transport.pull_calls(), 0, "held during the session");
             back_home(|| (), mode, Some(sync)).run(());
             assert!(matches!(mode.get_untracked(), Mode::Home));
+            assert_eq!(transport.pull_calls(), 0, "armed back home, not at once");
+            let due: Vec<_> = timers.borrow_mut().drain(..).collect();
+            for callback in due {
+                callback();
+            }
             assert_eq!(transport.pull_calls(), 1, "released back home");
+        });
+    }
+
+    /// The hint's 'first finished session' (assumption: the run has no
+    /// current question, as the Finished view tests): never at home, never
+    /// on a broken progress, never while questions remain.
+    #[test]
+    fn a_session_is_over_only_when_it_has_no_question_left() {
+        Owner::new().with(|| {
+            let (_store, _files) = provide_fakes(Load::Ok(progress_fixture()));
+            let owner = Owner::current().expect("an owner");
+            assert!(!session_over(Mode::Home));
+            let running = Mode::Session(start_phase(&owner, Backend::current()));
+            assert!(!session_over(running), "the fixture has cards due");
+            let Mode::Session(Phase::Running(run)) = running else {
+                panic!("a running session");
+            };
+            let backend = Backend::current();
+            let mut guard = 0;
+            while run.with_untracked(|run| run.current().is_some()) {
+                run.update(|run| run.grade(learn_core::session::Answer::Pass, |s| backend.save(s)));
+                guard += 1;
+                assert!(guard < 500, "the run never ended");
+            }
+            assert!(session_over(running), "graded to its end");
+            let (_store, _files) = provide_fakes(Load::Empty);
+            let nothing_due = Mode::Session(start_phase(&owner, Backend::current()));
+            assert!(
+                !session_over(nothing_due),
+                "an empty store: nothing to ask, no answer given"
+            );
+            let (_store, _files) = provide_fakes(Load::Invalid { raw: "{".into() });
+            let broken = Mode::Session(start_phase(&owner, Backend::current()));
+            assert!(!session_over(broken), "a progress that cannot be used");
         });
     }
 

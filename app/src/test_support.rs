@@ -386,6 +386,13 @@ struct TransportInner {
     sign_outs: Cell<usize>,
     /// The failure the next answered pull or push gives instead.
     failure: RefCell<Option<SyncError>>,
+    /// How many times the cycle asked the transport to re-read its account.
+    refreshes: Cell<usize>,
+    /// The next refresh finds the access gone: `SignedIn` turns `Remembered`.
+    expires: Cell<bool>,
+    /// The next refresh finds the refresh token refused: the account turns
+    /// `SignedOut` (the app's Keychain token revoked).
+    refuses: Cell<bool>,
 }
 
 /// A [`SyncTransport`] the tests drive: every call waits until the test
@@ -407,7 +414,33 @@ impl FakeTransport {
             pull_calls: Cell::new(0),
             sign_outs: Cell::new(0),
             failure: RefCell::new(None),
+            refreshes: Cell::new(0),
+            expires: Cell::new(false),
+            refuses: Cell::new(false),
         }))
+    }
+
+    /// Sets who is signed in (a reload, a revoked token, an expiry).
+    pub(crate) fn set_account(&self, account: SyncAccount) {
+        self.0.account.set(account);
+    }
+
+    /// The next [`SyncTransport::refresh`] finds the access gone: the
+    /// signed-in account turns remembered, as the web token's expiry does.
+    pub(crate) fn expire_on_refresh(&self) {
+        self.0.expires.set(true);
+    }
+
+    /// The next [`SyncTransport::refresh`] finds the refresh token refused:
+    /// the account turns signed out, as the desktop transport reports a
+    /// revoked token.
+    pub(crate) fn refuse_on_refresh(&self) {
+        self.0.refuses.set(true);
+    }
+
+    /// How many times the transport was asked to re-read its account.
+    pub(crate) fn refreshes(&self) -> usize {
+        self.0.refreshes.get()
     }
 
     /// A signed-in transport (`learner@example.org`).
@@ -515,6 +548,17 @@ impl SyncTransport for FakeTransport {
 
     fn account(&self) -> Signal<SyncAccount> {
         self.0.account.into()
+    }
+
+    fn refresh(&self) {
+        self.0.refreshes.set(self.0.refreshes.get() + 1);
+        if self.0.refuses.replace(false) {
+            self.0.account.set(SyncAccount::SignedOut);
+        } else if self.0.expires.replace(false)
+            && let SyncAccount::SignedIn { email } = self.0.account.get_untracked()
+        {
+            self.0.account.set(SyncAccount::Remembered { email });
+        }
     }
 
     fn pull(&self, on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {

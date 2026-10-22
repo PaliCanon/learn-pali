@@ -135,6 +135,10 @@ pub enum SyncError {
     Network,
     /// Google answered with an error: what it said, for the reason line.
     Drive(String),
+    /// The device's own secure storage failed (the app's Keychain denied
+    /// or locked): worded as local storage, never as a Google Drive
+    /// refusal. Retry may succeed once the storage is available.
+    Storage,
 }
 
 /// Where the progress is copied between devices: the learner's Google
@@ -172,10 +176,64 @@ pub trait SyncTransport {
     /// Google's window inside its gesture. No Google call, no token asked.
     /// Nothing by default.
     fn prepare(&self) {}
+
+    /// Re-reads the account against the clock (task 059): a transport
+    /// whose access can run out on its own (the site's token, valid about
+    /// an hour) turns [`SyncAccount::SignedIn`] into
+    /// [`SyncAccount::Remembered`] here when the access is gone, with no
+    /// request. Called at each automatic ask and at the home status line's
+    /// minute refresh. Nothing by default (the app never pauses).
+    fn refresh(&self) {}
 }
 
 /// A shared [`SyncTransport`].
 pub type SharedSync = Rc<dyn SyncTransport>;
+
+/// Where the host remembers that the 'sync on several devices' hint was
+/// answered (task 059): shown once after the first finished session, then
+/// remembered when the learner dismissed it or signed in. An optional prop
+/// of [`LearnProvider`](crate::fragment::LearnProvider): the site plugs
+/// `localStorage[pc_learn_hint]`; a host with none keeps the flag in memory
+/// for the tab (the hint then comes back after a reload).
+pub trait HintMemory {
+    /// Whether the hint was already answered.
+    fn seen(&self) -> bool;
+
+    /// Remembers it. False when the write failed: the caller then keeps a
+    /// flag in memory for this tab.
+    fn remember(&self) -> bool;
+}
+
+/// A shared [`HintMemory`].
+pub type SharedHint = Rc<dyn HintMemory>;
+
+/// The host's [`HintMemory`], as a `Copy` handle in the Leptos context
+/// (provided only when the host gave one).
+#[derive(Clone, Copy)]
+pub(crate) struct Hint(StoredValue<SharedHint, LocalStorage>);
+
+impl Hint {
+    /// A handle over `memory`.
+    pub(crate) fn new(memory: SharedHint) -> Self {
+        Hint(StoredValue::new_local(memory))
+    }
+
+    /// The handle the nearest provider gave; none when the host gave no
+    /// memory.
+    pub(crate) fn current() -> Option<Self> {
+        use_context::<Hint>()
+    }
+
+    /// [`HintMemory::seen`].
+    pub(crate) fn seen(self) -> bool {
+        self.0.get_value().seen()
+    }
+
+    /// [`HintMemory::remember`].
+    pub(crate) fn remember(self) -> bool {
+        self.0.get_value().remember()
+    }
+}
 
 /// A shared [`ProgressStore`].
 pub type SharedStore = Rc<dyn ProgressStore>;
@@ -191,6 +249,10 @@ pub(crate) struct Backend {
     store: StoredValue<SharedStore, LocalStorage>,
     /// The file transfer.
     files: StoredValue<SharedFiles, LocalStorage>,
+    /// Called after each [`save`](Self::save) (not after
+    /// [`save_merge`](Self::save_merge)): the sync's 'a change was saved'
+    /// ask.
+    saved: StoredValue<Option<Rc<dyn Fn()>>, LocalStorage>,
 }
 
 impl Backend {
@@ -199,6 +261,7 @@ impl Backend {
         Backend {
             store: StoredValue::new_local(store),
             files: StoredValue::new_local(files),
+            saved: StoredValue::new_local(None),
         }
     }
 
@@ -217,9 +280,27 @@ impl Backend {
         self.store.get_value().load()
     }
 
-    /// [`ProgressStore::save`].
+    /// [`ProgressStore::save`], a change the learner made: the listener
+    /// of [`on_saved`](Self::on_saved) runs after it. Any new save path
+    /// asks the sync by default.
     pub(crate) fn save(self, state: &State) {
+        self.save_merge(state);
+        if let Some(saved) = self.saved.get_value() {
+            saved();
+        }
+    }
+
+    /// [`ProgressStore::save`], the sync cycle's own merge: the cycle
+    /// carries the origin 'sync' and never asks itself for another cycle
+    /// (two devices cannot ping-pong).
+    pub(crate) fn save_merge(self, state: &State) {
         self.store.get_value().save(state);
+    }
+
+    /// Registers the listener of [`save`](Self::save): one per backend,
+    /// the latest wins.
+    pub(crate) fn on_saved(self, callback: impl Fn() + 'static) {
+        self.saved.set_value(Some(Rc::new(callback)));
     }
 
     /// [`ProgressStore::status`].
@@ -281,6 +362,59 @@ mod tests {
             backend.on_change(move || seen.set(seen.get() + 1));
             store.changed_outside();
             assert_eq!(calls.get(), 1);
+        });
+    }
+
+    /// Origin rule (design): a learner's save asks the sync, the cycle's
+    /// own merge save does not, and the store's changed-elsewhere event
+    /// does not either.
+    #[test]
+    fn a_save_asks_and_a_merge_save_and_a_change_elsewhere_do_not() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            let backend = backend_of(&store, &FakeFiles::default());
+            let asked = std::rc::Rc::new(std::cell::Cell::new(0));
+            let seen = std::rc::Rc::clone(&asked);
+            backend.on_saved(move || seen.set(seen.get() + 1));
+            backend.save(&State::empty());
+            assert_eq!(asked.get(), 1, "a save asks");
+            backend.save_merge(&State::empty());
+            assert_eq!(asked.get(), 1, "the merge save never asks");
+            assert_eq!(store.saved().len(), 2, "both reached the store");
+            store.changed_outside();
+            assert_eq!(asked.get(), 1, "a change elsewhere never asks");
+        });
+    }
+
+    #[test]
+    fn a_save_with_no_listener_just_saves() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Empty);
+            let backend = backend_of(&store, &FakeFiles::default());
+            backend.save(&State::empty());
+            assert_eq!(store.saved().len(), 1);
+        });
+    }
+
+    #[test]
+    fn the_hint_handle_forwards_to_the_hosts_memory() {
+        use std::cell::Cell;
+        struct Memory(Cell<bool>);
+        impl HintMemory for Memory {
+            fn seen(&self) -> bool {
+                self.0.get()
+            }
+            fn remember(&self) -> bool {
+                self.0.set(true);
+                true
+            }
+        }
+        Owner::new().with(|| {
+            assert!(Hint::current().is_none(), "none until a host gave one");
+            let hint = Hint::new(std::rc::Rc::new(Memory(Cell::new(false))));
+            assert!(!hint.seen());
+            assert!(hint.remember());
+            assert!(hint.seen());
         });
     }
 

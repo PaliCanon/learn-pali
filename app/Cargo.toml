@@ -44,6 +44,10 @@ web-sys = { version = "0.3", optional = true, features = [
   "Element",
   "KeyboardEvent",
   "Location",
+  # The sync's events and clocks (task 059): navigator.onLine,
+  # performance.now() for the monotonic gap.
+  "Navigator",
+  "Performance",
 ] }
 js-sys = { version = "0.3", optional = true }
 # The web sync's Drive calls (`fetch`) are awaited (task 050); already in the

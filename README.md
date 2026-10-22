@@ -24,7 +24,7 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `app/locales/` | UI translations: en.json, fr.json, vi.json. |
 | `app/style/` | Stylesheet (main.css), imports ui-lib's theme. |
 | `app/public/` | Static assets: favicon and logo. |
-| `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and of the build (no_build_git.rs: the image reads no git), the release read from the document and the fragment in a real browser (release_document.rs and csr.rs, wasm32 only). |
+| `app/tests/` | Integration tests: asset load, origin guard, the grep gates of the feature names (cfg_gates.rs) and of the build (no_build_git.rs: the image reads no git), the release read from the document, the fragment, the sync's browser triggers and the hint in a real browser (release_document.rs, csr.rs, sync_triggers.rs, sync_hint.rs; wasm32 only). |
 | `app/Dockerfile` | Container image build: cargo leptos build, debian runtime, non-root user, port 8080. |
 | `core/` | Crate `learn_core`, the learning loop library. `serde` only; builds for native and wasm32. |
 | `core/src/` | Learning modules: deck, Leitner stages, session, progress state, facets, word forms, shuffle, stats, date math, the SuttaCentral link of a passage by language (suttacentral.rs). |
@@ -230,6 +230,15 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER
 # The release read from the document's metas, same runner (task 060):
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
   cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test release_document
+# The sync's browser triggers, the real listeners and the tick driven by
+# dispatched events: the open, visibilitychange, focus and online ask, a hidden
+# page asks nothing and gets no tick, a second install adds no listener (task 059):
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
+  cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test sync_triggers
+# The one-time sync hint (shown after the first finished session, answered for
+# good by a sign-in), in a page of its own (task 059):
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
+  cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test sync_hint
 bash scripts/csr-without-web-store.sh   # the csr build holds nothing of the web store
 bash scripts/rollout-check.test.sh && bash scripts/release-values.test.sh
 bash infra/scripts/origin-secret.test.sh && bash infra/scripts/lifecycle.test.sh

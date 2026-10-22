@@ -146,6 +146,18 @@ jobs:
       # release metas (learn-release-env, learn-release-sha) of the document.
       - working-directory: learn-pali
         run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test release_document
+      # tests/sync_triggers.rs (task 059): the sync's browser triggers (open,
+      # visibilitychange, focus, online, the tick skipped while hidden), the real
+      # listeners driven by dispatched events.
+      - working-directory: learn-pali
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test sync_triggers
+        env:
+          CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
+      # tests/sync_hint.rs (task 059): the one-time hint after the first finished
+      # session, and a sign-in answering it for good (its Effect), in a page of
+      # its own: the answered flag is the tab's.
+      - working-directory: learn-pali
+        run: CHROMEDRIVER="$CHROMEWEBDRIVER/chromedriver" cargo test --locked -p learn_pali --features csr --target wasm32-unknown-unknown --test sync_hint
         env:
           CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER: wasm-bindgen-test-runner
       - working-directory: learn-pali

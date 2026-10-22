@@ -31,6 +31,13 @@ pub mod release;
 mod seed;
 mod store;
 mod sync;
+mod sync_pacing;
+mod sync_triggers;
+// The browser triggers' test door (`tests/sync_triggers.rs` drives the real
+// glue through it); hidden, not part of the API.
+#[cfg(feature = "browser")]
+#[doc(hidden)]
+pub use sync_triggers::__sync_triggers_door;
 #[cfg(test)]
 mod test_support;
 mod today;
@@ -39,7 +46,7 @@ mod today;
 #[cfg(any(feature = "ssr", feature = "web-store"))]
 mod web;
 #[cfg(any(feature = "ssr", feature = "web-store"))]
-pub use web::{web_files, web_store};
+pub use web::{web_files, web_hint, web_store};
 // The site's sync through Google Drive (task 050): nothing of it is in a
 // `csr` build (the app syncs through its own transport).
 #[cfg(any(feature = "ssr", feature = "web-sync"))]

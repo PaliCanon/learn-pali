@@ -9,5 +9,7 @@ pub mod new_terms;
 pub mod passage_badge;
 pub mod save_strip;
 pub mod session;
+pub mod sync_hint;
 pub mod sync_panel;
+pub mod sync_status;
 pub mod term_list;

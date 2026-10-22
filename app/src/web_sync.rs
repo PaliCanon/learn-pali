@@ -192,6 +192,27 @@ pub(crate) fn token_of(
     }
 }
 
+/// The account to turn into when the token has expired: `Remembered`
+/// (the email kept) when `account` is `SignedIn` and `token` is missing or
+/// no longer valid at `now`; `None` when nothing changes (signed out,
+/// already remembered, or a valid token). The paused state is derived from
+/// the account, never from a failed call, so no request is wasted.
+pub(crate) fn expired(
+    account: &SyncAccount,
+    token: Option<&Token>,
+    now: f64,
+) -> Option<SyncAccount> {
+    let SyncAccount::SignedIn { email } = account else {
+        return None;
+    };
+    if token.is_some_and(|token| token.valid(now)) {
+        return None;
+    }
+    Some(SyncAccount::Remembered {
+        email: email.clone(),
+    })
+}
+
 /// The failure of a token client's `error_callback`, by its `type`.
 pub(crate) fn sign_in_error(kind: Option<&str>) -> SyncError {
     match kind {
@@ -322,6 +343,46 @@ mod tests {
         );
         assert_eq!(sign_in_error(Some("popup_closed")), SyncError::Cancelled);
         assert_eq!(sign_in_error(None), SyncError::Cancelled);
+    }
+
+    /// Design (059): "the web transport turns `SignedIn` into Remembered when
+    /// token.valid(now) fails". Mutations it does not catch: a `refresh`
+    /// that never calls `expired` (the browser step does), a wrong clock.
+    #[test]
+    fn a_signed_in_account_with_no_valid_token_turns_remembered() {
+        let token = Token {
+            access: "t".into(),
+            expires_at: 5000.0,
+        };
+        let signed_in = |email: Option<&str>| SyncAccount::SignedIn {
+            email: email.map(str::to_owned),
+        };
+        let remembered = |email: Option<&str>| {
+            Some(SyncAccount::Remembered {
+                email: email.map(str::to_owned),
+            })
+        };
+        let a = Some("a@b.c");
+        assert_eq!(expired(&signed_in(a), Some(&token), 4999.0), None, "valid");
+        assert_eq!(
+            expired(&signed_in(a), Some(&token), 5000.0),
+            remembered(a),
+            "valid is now < expires_at: at the instant it is over"
+        );
+        assert_eq!(expired(&signed_in(a), Some(&token), 9000.0), remembered(a));
+        assert_eq!(expired(&signed_in(a), None, 0.0), remembered(a), "no token");
+        assert_eq!(expired(&signed_in(None), None, 0.0), remembered(None));
+        for account in [
+            SyncAccount::Remembered {
+                email: a.map(str::to_owned),
+            },
+            SyncAccount::Remembered { email: None },
+        ] {
+            assert_eq!(expired(&account, None, 0.0), None, "already remembered");
+            assert_eq!(expired(&account, Some(&token), 9000.0), None);
+        }
+        assert_eq!(expired(&SyncAccount::SignedOut, None, 0.0), None);
+        assert_eq!(expired(&SyncAccount::SignedOut, Some(&token), 9000.0), None);
     }
 
     #[test]

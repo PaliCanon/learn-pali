@@ -14,7 +14,7 @@ use web_sys::{Headers, Request, RequestInit, Response};
 
 use super::{
     CLIENT_ID, GIS_SCRIPT, REMEMBER_KEY, Token, USERINFO_URL, checked, created_id, email_of,
-    first_file_id, remembered, scope, sign_in_error, token_of, userinfo_email,
+    expired, first_file_id, remembered, scope, sign_in_error, token_of, userinfo_email,
 };
 use crate::backend::{SharedSync, SyncAccount, SyncError, SyncTransport};
 use crate::drive_location::{CREATE_URL, create_body, list_url, read_url, update_url};
@@ -103,6 +103,22 @@ impl SyncTransport for WebSync {
 
     fn account(&self) -> Signal<SyncAccount> {
         self.0.account.into()
+    }
+
+    /// The account against the clock: a signed-in account whose token has
+    /// expired is remembered (paused). No request, no timer, no Google
+    /// call; the remembered email in storage is untouched.
+    fn refresh(&self) {
+        let now = js_sys::Date::now();
+        let next = expired(
+            &self.0.account.get_untracked(),
+            self.0.token.borrow().as_ref(),
+            now,
+        );
+        if let Some(next) = next {
+            *self.0.token.borrow_mut() = None;
+            self.0.account.set(next);
+        }
     }
 
     fn pull(&self, on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {

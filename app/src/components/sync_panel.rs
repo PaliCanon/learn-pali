@@ -1,10 +1,10 @@
 //! The sync's UI (task 050): [`SyncPanel`] in Settings' 'Your progress'
-//! (in `ProgressActions`, inside `LearnSettings`), and [`SyncChip`] on the
-//! home. Both render nothing when the host gave no transport
-//! ([`SyncCycle::current`] is none: nothing changes from a device without
-//! sync), and nothing before the cycle is mounted on the client: the
-//! site's server, built without `web-sync`, has no transport and paints
-//! the same.
+//! (in `ProgressActions`, inside `LearnSettings`). It renders nothing when
+//! the host gave no transport ([`SyncCycle::current`] is none: nothing
+//! changes from a device without sync), and nothing before the cycle is
+//! mounted on the client: the site's server, built without `web-sync`, has
+//! no transport and paints the same. The home's line is
+//! [`SyncStatusLine`](crate::components::sync_status::SyncStatusLine).
 //!
 //! Signed out, the panel offers 'Sync with Google Drive' and says what is
 //! stored where. Signed in (or remembered, the site after a reload), it
@@ -13,8 +13,6 @@
 //! 'Sign out'; a Drive copy that could not be read is offered for download.
 //! Remembered with no token at hand, it also says that Sign out cannot
 //! revoke the access from here, with a link to the Google account.
-//! The chip shows on the home while the account is remembered with no
-//! token at hand: its tap asks Google for one, in the gesture, then syncs.
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
@@ -181,6 +179,7 @@ fn SyncState(
             }
             SyncStatus::Failed(error) => not_synced(locale, &error_reason(locale, &error)),
             SyncStatus::Refused(refusal) => not_synced(locale, refusal_reason(locale, refusal)),
+            SyncStatus::Offline => muted(td_string!(locale, sync_offline).to_string()),
             SyncStatus::DriveNewer => alert(td_string!(locale, sync_drive_newer).to_string()),
             SyncStatus::DriveUnreadable { raw } => {
                 view! { <DriveUnreadable backend=backend raw=raw /> }.into_any()
@@ -215,7 +214,7 @@ fn not_synced(locale: Locale, reason: &str) -> AnyView {
 }
 
 /// Why a call of the transport failed, in words.
-fn error_reason(locale: Locale, error: &SyncError) -> String {
+pub(crate) fn error_reason(locale: Locale, error: &SyncError) -> String {
     match error {
         SyncError::SignedOut => td_string!(locale, sync_error_signed_out).to_string(),
         SyncError::Cancelled => td_string!(locale, sync_error_cancelled).to_string(),
@@ -224,6 +223,7 @@ fn error_reason(locale: Locale, error: &SyncError) -> String {
         SyncError::Drive(detail) => {
             td_string!(locale, sync_error_drive, detail = detail).to_string()
         }
+        SyncError::Storage => td_string!(locale, sync_error_storage).to_string(),
     }
 }
 
@@ -261,32 +261,10 @@ fn DriveUnreadable(
     }
 }
 
-/// The home's 'Sync' chip: shown while the account is remembered with no
-/// token at hand; its tap asks Google for one in the gesture, then syncs.
-/// Nothing otherwise.
-#[component]
-pub(crate) fn SyncChip() -> impl IntoView {
-    let t = strings();
-    let sync = SyncCycle::current();
-    move || {
-        let sync = sync.filter(|sync| sync.mounted())?;
-        matches!(sync.account().get(), SyncAccount::Remembered { .. }).then(|| {
-            // The chip shown: Google's script is readied for its tap.
-            Effect::new(move |_| sync.prepare());
-            view! {
-                <div class="flex justify-center">
-                    <Button variant=Variant::Chip on_click=move |_| sync.sync_now()>
-                        {move || td_string!(t.locale(), sync_chip)}
-                    </Button>
-                </div>
-            }
-        })
-    }
-}
-
 /// These tests render markup on the server: they need `ssr`.
 #[cfg(all(test, feature = "ssr"))]
 mod tests {
+    use std::collections::BTreeSet;
     use std::rc::Rc;
 
     use palicanon_ui_lib::Language;
@@ -340,14 +318,8 @@ mod tests {
         )
     }
 
-    fn chip(account: SyncAccount) -> String {
-        render(Some((account, SyncStatus::Idle)), Language::En, || {
-            view! { <SyncChip /> }
-        })
-    }
-
     /// Before the provider is mounted on the client (the server's paint,
-    /// the first hydration pass) the panel and the chip render nothing, so
+    /// the first hydration pass) the panel renders nothing, so
     /// the server, which has no transport, paints the same.
     #[test]
     fn nothing_is_rendered_before_the_cycle_is_mounted() {
@@ -360,11 +332,7 @@ mod tests {
                 let cycle =
                     SyncCycle::new(transport, Backend::current(), || {}, String::new, |_, _| {});
                 provide_context(cycle);
-                view! {
-                    <SyncPanel />
-                    <SyncChip />
-                }
-                .to_html()
+                view! { <SyncPanel /> }.to_html()
             })
             .replace("<!>", "");
         assert_eq!(html, "", "{html}");
@@ -384,8 +352,6 @@ mod tests {
     #[test]
     fn without_a_transport_nothing_is_rendered() {
         let html = render(None, Language::En, || view! { <SyncPanel /> });
-        assert_eq!(html, "", "{html}");
-        let html = render(None, Language::En, || view! { <SyncChip /> });
         assert_eq!(html, "", "{html}");
     }
 
@@ -535,6 +501,17 @@ mod tests {
     }
 
     #[test]
+    fn offline_is_said_as_a_state_not_a_failure() {
+        let html = panel(email(), SyncStatus::Offline, Language::En);
+        assert!(
+            html.contains("Offline. Sync resumes when you are back online."),
+            "{html}"
+        );
+        assert!(!html.contains("Not synced."), "{html}");
+        assert!(html.contains(">Sync now<"), "{html}");
+    }
+
+    #[test]
     fn a_failure_says_not_synced_with_its_reason_and_retry() {
         for (error, reason) in [
             (SyncError::SignedOut, "Google asked to sign in again."),
@@ -548,8 +525,15 @@ mod tests {
                 SyncError::Drive("403 rate".into()),
                 "Google Drive refused: 403 rate",
             ),
+            (
+                SyncError::Storage,
+                "This device could not use its secure storage.",
+            ),
         ] {
             let html = panel(email(), SyncStatus::Failed(error.clone()), Language::En);
+            if error == SyncError::Storage {
+                assert!(!html.contains("Google Drive refused"), "{html}");
+            }
             assert!(html.contains("Not synced."), "{error:?}: {html}");
             assert!(html.contains(reason), "{error:?}: {html}");
             assert!(html.contains(">Retry<"), "{error:?}: {html}");
@@ -617,34 +601,117 @@ mod tests {
         });
     }
 
-    #[test]
-    fn the_chip_shows_only_for_a_remembered_account() {
-        let html = chip(SyncAccount::Remembered { email: None });
-        assert!(html.contains(">Sync<"), "{html}");
-        assert!(html.contains("<button"), "{html}");
-        for account in [SyncAccount::SignedOut, email()] {
-            assert_eq!(chip(account.clone()), "", "{account:?}");
-        }
-    }
-
-    /// No sync string holds an em dash, in any language (memory: no em
-    /// dash in copy).
-    #[test]
-    fn no_sync_string_holds_an_em_dash() {
-        for (code, text) in [
+    /// The three catalogues, parsed: `(code, key -> text)`.
+    fn catalogues() -> Vec<(&'static str, serde_json::Map<String, serde_json::Value>)> {
+        [
             ("en", include_str!("../../locales/en.json")),
             ("fr", include_str!("../../locales/fr.json")),
             ("vi", include_str!("../../locales/vi.json")),
-        ] {
-            let values: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(text).expect("a catalogue");
-            let sync: Vec<_> = values
-                .iter()
-                .filter(|(key, _)| key.starts_with("sync_"))
+        ]
+        .into_iter()
+        .map(|(code, text)| (code, serde_json::from_str(text).expect("a catalogue")))
+        .collect()
+    }
+
+    /// The text of `key` in a catalogue.
+    fn text<'a>(values: &'a serde_json::Map<String, serde_json::Value>, key: &str) -> &'a str {
+        values[key].as_str().expect("a string row")
+    }
+
+    /// No locale row holds an em dash, whatever its key (memory: no em
+    /// dash in copy; "UI strings: a full stop and two sentences"), and the
+    /// three catalogues carry the same keys. Guard on files that are right:
+    /// green on arrival; it does not catch a dash spelled `&mdash;` or
+    /// U+2015, nor a missing key that all three lack.
+    #[test]
+    fn no_locale_row_holds_an_em_dash() {
+        let all = catalogues();
+        let keys: BTreeSet<&String> = all[0].1.keys().collect();
+        for (code, values) in &all {
+            let own: BTreeSet<&String> = values.keys().collect();
+            assert_eq!(
+                own,
+                keys,
+                "{code}: same keys, differing: {:?}",
+                own.symmetric_difference(&keys).collect::<Vec<_>>()
+            );
+            for (key, value) in values {
+                assert!(
+                    !value.as_str().unwrap().contains('\u{2014}'),
+                    "{code} {key}"
+                );
+            }
+        }
+    }
+
+    /// The old `sync_chip` string is gone from all three catalogues (task
+    /// 059: the chip became the status line). Does not catch a renamed
+    /// copy of it.
+    #[test]
+    fn sync_chip_is_a_key_of_no_locale() {
+        for (code, values) in catalogues() {
+            let chips: Vec<_> = values
+                .keys()
+                .filter(|key| key.contains("sync_chip"))
                 .collect();
-            assert_eq!(sync.len(), 25, "{code}");
-            for (key, value) in sync {
-                assert!(!value.as_str().unwrap().contains('—'), "{code} {key}");
+            assert_eq!(chips.len(), 0, "{code}: {chips:?}");
+        }
+    }
+
+    /// The stems that have only one of their `_1` / `_n` halves among
+    /// `keys`: the two stem sets are compared whole, so the order of the
+    /// keys never matters (G5).
+    fn unpaired<'a>(keys: impl Iterator<Item = &'a str>) -> Vec<String> {
+        let (mut singular, mut plural) = (BTreeSet::new(), BTreeSet::new());
+        for key in keys {
+            if let Some(stem) = key.strip_suffix("_1") {
+                singular.insert(stem.to_owned());
+            } else if let Some(stem) = key.strip_suffix("_n") {
+                plural.insert(stem.to_owned());
+            }
+        }
+        singular.symmetric_difference(&plural).cloned().collect()
+    }
+
+    /// Every `*_1` key has its `*_n` sibling and the reverse, in all three
+    /// catalogues (F10: a count renders with the string its locale picks, so
+    /// a lone half would render nothing). The stems are compared as sets,
+    /// never by the order of the keys (G5), and `unpaired` is itself pinned
+    /// on synthetic key lists (a lone half is named, the order is free).
+    /// Does not catch a pair whose two halves were swapped. A lone half in
+    /// a real catalogue also stops the build (`build.rs`), before this test.
+    #[test]
+    fn every_singular_key_has_its_plural_and_the_reverse() {
+        assert_eq!(
+            unpaired(["a_n", "b", "a_1", "c_n", "c_1"].into_iter()).len(),
+            0
+        );
+        assert_eq!(unpaired(["c_1", "a_1", "a_n", "c_n"].into_iter()).len(), 0);
+        assert_eq!(unpaired(["a_1", "b_n", "b_1"].into_iter()), ["a"]);
+        assert_eq!(unpaired(["a_n", "b_n", "b_1"].into_iter()), ["a"]);
+        for (code, values) in catalogues() {
+            let lone = unpaired(values.keys().map(String::as_str));
+            assert_eq!(lone.len(), 0, "{code}: stems with one half only: {lone:?}");
+        }
+    }
+
+    /// "N terms from another device": both strings hold `{{ count }}` in
+    /// every language; en and fr tell one from many; vi has no plural, so
+    /// its two strings are allowed to be equal (and are). Does not catch a
+    /// wrong word in a string, only its shape.
+    #[test]
+    fn the_from_other_pair_holds_the_count_and_differs_where_the_language_does() {
+        for (code, values) in catalogues() {
+            let (one, many) = (
+                text(&values, "sync_from_other_1"),
+                text(&values, "sync_from_other_n"),
+            );
+            assert!(one.contains("{{ count }}"), "{code}: _1");
+            assert!(many.contains("{{ count }}"), "{code}: _n");
+            if code == "vi" {
+                assert_eq!(one, many, "vi has no plural");
+            } else {
+                assert_ne!(one, many, "{code} tells one term from many");
             }
         }
     }

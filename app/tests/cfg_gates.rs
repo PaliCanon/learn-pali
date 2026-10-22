@@ -162,3 +162,190 @@ fn the_gates_see_through_spacing() {
         assert!(!names_feature(line, "hydrate"), "{line}");
     }
 }
+
+// ---- The CI feature flags of the browser tests (task 059, F11) ----
+
+/// Every `feature = "..."` named on `line`, in order.
+fn features_named(line: &str) -> Vec<String> {
+    let squeezed = squeeze(line);
+    let mut found = Vec::new();
+    let mut rest = squeezed.as_str();
+    while let Some(at) = rest.find(r#"feature=""#) {
+        rest = &rest[at + r#"feature=""#.len()..];
+        let end = rest.find('"').expect("a closed string");
+        found.push(rest[..end].to_owned());
+        rest = &rest[end..];
+    }
+    found
+}
+
+/// The features the browser test file gates on, from its first inner
+/// `#![cfg(all(target_arch = "wasm32", ...))]` line; `None` when the file
+/// has no wasm gate (a native test).
+fn wasm_gate(text: &str) -> Option<Vec<String>> {
+    let gate = text
+        .lines()
+        .map(squeeze)
+        .find(|line| line.starts_with("#![cfg("))?;
+    // `not(target_arch = "wasm32")` is a native gate (this very file's).
+    (gate.contains(r#"target_arch="wasm32""#) && !gate.contains(r#"not(target_arch="wasm32")"#))
+        .then(|| features_named(&gate))
+}
+
+/// The package's `[features]` table, `name -> members`, read from
+/// `Cargo.toml` (a member is a quoted string; `dep:` and `crate/feature`
+/// members are not features of this package).
+fn feature_table() -> Vec<(String, Vec<String>)> {
+    let manifest = fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
+        .expect("Cargo.toml");
+    let section = manifest
+        .split("\n[features]")
+        .nth(1)
+        .expect("a [features] table")
+        .split("\n[")
+        .next()
+        .expect("its end");
+    let mut table: Vec<(String, Vec<String>)> = Vec::new();
+    for line in section.lines().map(str::trim) {
+        if line.starts_with('#') || line.is_empty() {
+            continue;
+        }
+        if let Some((name, rest)) = line.split_once('=') {
+            table.push((name.trim().to_owned(), Vec::new()));
+            add_members(&mut table, rest);
+        } else {
+            add_members(&mut table, line);
+        }
+    }
+    table
+}
+
+/// Pushes the quoted members of `text` onto the last feature of `table`.
+fn add_members(table: &mut [(String, Vec<String>)], text: &str) {
+    for member in text.split('"').skip(1).step_by(2) {
+        if !member.contains(':') && !member.contains('/') {
+            table
+                .last_mut()
+                .expect("a feature")
+                .1
+                .push(member.to_owned());
+        }
+    }
+}
+
+/// `requested` and everything they switch on, through the table.
+fn expand(requested: &[String], table: &[(String, Vec<String>)]) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    let mut todo: Vec<String> = requested.to_vec();
+    while let Some(name) = todo.pop() {
+        if all.contains(&name) {
+            continue;
+        }
+        if let Some((_, members)) = table.iter().find(|(feature, _)| *feature == name) {
+            todo.extend(members.iter().cloned());
+        }
+        all.push(name);
+    }
+    all
+}
+
+/// The `--features` list of the workflow step that runs `--test <name>`,
+/// or `None` when no step does.
+fn ci_features_of(workflow: &str, name: &str) -> Option<Vec<String>> {
+    let run = workflow
+        .lines()
+        .find(|line| line.trim_end().ends_with(&format!("--test {name}")))?;
+    let mut words = run.split_whitespace();
+    words.find(|word| *word == "--features")?;
+    Some(words.next()?.split(',').map(str::to_owned).collect())
+}
+
+/// Each `(file stem, features its wasm gate names)` under `app/tests/`.
+fn browser_test_files() -> Vec<(String, Vec<String>)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut files = Vec::new();
+    rust_files(&dir, &mut files);
+    let mut found = Vec::new();
+    for file in files {
+        let text = fs::read_to_string(&file).expect("a UTF-8 test file");
+        if let Some(features) = wasm_gate(&text) {
+            let stem = file
+                .file_stem()
+                .expect("a stem")
+                .to_string_lossy()
+                .into_owned();
+            found.push((stem, features));
+        }
+    }
+    found
+}
+
+/// CI runs every browser test file with the features its gate names (task
+/// 059, F11: a step with a missing flag compiles the file to nothing and
+/// passes with zero tests). A feature a flag switches on counts (`csr`
+/// brings `browser`); a file with a wasm gate and no `--test` step fails.
+/// Green on arrival, a guard on a workflow that is right. It does not
+/// catch a step that exists but is commented out of the job, a step in the
+/// wrong job, or a `--features` flag spelled across two lines.
+#[test]
+fn ci_runs_each_browser_test_with_the_features_its_file_gates_on() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+    let workflow = fs::read_to_string(root.join(".github/workflows/ci.yml")).expect("ci.yml");
+    let table = feature_table();
+    let files = browser_test_files();
+    let stems: Vec<&str> = files.iter().map(|(stem, _)| stem.as_str()).collect();
+    for stem in ["csr", "web_sync", "web_add", "sync_triggers", "sync_hint"] {
+        assert!(
+            stems.contains(&stem),
+            "the walk missed {stem}.rs: {stems:?}"
+        );
+    }
+    for (stem, gates) in &files {
+        let requested = ci_features_of(&workflow, stem)
+            .unwrap_or_else(|| panic!("no CI step runs `--test {stem}` with --features"));
+        let enabled = expand(&requested, &table);
+        for gate in gates {
+            assert!(
+                enabled.contains(gate),
+                "{stem}.rs gates on `{gate}`; its CI step enables only {enabled:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_ci_helpers_read_gates_steps_and_the_feature_table() {
+    let gate = "//! doc\n\n#![cfg(all(target_arch = \"wasm32\", feature = \"csr\", feature=\"web-store\"))]\n";
+    assert_eq!(
+        wasm_gate(gate),
+        Some(vec!["csr".to_owned(), "web-store".to_owned()])
+    );
+    assert_eq!(wasm_gate("#![cfg(not(target_arch = \"wasm32\"))]\n"), None);
+    assert_eq!(wasm_gate("#![cfg(feature = \"ssr\")]\n"), None);
+    assert_eq!(wasm_gate("fn main() {}\n"), None);
+    let table = vec![
+        ("csr".to_owned(), vec!["browser".to_owned()]),
+        ("web-sync".to_owned(), vec!["web-store".to_owned()]),
+        ("web-store".to_owned(), vec!["browser".to_owned()]),
+    ];
+    let mut enabled = expand(&["csr".to_owned(), "web-sync".to_owned()], &table);
+    enabled.sort();
+    assert_eq!(enabled, ["browser", "csr", "web-store", "web-sync"]);
+    let step = "        run: cargo test -p x --features csr,web-sync --target t --test web_sync\n";
+    assert_eq!(
+        ci_features_of(step, "web_sync"),
+        Some(vec!["csr".to_owned(), "web-sync".to_owned()])
+    );
+    assert_eq!(ci_features_of(step, "web"), None);
+    assert_eq!(ci_features_of(step, "csr"), None);
+}
+
+/// The real manifest parses into the features the gates rely on: `csr`
+/// switches `browser` on, `web-sync` switches `web-store` on.
+#[test]
+fn the_real_feature_table_makes_csr_bring_browser() {
+    let table = feature_table();
+    assert!(expand(&["csr".to_owned()], &table).contains(&"browser".to_owned()));
+    let sync = expand(&["web-sync".to_owned()], &table);
+    assert!(sync.contains(&"web-store".to_owned()) && sync.contains(&"browser".to_owned()));
+}

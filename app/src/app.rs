@@ -18,7 +18,7 @@ use crate::catalogue::strings;
 use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
 #[cfg(feature = "ssr")]
 use crate::release::{ENV_META, ReleaseInfo, SHA_META};
-use crate::{web_files, web_store, web_sync};
+use crate::{web_files, web_hint, web_store, web_sync};
 
 mod site_footer;
 use site_footer::SiteFooter;
@@ -128,7 +128,7 @@ fn nav(current: Signal<String>) -> NavList {
 fn Layout() -> impl IntoView {
     let location = use_location();
     view! {
-        <LearnProvider store=web_store() files=web_files() sync=web_sync()>
+        <LearnProvider store=web_store() files=web_files() sync=web_sync() hint=Some(web_hint())>
             <AppShell
                 nav=nav(location.pathname.into())
                 settings_extra=move || view! { <LearnSettings /> }

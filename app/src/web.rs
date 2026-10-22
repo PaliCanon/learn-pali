@@ -14,7 +14,8 @@ use std::rc::Rc;
 use leptos::prelude::*;
 
 use crate::backend::{
-    FileTransfer, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles, SharedStore,
+    FileTransfer, HintMemory, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles,
+    SharedHint, SharedStore,
 };
 use crate::store::{Load, classify};
 use learn_core::progress::State;
@@ -36,6 +37,78 @@ pub fn web_store() -> SharedStore {
 #[must_use]
 pub fn web_files() -> SharedFiles {
     Rc::new(WebFiles)
+}
+
+/// Where the site remembers that the 'sync on several devices' hint was
+/// answered (task 059): `localStorage[pc_learn_hint]` holds `1`. When the
+/// browser has no storage or refuses the write, `remember` says so and the
+/// hint keeps a flag in memory for the tab. On the server nothing is read
+/// or written (it is never called there).
+#[must_use]
+pub fn web_hint() -> SharedHint {
+    Rc::new(WebHint::new(BrowserStorage))
+}
+
+/// The key of the hint's answer in `localStorage`.
+pub(crate) const HINT_KEY: &str = "pc_learn_hint";
+
+/// What is stored under [`HINT_KEY`] once the hint was answered.
+const HINT_ANSWERED: &str = "1";
+
+/// The browser's storage as [`WebHint`] sees it: any key, so a test can
+/// check which keys the hint touches (only its own).
+trait Storage {
+    /// The text under `key`; `Ok(None)` when the key is not there.
+    fn get_item(&self, key: &str) -> Result<Option<String>, Unavailable>;
+
+    /// Stores `text` under `key`.
+    fn set_item(&self, key: &str, text: &str) -> Result<(), Unavailable>;
+}
+
+/// `window.localStorage` (nothing, on the server).
+struct BrowserStorage;
+
+impl Storage for BrowserStorage {
+    fn get_item(&self, key: &str) -> Result<Option<String>, Unavailable> {
+        browser::get_item(key)
+    }
+
+    fn set_item(&self, key: &str, text: &str) -> Result<(), Unavailable> {
+        browser::set_item(key, text)
+    }
+}
+
+/// [`web_hint`]'s implementation over a [`Storage`]: it reads and writes
+/// [`HINT_KEY`] and no other key (`pc_learn`, the progress, is never
+/// touched).
+struct WebHint<S> {
+    /// Where the answer lives.
+    storage: S,
+}
+
+impl<S: Storage> WebHint<S> {
+    /// A hint memory over `storage`.
+    fn new(storage: S) -> Self {
+        WebHint { storage }
+    }
+}
+
+impl<S: Storage> HintMemory for WebHint<S> {
+    /// The key holds `1`; anything else, an absent key or a storage that
+    /// throws on read, is not an answer.
+    fn seen(&self) -> bool {
+        matches!(
+            self.storage.get_item(HINT_KEY),
+            Ok(Some(text)) if text == HINT_ANSWERED
+        )
+    }
+
+    /// Writes `1` under the hint key; false when the browser has no
+    /// storage or refuses the write (the hint then keeps a flag in memory
+    /// for the tab).
+    fn remember(&self) -> bool {
+        self.storage.set_item(HINT_KEY, HINT_ANSWERED).is_ok()
+    }
 }
 
 /// `localStorage` could not be reached: absent, or it threw.
@@ -214,6 +287,16 @@ mod browser {
         Ok(())
     }
 
+    /// Nothing is stored on the server.
+    pub(super) fn get_item(_key: &str) -> Result<Option<String>, Unavailable> {
+        Ok(None)
+    }
+
+    /// Nothing can be written on the server: the write failed.
+    pub(super) fn set_item(_key: &str, _text: &str) -> Result<(), Unavailable> {
+        Err(Unavailable)
+    }
+
     /// Nothing is downloaded on the server.
     pub(super) fn download(_name: &str, _text: &str) {}
 
@@ -259,6 +342,17 @@ mod browser {
     /// when the browser refuses (a full quota, private mode).
     pub(super) fn set(text: &str) -> Result<(), Unavailable> {
         storage()?.set_item(KEY, text).map_err(|_| Unavailable)
+    }
+
+    /// `localStorage[key]`; an error when the storage cannot be read.
+    pub(super) fn get_item(key: &str) -> Result<Option<String>, Unavailable> {
+        storage()?.get_item(key).map_err(|_| Unavailable)
+    }
+
+    /// Writes `text` to `localStorage[key]`; an error when the browser
+    /// refuses (a full quota, private mode).
+    pub(super) fn set_item(key: &str, text: &str) -> Result<(), Unavailable> {
+        storage()?.set_item(key, text).map_err(|_| Unavailable)
     }
 
     /// The Blob URL of `text` (`application/json`).
@@ -579,6 +673,148 @@ mod tests {
                 "the file wins"
             );
         });
+    }
+
+    /// A `localStorage` that holds any key, the tests drive: it records
+    /// every key it is asked about.
+    #[derive(Default)]
+    struct FakeStorage {
+        items: RefCell<std::collections::HashMap<String, String>>,
+        readable: Cell<bool>,
+        writable: Cell<bool>,
+        /// Every key a read or a write named, in order.
+        touched: RefCell<Vec<String>>,
+    }
+
+    impl FakeStorage {
+        fn working() -> Self {
+            FakeStorage {
+                readable: Cell::new(true),
+                writable: Cell::new(true),
+                ..FakeStorage::default()
+            }
+        }
+
+        fn put(&self, key: &str, text: &str) {
+            self.items.borrow_mut().insert(key.into(), text.into());
+        }
+    }
+
+    impl Storage for &FakeStorage {
+        fn get_item(&self, key: &str) -> Result<Option<String>, Unavailable> {
+            self.touched.borrow_mut().push(key.to_owned());
+            if self.readable.get() {
+                Ok(self.items.borrow().get(key).cloned())
+            } else {
+                Err(Unavailable)
+            }
+        }
+
+        fn set_item(&self, key: &str, text: &str) -> Result<(), Unavailable> {
+            self.touched.borrow_mut().push(key.to_owned());
+            if self.writable.get() {
+                self.put(key, text);
+                Ok(())
+            } else {
+                Err(Unavailable)
+            }
+        }
+    }
+
+    /// '`pc_learn_hint` in localStorage': the key is that name, spelled out
+    /// here so a typo in the constant fails (it also fails the key rows
+    /// below, which compare with this literal).
+    #[test]
+    fn the_hint_key_is_pc_learn_hint() {
+        assert_eq!(HINT_KEY, "pc_learn_hint");
+    }
+
+    /// An unanswered hint is not seen; remembering writes `1` under the
+    /// hint key and reads back as seen.
+    #[test]
+    fn the_hint_remembers_one_and_reads_it_back() {
+        let storage = FakeStorage::working();
+        let hint = WebHint::new(&storage);
+        assert!(!hint.seen(), "nothing stored yet");
+        assert!(hint.remember(), "the write went through");
+        assert_eq!(
+            storage
+                .items
+                .borrow()
+                .get("pc_learn_hint")
+                .map(String::as_str),
+            Some("1")
+        );
+        assert!(hint.seen());
+    }
+
+    /// Only the value `1` means answered.
+    #[test]
+    fn only_one_means_the_hint_was_answered() {
+        let storage = FakeStorage::working();
+        let hint = WebHint::new(&storage);
+        for other in ["0", "", "true", "11"] {
+            storage.put("pc_learn_hint", other);
+            assert!(!hint.seen(), "{other:?} is not an answer");
+        }
+        storage.put("pc_learn_hint", "1");
+        assert!(hint.seen());
+    }
+
+    /// A storage that refuses the write: `remember` says false (the caller
+    /// keeps a flag in memory for the tab), nothing is stored, and the hint
+    /// is not seen. No panic.
+    #[test]
+    fn a_refused_write_is_remembered_as_false() {
+        let storage = FakeStorage::working();
+        storage.writable.set(false);
+        let hint = WebHint::new(&storage);
+        assert!(!hint.remember());
+        assert!(!hint.seen());
+        assert_eq!(storage.items.borrow().len(), 0, "nothing stored");
+    }
+
+    /// A storage that throws on read: not seen, no panic, and `remember`
+    /// still tries its write.
+    #[test]
+    fn an_unreadable_storage_is_not_seen() {
+        let storage = FakeStorage::working();
+        storage.put("pc_learn_hint", "1");
+        storage.readable.set(false);
+        let hint = WebHint::new(&storage);
+        assert!(!hint.seen());
+    }
+
+    /// The hint never reads or writes another key: `pc_learn`, the
+    /// progress, keeps its text, and the only key named is the hint's.
+    #[test]
+    fn the_hint_touches_no_other_key() {
+        let storage = FakeStorage::working();
+        storage.put("pc_learn", "{\"progress\": true}");
+        let hint = WebHint::new(&storage);
+        assert!(!hint.seen());
+        assert!(hint.remember());
+        assert!(hint.seen());
+        let touched = storage.touched.borrow();
+        assert!(touched.len() >= 3, "it did read and write: {touched:?}");
+        assert!(
+            touched.iter().all(|key| key == "pc_learn_hint"),
+            "{touched:?}"
+        );
+        assert_eq!(
+            storage.items.borrow().get("pc_learn").map(String::as_str),
+            Some("{\"progress\": true}")
+        );
+    }
+
+    /// On the server the hint memory reads nothing and cannot write: seen
+    /// false, remember false (it is never called there; this pins the stub).
+    #[test]
+    fn the_server_stub_has_not_seen_the_hint_and_cannot_remember_it() {
+        let hint = web_hint();
+        assert!(!hint.seen());
+        assert!(!hint.remember());
+        assert!(!hint.seen());
     }
 
     /// A second pick supersedes the first: only the latest one is current,

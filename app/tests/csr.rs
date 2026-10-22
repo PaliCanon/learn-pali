@@ -480,16 +480,24 @@ impl SyncTransport for CountingSync {
 /// The fragment at `/learn` with a counting sync for `account`, Settings'
 /// section shown when `settings` (no shell: shown at once).
 fn mount_with_sync(root: &'static str, account: SyncAccount, settings: bool) -> CountingSync {
-    go_to("/learn");
     let transport = CountingSync {
         prepared: Rc::default(),
         account: RwSignal::new(account),
     };
-    let (shared, files, sync): (SharedStore, SharedFiles, SharedSync) = (
-        Rc::new(seeded_store()),
-        Rc::new(NoFiles),
-        Rc::new(transport.clone()),
-    );
+    mount_sync(root, Rc::new(transport.clone()), settings);
+    transport
+}
+
+/// The fragment at `/learn` over `sync`, Settings' section shown when
+/// `settings`.
+fn mount_sync(root: &'static str, sync: SharedSync, settings: bool) {
+    mount_sync_on(root, sync, settings, seeded_store());
+}
+
+/// [`mount_sync`] over `store`.
+fn mount_sync_on(root: &'static str, sync: SharedSync, settings: bool, store: BrowserStore) {
+    go_to("/learn");
+    let (shared, files): (SharedStore, SharedFiles) = (Rc::new(store), Rc::new(NoFiles));
     csr::mount(move || {
         palicanon_ui_lib::provide_language();
         view! {
@@ -507,19 +515,21 @@ fn mount_with_sync(root: &'static str, account: SyncAccount, settings: bool) -> 
             </div>
         }
     });
-    transport
 }
 
 /// Signed out with Settings closed: no sync UI asks anything of Google.
 /// Settings shown: its Sign in appears and Google's script is readied, so
 /// the tap opens the window in its gesture. A remembered account: the
-/// home's chip appears and readies it too.
+/// home's 'Sync paused' line with Resume appears and readies it too.
 #[wasm_bindgen_test]
 async fn the_sync_ui_readies_google_only_where_a_tap_may_follow() {
     let home = mount_with_sync("csr-sync-home", SyncAccount::SignedOut, false);
     settle().await;
     assert_eq!(home.prepared.get(), 0, "nothing before a tap may follow");
-    assert!(button("csr-sync-home", "Sync").is_none(), "no chip");
+    assert!(
+        button("csr-sync-home", "Resume").is_none(),
+        "no paused line"
+    );
 
     let settings = mount_with_sync("csr-sync-settings", SyncAccount::SignedOut, true);
     settle().await;
@@ -532,8 +542,11 @@ async fn the_sync_ui_readies_google_only_where_a_tap_may_follow() {
         false,
     );
     settle().await;
-    assert!(button("csr-sync-chip", "Sync").is_some(), "the chip");
-    assert!(chip.prepared.get() >= 1, "the chip shown: readied");
+    assert!(
+        button("csr-sync-chip", "Resume").is_some(),
+        "the paused line's Resume"
+    );
+    assert!(chip.prepared.get() >= 1, "the Resume shown: readied");
 }
 
 /// A profile with practice behind it (ten terms started) is offered the add
@@ -792,4 +805,105 @@ async fn a_rebuilt_review_still_offers_the_add_and_takes_the_word() {
     assert_eq!(saved.len(), 1, "the word is saved at once");
     assert_eq!(saved[0].progress.len(), 12, "eleven, and the word started");
     word_pressed(&saved[0]);
+}
+
+/// A sync transport the tests script (task 059): counts the sign-ins and the
+/// pulls, answers a pull a moment later (never inside the call) with a
+/// scripted result.
+#[derive(Clone)]
+struct ScriptedSync {
+    account: RwSignal<SyncAccount>,
+    sign_ins: Rc<Cell<usize>>,
+    pulls: Rc<Cell<usize>>,
+    answer: Rc<RefCell<Result<Option<String>, SyncError>>>,
+}
+
+impl ScriptedSync {
+    fn new(account: SyncAccount, answer: Result<Option<String>, SyncError>) -> Self {
+        ScriptedSync {
+            account: RwSignal::new(account),
+            sign_ins: Rc::default(),
+            pulls: Rc::default(),
+            answer: Rc::new(RefCell::new(answer)),
+        }
+    }
+}
+
+impl SyncTransport for ScriptedSync {
+    fn sign_in(&self, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {
+        self.sign_ins.set(self.sign_ins.get() + 1);
+    }
+
+    fn sign_out(&self) {}
+
+    fn account(&self) -> Signal<SyncAccount> {
+        self.account.into()
+    }
+
+    fn pull(&self, on_done: Box<dyn FnOnce(Result<Option<String>, SyncError>)>) {
+        self.pulls.set(self.pulls.get() + 1);
+        let answer = self.answer.borrow().clone();
+        leptos::task::spawn_local(async move { on_done(answer) });
+    }
+
+    fn push(&self, _text: &str, _on_done: Box<dyn FnOnce(Result<(), SyncError>)>) {}
+}
+
+/// Waits `ms` of real time (the gate arms real timers).
+async fn wait(ms: i32) {
+    let (tx, rx) = futures::channel::oneshot::channel::<()>();
+    let done = wasm_bindgen::closure::Closure::once_into_js(move || {
+        let _ = tx.send(());
+    });
+    window()
+        .set_timeout_with_callback_and_timeout_and_arguments_0(done.unchecked_ref(), ms)
+        .expect("a timer");
+    rx.await.expect("the timer ran");
+    settle().await;
+}
+
+/// The text of the app of `root`.
+fn text_of(root: &str) -> String {
+    document()
+        .get_element_by_id(root)
+        .and_then(|root| root.text_content())
+        .unwrap_or_default()
+}
+
+/// The paused line (task 059): a remembered account with no token reads
+/// 'Sync paused', no automatic ask reaches the transport, and the Resume tap
+/// asks for a token in its gesture (the click is wired to `resume`).
+#[wasm_bindgen_test]
+async fn a_paused_account_asks_nothing_and_resume_signs_in_in_the_tap() {
+    let sync = ScriptedSync::new(SyncAccount::Remembered { email: None }, Ok(None));
+    mount_sync("csr-paused", Rc::new(sync.clone()), false);
+    wait(60).await;
+    assert!(text_of("csr-paused").contains("Sync paused"), "the line");
+    assert_eq!(sync.pulls.get(), 0, "no automatic cycle while paused");
+    assert_eq!(sync.sign_ins.get(), 0, "no window unasked");
+    button("csr-paused", "Resume").expect("Resume").click();
+    settle().await;
+    assert_eq!(sync.sign_ins.get(), 1, "the tap asks for a token");
+}
+
+/// A failed cycle (task 059): the line says it retries by itself and offers
+/// Retry; Retry (the click is wired to `sync_now`) runs a cycle at once,
+/// well inside the 15 s gap.
+#[wasm_bindgen_test]
+async fn a_failed_cycle_says_it_retries_and_retry_runs_a_cycle_at_once() {
+    let sync = ScriptedSync::new(
+        SyncAccount::SignedIn { email: None },
+        Err(SyncError::Network),
+    );
+    mount_sync("csr-retry", Rc::new(sync.clone()), false);
+    wait(80).await;
+    assert_eq!(sync.pulls.get(), 1, "the open asks one cycle");
+    assert!(
+        text_of("csr-retry").contains("Retrying automatically"),
+        "{}",
+        text_of("csr-retry")
+    );
+    button("csr-retry", "Retry").expect("Retry").click();
+    wait(20).await;
+    assert_eq!(sync.pulls.get(), 2, "a gesture bypasses the gap");
 }

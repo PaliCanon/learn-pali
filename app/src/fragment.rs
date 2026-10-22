@@ -35,21 +35,25 @@
 //! The deck is embedded in the build (`include_str!`): Learn works offline
 //! from the first start.
 
+use std::cell::Cell;
+
 use leptos::prelude::*;
 use leptos_router::MatchNestedRoutes;
 use leptos_router::components::Route;
 use leptos_router::hooks::use_matched;
 use leptos_router::path;
 
-use crate::backend::Backend;
+use crate::backend::{Backend, Hint};
 pub use crate::backend::{
-    FileTransfer, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles, SharedStore,
-    SharedSync, SyncAccount, SyncError, SyncTransport,
+    FileTransfer, HintMemory, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles,
+    SharedHint, SharedStore, SharedSync, SyncAccount, SyncError, SyncTransport,
 };
 use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
 use crate::pages::home::Home;
 pub use crate::store::{Load, classify};
 use crate::sync::{SyncCycle, browser_timer, clock_label};
+use crate::sync_pacing::Reason;
+use crate::sync_triggers::install;
 
 /// The Learn routes, to mount under a parent: one route with an empty
 /// relative path, the home. The site puts it in its `Routes` at the root,
@@ -103,6 +107,10 @@ pub fn LearnProvider(
     /// sync UI.
     #[prop(optional_no_strip)]
     sync: Option<SharedSync>,
+    /// Where the 'sync on several devices' hint is remembered as answered
+    /// (task 059); none: the hint keeps its flag in memory for the tab.
+    #[prop(optional_no_strip)]
+    hint: Option<SharedHint>,
     /// The host's screens, with [`LearnRoutes`] and [`LearnSettings`]
     /// somewhere inside them.
     children: Children,
@@ -126,18 +134,40 @@ pub fn LearnProvider(
         data.moved();
     };
     backend.on_change(changed);
+    if let Some(memory) = hint {
+        provide_context(Hint::new(memory));
+    }
     if let Some(transport) = sync {
         let cycle = SyncCycle::new(transport, backend, changed, clock_label, browser_timer);
         provide_context(cycle);
         // Mounted, on the client only: the sync UI shows (the server's
         // paint, with no transport, shows none), and a cycle runs when a
-        // token is at hand.
-        Effect::new(move |_| cycle.mount());
+        // token is at hand. A change the learner saved asks the sync (the
+        // cycle's own merge save does not) once the cycle is mounted, so
+        // nothing asks a cycle before it (the server's paint, hydration,
+        // an import before this Effect); the browser's events ask it too.
+        let done = Cell::new(false);
+        Effect::new(move |_| mount_sync(&done, cycle, backend));
     }
     view! {
         {children()}
         <ImportConfirm data=data />
     }
+}
+
+/// The mount Effect's body, run once per `done` (G7, the once guard, like
+/// `install`'s own): the Effect may run again (a tracked signal read inside
+/// the cycle's ask, a remount at home) and the cycle must not be mounted,
+/// asked and given a saved-listener again. The guard was chosen over an
+/// Effect that tracks nothing, because `cycle.mount()` asks, and an ask
+/// reads the account: it is not guaranteed to stay untracked.
+fn mount_sync(done: &Cell<bool>, cycle: SyncCycle, backend: Backend) {
+    if done.replace(true) {
+        return;
+    }
+    cycle.mount();
+    backend.on_saved(move || cycle.ask(Reason::Saved));
+    install(move |reason| cycle.ask(reason));
 }
 
 /// 'Your progress', the section for the host's Settings (`AppShell`'s
@@ -417,5 +447,72 @@ mod tests {
             "{french}"
         );
         assert!(!french.contains(">Learn Pāli<"), "{french}");
+    }
+
+    /// Task 059 F6: the saved-listener is registered inside the mount
+    /// Effect, so nothing asks a cycle that is not mounted (the server's
+    /// paint, hydration, an import before the Effect). Effects do not run
+    /// in ssr: a learner save after the render must ask nothing. Every ask
+    /// refreshes the transport first, so a registered listener would show
+    /// as one refresh. NOT caught: a listener registered in a different
+    /// Effect that also runs only on the client.
+    #[test]
+    fn a_save_before_the_mount_effect_asks_no_cycle() {
+        use crate::test_support::FakeTransport;
+        Owner::new().with(|| {
+            let transport = FakeTransport::new(SyncAccount::SignedIn {
+                email: Some("a@b.c".into()),
+            });
+            let shared: SharedSync = Rc::new(transport.clone());
+            let store: SharedStore = Rc::new(FakeStore::new(Load::Empty));
+            let files: SharedFiles = Rc::new(FakeFiles::default());
+            let backend = RwSignal::new(None::<Backend>);
+            let _ = view! {
+                <LearnProvider store=store files=files sync=Some(shared)>
+                    {move || {
+                        backend.set(Some(Backend::current()));
+                    }}
+                </LearnProvider>
+            }
+            .to_html();
+            let backend = backend.get_untracked().expect("the provider provides it");
+            backend.save(&learn_core::progress::State::empty());
+            assert_eq!(
+                transport.refreshes(),
+                0,
+                "a save asked a cycle that was never mounted"
+            );
+        });
+    }
+
+    /// Task 059 G7: the mount Effect's body runs once, whatever the number
+    /// of times the Effect runs (a tracked signal read inside would run it
+    /// again). Two runs of the body leave the cycle asked once (the mount's
+    /// own ask refreshes the transport once) and a learner save asks
+    /// exactly one more cycle. NOT caught: a second `install` (the native
+    /// build installs nothing; the browser's own guard is tested in
+    /// `tests/sync_triggers.rs`), nor `on_saved` registered twice (a single
+    /// slot, the latest wins: harmless).
+    #[test]
+    fn two_runs_of_the_mount_body_ask_once_and_a_save_asks_once_more() {
+        use crate::backend::Backend;
+        use crate::test_support::FakeTransport;
+        Owner::new().with(|| {
+            let transport = FakeTransport::new(SyncAccount::SignedIn {
+                email: Some("a@b.c".into()),
+            });
+            let store: SharedStore = Rc::new(FakeStore::new(Load::Empty));
+            let files: SharedFiles = Rc::new(FakeFiles::default());
+            let backend = Backend::new(store, files);
+            let shared: SharedSync = Rc::new(transport.clone());
+            let cycle = SyncCycle::new(shared, backend, || {}, String::new, |_, _| {});
+            let done = Cell::new(false);
+            mount_sync(&done, cycle, backend);
+            mount_sync(&done, cycle, backend);
+            assert_eq!(transport.refreshes(), 1, "the second run asked again");
+            assert!(cycle.mounted(), "the first run mounted it");
+            backend.save(&learn_core::progress::State::empty());
+            assert_eq!(transport.refreshes(), 2, "a save asks exactly one cycle");
+        });
     }
 }

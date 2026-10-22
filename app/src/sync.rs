@@ -28,16 +28,43 @@
 //! pushes it. No compare-and-set: the merge is a join, so a raced write is
 //! healed at the next sync of either device.
 //!
-//! One cycle at a time: a request during one runs once, after it. A pull
-//! or a push unanswered after [`STEP_TIMEOUT`] fails with `Network` and
-//! frees the cycle. A sign-out cuts the cycle in flight: its late answers
-//! are dropped. A review session holds the sync ([`SyncCycle::hold`]): a
-//! cycle asked during it, or a copy that arrives during it, waits for the
-//! session's end ([`SyncCycle::release`], back home), so nothing is merged
-//! under the learner and no Reload banner is shown.
+//! The gate (task 059, [`gate`]): every automatic ask ([`SyncCycle::ask`],
+//! with its [`Reason`]) passes one coalescing gate, and the
+//! [`Pacer`] decides WHEN a cycle starts.
+//!
+//! - **Ignored**: when the account is not signed in (signed out, or
+//!   remembered with no valid token: paused, the web token's expiry is
+//!   checked at each ask), and after a terminal state (refused, a newer or
+//!   an unreadable Drive copy) until a gesture or a reload.
+//! - **Offline** (`navigator.onLine` false): the status is 'Offline', not a
+//!   failure; no timer is armed, the backoff is not touched; the online
+//!   event resets the backoff and asks.
+//! - **Held** by a session: nothing is armed; one ask is remembered and
+//!   asked again at [`SyncCycle::release`] (back home).
+//! - **Else** the pacer: one trailing timer, however many asks; a cycle in
+//!   flight sets 'again' (one more after it, after the gap, or the backoff
+//!   after a failure, never at once); a saved change waits for the debounce.
+//!   When the timer runs out the gates are applied again.
+//! - **Gestures** ([`SyncCycle::run`]: Sync now, Retry, Resume, sign-in)
+//!   bypass the gap and the terminal state: they cancel the armed timer,
+//!   reset the backoff and start at once (offline: 'Offline' at once, no
+//!   cycle).
+//!
+//! One cycle at a time. A pull or a push unanswered after [`STEP_TIMEOUT`]
+//! fails with `Network` and frees the cycle. A sign-out cuts the cycle in
+//! flight: its late answers are dropped, its timers are stale, its backoff
+//! and flags are cleared. A review session holds the sync
+//! ([`SyncCycle::hold`]): a copy that arrives during it waits for the
+//! session's end too, so nothing is merged under the learner and no Reload
+//! banner is shown.
+//!
+//! The age ('2 min ago') and the count ('N terms from another device') of
+//! the home's status line live in memory only: the wall-clock stamp of the
+//! last cycle that ended with both sides equal, and the number of terms the
+//! last merge that changed the local progress took from the Drive.
 
-use std::cell::Cell;
-use std::collections::HashMap;
+use std::cell::{Cell, RefCell};
+use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -48,6 +75,9 @@ use leptos::prelude::*;
 
 use crate::backend::{Backend, SaveError, SaveStatus, SharedSync, SyncAccount, SyncError};
 use crate::store::Load;
+use crate::sync_pacing::{Outcome, Pacer, Reason};
+
+mod gate;
 
 /// Why this device's progress is not synced.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -79,6 +109,9 @@ pub(crate) enum SyncStatus {
     Failed(SyncError),
     /// This device's progress is not synced.
     Refused(Refusal),
+    /// The browser is offline: not a failure, no cycle starts, the backoff
+    /// is not armed; the online event asks again.
+    Offline,
     /// The Drive copy was saved by a newer version: never overwritten.
     DriveNewer,
     /// The Drive copy does not parse: never overwritten, its text offered
@@ -97,10 +130,18 @@ struct Cycle {
     backend: Backend,
     /// Where the sync stands.
     status: RwSignal<SyncStatus>,
-    /// A cycle is running.
-    busy: Cell<bool>,
-    /// A cycle was asked while one ran: it runs once after it.
-    again: Cell<bool>,
+    /// The pacing of the automatic cycles: the spacing, the backoff, the
+    /// one trailing timer and the cycle in flight.
+    pacer: RefCell<Pacer>,
+    /// The last cycle ended in a terminal state (refused, a newer or an
+    /// unreadable Drive copy): no automatic cycle until a gesture or a reload.
+    terminal: Cell<bool>,
+    /// The monotonic clock, milliseconds (the gap and the backoff).
+    monotonic: RefCell<Box<dyn Fn() -> f64>>,
+    /// The wall clock, milliseconds since the epoch (the status line's age).
+    wall: RefCell<Box<dyn Fn() -> f64>>,
+    /// Whether the browser says it is online.
+    online: RefCell<Box<dyn Fn() -> bool>>,
     /// The current step (a pull or a push waiting for its answer): an
     /// answer or a timeout counts only while its step is current. A
     /// sign-out moves it, so the answers of a cycle it cut are dropped.
@@ -109,6 +150,13 @@ struct Cycle {
     held: Cell<bool>,
     /// Mounted on the client: the sync UI shows.
     mounted: RwSignal<bool>,
+    /// The wall-clock time (milliseconds since the epoch) the last cycle
+    /// ended in this tab with both sides equal; memory only, never written
+    /// to the progress.
+    synced_at: RwSignal<Option<f64>>,
+    /// How many terms came from another device in the last cycle that
+    /// merged any; memory only.
+    from_other: RwSignal<usize>,
     /// A cycle was asked during the session.
     pending: Cell<bool>,
     /// The provider's changed-elsewhere handler.
@@ -147,11 +195,16 @@ impl SyncCycle {
             transport,
             backend,
             status: RwSignal::new(SyncStatus::Idle),
-            busy: Cell::new(false),
-            again: Cell::new(false),
+            pacer: RefCell::new(Pacer::new()),
+            terminal: Cell::new(false),
+            monotonic: RefCell::new(Box::new(monotonic_now_ms)),
+            wall: RefCell::new(Box::new(wall_now_ms)),
+            online: RefCell::new(Box::new(browser_online)),
             step: Cell::new(0),
             held: Cell::new(false),
             mounted: RwSignal::new(false),
+            synced_at: RwSignal::new(None),
+            from_other: RwSignal::new(0),
             pending: Cell::new(false),
             changed: Box::new(changed),
             clock: Box::new(clock),
@@ -162,6 +215,27 @@ impl SyncCycle {
     /// The sync of the nearest provider; none when the host gave none.
     pub(crate) fn current() -> Option<Self> {
         use_context::<SyncCycle>()
+    }
+
+    /// Sets the clocks (the gate's tests): the monotonic one (the gap and
+    /// the backoff) and the wall one (the status line's age).
+    #[cfg(test)]
+    pub(crate) fn set_clocks(
+        self,
+        monotonic: impl Fn() -> f64 + 'static,
+        wall: impl Fn() -> f64 + 'static,
+    ) {
+        self.0.with_value(|cycle| {
+            *cycle.monotonic.borrow_mut() = Box::new(monotonic);
+            *cycle.wall.borrow_mut() = Box::new(wall);
+        });
+    }
+
+    /// Sets the online probe (the gate's tests).
+    #[cfg(test)]
+    pub(crate) fn set_online(self, online: impl Fn() -> bool + 'static) {
+        self.0
+            .with_value(|cycle| *cycle.online.borrow_mut() = Box::new(online));
     }
 
     /// Sets where the sync stands (the render tests, which are `ssr`).
@@ -192,6 +266,50 @@ impl SyncCycle {
         self.0.with_value(|cycle| cycle.mounted.get())
     }
 
+    /// An automatic ask (task 059): the one coalescing gate, see the module
+    /// doc. Logs its reason to the console (diagnosis only).
+    pub(crate) fn ask(self, reason: Reason) {
+        self.0.get_value().ask(reason);
+    }
+
+    /// When the last cycle ended with both sides equal in this tab, as
+    /// wall-clock milliseconds since the epoch; none before. Tracked.
+    pub(crate) fn synced_at(self) -> Signal<Option<f64>> {
+        self.0.with_value(|cycle| cycle.synced_at.into())
+    }
+
+    /// How many terms came from another device in the last cycle that
+    /// merged any (kept until the next such cycle); 0 before. Tracked.
+    pub(crate) fn terms_from_other(self) -> Signal<usize> {
+        self.0.with_value(|cycle| cycle.from_other.into())
+    }
+
+    /// The home's 'Resume' (task 059): a gesture. With a token at hand a
+    /// cycle, else a sign-in in the gesture then a cycle: the same as
+    /// [`sync_now`](Self::sync_now).
+    pub(crate) fn resume(self) {
+        self.sync_now();
+    }
+
+    /// Re-reads the account against the clock (the web token's expiry):
+    /// [`SyncTransport::refresh`](crate::backend::SyncTransport::refresh).
+    /// The gate does the same at each ask and each timer. The status line's
+    /// minute tick calls it (browser builds only).
+    #[cfg(any(feature = "browser", test))]
+    pub(crate) fn check_account(self) {
+        self.0.with_value(|cycle| cycle.transport.refresh());
+    }
+
+    /// Sets when the last cycle ended and how many terms came from another
+    /// device (the render tests, which are `ssr`).
+    #[cfg(all(test, feature = "ssr"))]
+    pub(crate) fn set_synced(self, at: Option<f64>, from_other: usize) {
+        self.0.with_value(|cycle| {
+            cycle.synced_at.set(at);
+            cycle.from_other.set(from_other);
+        });
+    }
+
     /// Marks the cycle mounted without a cycle (the render tests, which are
     /// `ssr`).
     #[cfg(all(test, feature = "ssr"))]
@@ -205,16 +323,17 @@ impl SyncCycle {
         self.0.with_value(|cycle| cycle.transport.prepare());
     }
 
-    /// Runs a cycle now (or once after the running one).
+    /// A gesture (Sync now, Retry, Resume, sign-in): a cycle now, bypassing
+    /// the gap, the backoff and a terminal state (once after the running
+    /// one), when a token is at hand after the account is refreshed; with
+    /// none it asks nothing and touches nothing.
     pub(crate) fn run(self) {
         self.0.get_value().run();
     }
 
-    /// Runs a cycle when a token is at hand: at load and back home.
+    /// Asks a cycle at open, when a token is at hand.
     pub(crate) fn when_ready(self) {
-        if matches!(self.account().get_untracked(), SyncAccount::SignedIn { .. }) {
-            self.run();
-        }
+        self.ask(Reason::Visible);
     }
 
     /// A session started: a cycle asked from now on waits for its end.
@@ -222,21 +341,20 @@ impl SyncCycle {
         self.0.with_value(|cycle| cycle.held.set(true));
     }
 
-    /// The session ended (back home): the cycle asked during it runs now;
-    /// with none asked, a cycle runs when a token is at hand.
+    /// The session ended (back home): the cycle asked during it is asked
+    /// again; with none asked, nothing is.
     pub(crate) fn release(self) {
         let asked = self.0.with_value(|cycle| {
             cycle.held.set(false);
             cycle.pending.replace(false)
         });
         if asked {
-            self.run();
-        } else {
-            self.when_ready();
+            self.ask(Reason::Home);
         }
     }
 
-    /// Sign in, then a cycle; a failed sign-in is the status' reason.
+    /// Sign in, then a cycle; a failed sign-in is the status' reason, a
+    /// closed window leaves the status as it was.
     pub(crate) fn sign_in(self) {
         let cycle = self.0.get_value();
         let after = Rc::clone(&cycle);
@@ -244,6 +362,7 @@ impl SyncCycle {
             .transport
             .sign_in(Box::new(move |signed| match signed {
                 Ok(()) => after.run(),
+                Err(SyncError::Cancelled) => {}
                 Err(error) => after.status.set(SyncStatus::Failed(error)),
             }));
     }
@@ -260,36 +379,29 @@ impl SyncCycle {
 
     /// Sign out: the transport revokes and forgets; the local progress is
     /// kept, the status back to `Idle`. A cycle in flight is cut: its step
-    /// moves on (a late answer is dropped), and nothing waits after it.
+    /// moves on (a late answer is dropped); the pacer forgets its timer, its
+    /// backoff and its flags; the terminal state, the stamp and the count
+    /// are cleared.
     pub(crate) fn sign_out(self) {
         self.0.with_value(|cycle| {
             cycle.transport.sign_out();
             cycle.step.set(cycle.step.get() + 1);
-            cycle.busy.set(false);
-            cycle.again.set(false);
+            cycle.pacer.borrow_mut().reset();
+            cycle.terminal.set(false);
             cycle.pending.set(false);
+            cycle.synced_at.set(None);
+            cycle.from_other.set(0);
             cycle.status.set(SyncStatus::Idle);
         });
     }
 }
 
 impl Cycle {
-    /// Starts a cycle, unless one runs (then it runs once after) or this
-    /// device's progress must not be synced.
-    fn run(self: &Rc<Self>) {
-        if self.held.get() {
-            self.pending.set(true);
-            return;
-        }
-        if self.busy.get() {
-            self.again.set(true);
-            return;
-        }
+    /// Starts a cycle: the pull. The pacer has said so (`Act::Start`).
+    fn start(self: &Rc<Self>) {
         if let Err(refusal) = self.local() {
-            self.status.set(SyncStatus::Refused(refusal));
-            return;
+            return self.finish(SyncStatus::Refused(refusal));
         }
-        self.busy.set(true);
         self.status.set(SyncStatus::Syncing);
         let step = self.begin();
         let cycle = Rc::clone(self);
@@ -379,14 +491,11 @@ impl Cycle {
     /// when it changed the local, pushes it when it differs from the copy:
     /// all in this one call, no wait between the load and the save.
     fn join(self: &Rc<Self>, drive: Option<State>) {
+        // The one boundary of a session: the push below sends this call's
+        // local snapshot, so a hold landing after the check is harmless (its
+        // progress is merged at the next cycle, nothing is saved under it).
         if self.held.get() {
-            // A session started during the pull: nothing is merged under
-            // the learner; the cycle runs again at the session's end.
-            self.pending.set(true);
-            self.busy.set(false);
-            self.again.set(false);
-            self.status.set(SyncStatus::Idle);
-            return;
+            return self.defer();
         }
         let local = match self.local() {
             Ok(local) => local,
@@ -395,16 +504,49 @@ impl Cycle {
         let merged = drive
             .as_ref()
             .map_or_else(|| local.clone(), |drive| merge(&local, drive));
-        if !same(&merged, &local) {
-            self.backend.save(&merged);
-            (self.changed)();
-            if let Some(refusal) = self.refused(&merged) {
-                return self.finish(SyncStatus::Refused(refusal));
-            }
+        if !same(&merged, &local)
+            && let Some(refusal) = self.save_merge(&local, &merged)
+        {
+            return self.finish(SyncStatus::Refused(refusal));
         }
         if drive.as_ref().is_some_and(|drive| same(drive, &merged)) {
             return self.finish(SyncStatus::Synced { at: (self.clock)() });
         }
+        self.push(&merged);
+    }
+
+    /// A session started during the pull: nothing is merged under the
+    /// learner; the cycle ends (the pacer is told, or it would stay in
+    /// flight for ever) as `Deferred`, which did no I/O and so leaves the
+    /// ladder and the last end as they were, and is asked again at the
+    /// session's end.
+    fn defer(self: &Rc<Self>) {
+        self.pending.set(true);
+        self.status.set(SyncStatus::Idle);
+        let act = self
+            .pacer
+            .borrow_mut()
+            .finished(Outcome::Deferred, self.now());
+        self.apply(act);
+    }
+
+    /// Saves the merge locally, tells the home, counts what came from the
+    /// Drive; why the store did not take it, if it did not.
+    fn save_merge(&self, local: &State, merged: &State) -> Option<Refusal> {
+        self.backend.save_merge(merged);
+        (self.changed)();
+        if let Some(refusal) = self.refused(merged) {
+            return Some(refusal);
+        }
+        let count = terms_changed(local, merged);
+        if count > 0 {
+            self.from_other.set(count);
+        }
+        None
+    }
+
+    /// Pushes the merge; the push's answer ends the cycle.
+    fn push(self: &Rc<Self>, merged: &State) {
         let step = self.begin();
         let cycle = Rc::clone(self);
         self.transport.push(
@@ -423,15 +565,6 @@ impl Cycle {
             }),
         );
     }
-
-    /// Ends the cycle with `status`; runs the one asked meanwhile.
-    fn finish(self: &Rc<Self>, status: SyncStatus) {
-        self.status.set(status);
-        self.busy.set(false);
-        if self.again.replace(false) {
-            self.run();
-        }
-    }
 }
 
 /// Whether `a` and `b` hold the same progress, whatever the order of their
@@ -440,25 +573,49 @@ impl Cycle {
 /// file was written (1 while no word was added), not progress: a copy in
 /// another order or of another stamp is neither saved nor pushed.
 fn same(a: &State, b: &State) -> bool {
-    let entries = |state: &State| -> HashMap<TermId, Progress> {
-        state
-            .progress
-            .iter()
-            .map(|entry| (entry.term.clone(), entry.clone()))
-            .collect()
-    };
-    let words = |state: &State| -> HashMap<TermId, Term> {
-        state
-            .added
-            .iter()
-            .map(|term| (term.id.clone(), term.clone()))
-            .collect()
-    };
     a.last_today == b.last_today
         && a.progress.len() == b.progress.len()
         && a.added.len() == b.added.len()
-        && entries(a) == entries(b)
-        && words(a) == words(b)
+        && entries_of(a) == entries_of(b)
+        && words_of(a) == words_of(b)
+}
+
+/// The entries of `state` by term.
+fn entries_of(state: &State) -> HashMap<TermId, Progress> {
+    state
+        .progress
+        .iter()
+        .map(|entry| (entry.term.clone(), entry.clone()))
+        .collect()
+}
+
+/// The added words of `state` by id.
+fn words_of(state: &State) -> HashMap<TermId, Term> {
+    state
+        .added
+        .iter()
+        .map(|term| (term.id.clone(), term.clone()))
+        .collect()
+}
+
+/// How many terms of `merged` are absent from `local` or differ from it:
+/// the entries by term and the added words by id, compared as [`same`]
+/// compares them (another order is no change). A word and its progress
+/// entry are one term.
+fn terms_changed(local: &State, merged: &State) -> usize {
+    let (entries, words) = (entries_of(local), words_of(local));
+    let mut changed: HashSet<&TermId> = HashSet::new();
+    for entry in &merged.progress {
+        if entries.get(&entry.term) != Some(entry) {
+            changed.insert(&entry.term);
+        }
+    }
+    for word in &merged.added {
+        if words.get(&word.id) != Some(word) {
+            changed.insert(&word.id);
+        }
+    }
+    changed.len()
 }
 
 /// Runs `callback` once after `delay` (the browser's `setTimeout`); never
@@ -484,6 +641,56 @@ pub(crate) fn clock_label() -> String {
     }
 }
 
+/// The monotonic time, milliseconds (the browser's `performance.now()`;
+/// the time since the first call on the server, which never syncs, and in
+/// the native tests). Never goes back: the gap and the backoff read it.
+pub(crate) fn monotonic_now_ms() -> f64 {
+    #[cfg(feature = "browser")]
+    {
+        web_sys::window()
+            .and_then(|window| window.performance())
+            .map_or(0.0, |performance| performance.now())
+    }
+    #[cfg(not(feature = "browser"))]
+    {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_secs_f64()
+            * 1000.0
+    }
+}
+
+/// Whether the browser says it is online (`navigator.onLine`); always
+/// true off the browser.
+pub(crate) fn browser_online() -> bool {
+    #[cfg(feature = "browser")]
+    {
+        web_sys::window().is_none_or(|window| window.navigator().on_line())
+    }
+    #[cfg(not(feature = "browser"))]
+    {
+        true
+    }
+}
+
+/// The wall-clock time, milliseconds since the epoch (the browser's
+/// `Date.now()`; the system clock on the server, which never syncs). The
+/// home status line's age is read from it: a night's sleep reads '8 h ago'.
+pub(crate) fn wall_now_ms() -> f64 {
+    #[cfg(feature = "browser")]
+    {
+        js_sys::Date::now()
+    }
+    #[cfg(not(feature = "browser"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0.0, |elapsed| elapsed.as_secs_f64() * 1000.0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::cell::{Cell, RefCell};
@@ -502,7 +709,7 @@ mod tests {
     };
 
     /// The timers a cycle armed, waiting to be fired by the test.
-    type Timers = Rc<RefCell<Vec<(Duration, Box<dyn FnOnce()>)>>>;
+    pub(super) type Timers = Rc<RefCell<Vec<(Duration, Box<dyn FnOnce()>)>>>;
 
     /// A cycle over `store` and `transport`; the count of the changed
     /// handler's calls.
@@ -512,7 +719,7 @@ mod tests {
     }
 
     /// [`cycle`], and the timers it arms.
-    fn timed_cycle(
+    pub(super) fn timed_cycle(
         store: &FakeStore,
         transport: &FakeTransport,
     ) -> (SyncCycle, Rc<Cell<usize>>, Timers) {
@@ -528,12 +735,32 @@ mod tests {
             || "10:42".to_owned(),
             move |delay, callback| armed.borrow_mut().push((delay, callback)),
         );
+        sync.set_clocks(test_now, wall_now_ms);
         (sync, changed, timers)
     }
 
-    /// Fires every armed timer (they all ran out); their delays.
-    fn fire(timers: &Timers) -> Vec<Duration> {
+    thread_local! {
+        /// The tests' monotonic clock, milliseconds: [`fire`] moves it by the
+        /// longest delay it fires, so a timer that fires has really waited its
+        /// delay (the pacer checks the gap again when a timer runs out).
+        static TEST_NOW: Cell<f64> = const { Cell::new(1_000_000.0) };
+    }
+
+    /// The tests' monotonic clock (see [`fire`]).
+    pub(super) fn test_now() -> f64 {
+        TEST_NOW.with(Cell::get)
+    }
+
+    /// Fires every armed timer (they all ran out, after the longest delay
+    /// on the tests' clock); their delays.
+    pub(super) fn fire(timers: &Timers) -> Vec<Duration> {
         let due: Vec<_> = timers.borrow_mut().drain(..).collect();
+        let longest = due
+            .iter()
+            .map(|(delay, _)| *delay)
+            .max()
+            .unwrap_or_default();
+        TEST_NOW.with(|now| now.set(now.get() + longest.as_secs_f64() * 1000.0));
         due.into_iter()
             .map(|(delay, callback)| {
                 callback();
@@ -543,7 +770,7 @@ mod tests {
     }
 
     /// The fixture with one more term, `extra`, started today.
-    fn with_term(mut state: State, extra: &str) -> State {
+    pub(super) fn with_term(mut state: State, extra: &str) -> State {
         state
             .progress
             .push(Progress::new(TermId(extra.into()), today()));
@@ -551,13 +778,13 @@ mod tests {
     }
 
     /// The fixture with its first term failed once more.
-    fn lapsed(mut state: State) -> State {
+    pub(super) fn lapsed(mut state: State) -> State {
         state.progress[0].lapses += 1;
         state.progress[0].stage = Stage::Day;
         state
     }
 
-    fn synced() -> SyncStatus {
+    pub(super) fn synced() -> SyncStatus {
         SyncStatus::Synced { at: "10:42".into() }
     }
 
@@ -658,7 +885,7 @@ mod tests {
     }
 
     /// The fixture holding the added word `sānuvajja`.
-    fn with_word(mut state: State) -> State {
+    pub(super) fn with_word(mut state: State) -> State {
         state.added.push(crate::test_support::added_word());
         state
     }
@@ -781,6 +1008,30 @@ mod tests {
             assert_eq!(changed.get(), 1, "the home reads the store again");
             assert_eq!(transport.pushed(), Vec::<String>::new());
             assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    /// Origin rule (design): the cycle's own merge save carries origin
+    /// sync and never asks for another cycle, or two devices would
+    /// ping-pong; a save the learner makes does ask.
+    #[test]
+    fn the_merge_save_never_asks_for_another_cycle() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            transport.set_drive(Some(&lapsed(progress_fixture()).to_json()));
+            let backend = backend_of(&store, &FakeFiles::default());
+            let asked = Rc::new(Cell::new(0));
+            let seen = Rc::clone(&asked);
+            backend.on_saved(move || seen.set(seen.get() + 1));
+            let shared: SharedSync = Rc::new(transport.clone());
+            let sync = SyncCycle::new(shared, backend, || {}, || "10:42".to_owned(), |_, _| {});
+            sync.run();
+            transport.settle();
+            assert_eq!(store.saved().len(), 1, "the merge was saved locally");
+            assert_eq!(asked.get(), 0, "and it asked for nothing");
+            backend.save(&State::empty());
+            assert_eq!(asked.get(), 1, "a learner's save does ask");
         });
     }
 
@@ -1009,7 +1260,7 @@ mod tests {
         Owner::new().with(|| {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
             let transport = FakeTransport::signed_in();
-            let (sync, _) = cycle(&store, &transport);
+            let (sync, _, timers) = timed_cycle(&store, &transport);
             sync.run();
             sync.run();
             sync.run();
@@ -1017,8 +1268,11 @@ mod tests {
             assert!(transport.answer_pull());
             assert_eq!(transport.pull_calls(), 1, "still running: the push");
             assert!(transport.answer_push());
+            assert_eq!(transport.pull_calls(), 1, "the asked one waits the gap");
+            fire(&timers);
             assert_eq!(transport.pull_calls(), 2, "the asked one, once");
             transport.settle();
+            fire(&timers);
             assert_eq!(transport.pull_calls(), 2, "and no more");
             assert_eq!(sync.status().get_untracked(), synced());
         });
@@ -1041,6 +1295,8 @@ mod tests {
             assert_eq!(changed.get(), 0);
             assert_eq!(transport.pushed(), Vec::<String>::new());
             assert_eq!(sync.status().get_untracked(), SyncStatus::Idle);
+            // Signed in again (a gesture asks nothing without a token).
+            transport.set_account(SyncAccount::SignedIn { email: None });
             sync.run();
             assert_eq!(transport.pull_calls(), 2, "free again");
         });
@@ -1086,6 +1342,79 @@ mod tests {
         });
     }
 
+    /// A session that starts after the push left (the pull's join passed
+    /// the held check): the cycle's own end is not held. A failed push
+    /// shows Failed, arms nothing and leaves nothing for the session's end.
+    /// Caught by: the failed push's end remembering an ask when held
+    /// (`release` then arms a cycle).
+    #[test]
+    fn a_failed_push_answered_under_a_hold_ends_the_cycle_quietly() {
+        Owner::new().with(|| {
+            let (sync, transport, timers) = pushing_cycle();
+            sync.hold();
+            timers.borrow_mut().clear();
+            transport.fail_next(SyncError::Network);
+            assert!(transport.answer_push());
+            assert_eq!(
+                sync.status().get_untracked(),
+                SyncStatus::Failed(SyncError::Network)
+            );
+            assert_eq!(timers.borrow().len(), 0, "nothing armed");
+            sync.release();
+            assert_eq!(timers.borrow().len(), 0, "release asks nothing");
+            assert_eq!(transport.pull_calls(), 1);
+        });
+    }
+
+    /// The same with a push that succeeds: Synced, and the release is silent.
+    /// Caught by: the push's Ok end remembering an ask when held.
+    #[test]
+    fn an_ok_push_answered_under_a_hold_is_synced_and_release_is_silent() {
+        Owner::new().with(|| {
+            let (sync, transport, timers) = pushing_cycle();
+            sync.hold();
+            timers.borrow_mut().clear();
+            assert!(transport.answer_push());
+            assert!(matches!(
+                sync.status().get_untracked(),
+                SyncStatus::Synced { .. }
+            ));
+            assert_eq!(timers.borrow().len(), 0, "nothing armed");
+            sync.release();
+            assert_eq!(timers.borrow().len(), 0, "release asks nothing");
+            assert_eq!(transport.pull_calls(), 1);
+        });
+    }
+
+    /// The push's step timeout runs out under a hold: the cycle fails with
+    /// the network error (a hold does not stretch the timeout), and the
+    /// late answer of that push is dropped by `take(step)`.
+    /// Caught by: `take` always answering true (the late Ok overwrites Failed).
+    #[test]
+    fn a_push_timeout_under_a_hold_fails_and_its_late_answer_is_dropped() {
+        Owner::new().with(|| {
+            let (sync, transport, timers) = pushing_cycle();
+            sync.hold();
+            assert_eq!(fire(&timers).len(), 2, "the pull's and the push's");
+            let failed = SyncStatus::Failed(SyncError::Network);
+            assert_eq!(sync.status().get_untracked(), failed);
+            assert!(transport.answer_push(), "late");
+            assert_eq!(sync.status().get_untracked(), failed, "dropped");
+            sync.release();
+            assert_eq!(timers.borrow().len(), 0);
+        });
+    }
+
+    /// A cycle whose pull is answered (an empty Drive) and whose push waits.
+    fn pushing_cycle() -> (SyncCycle, FakeTransport, Timers) {
+        let store = FakeStore::new(Load::Ok(progress_fixture()));
+        let transport = FakeTransport::signed_in();
+        let (sync, _, timers) = timed_cycle(&store, &transport);
+        sync.run();
+        assert!(transport.answer_pull());
+        (sync, transport, timers)
+    }
+
     /// A push that never answers fails the same way; an answered step's
     /// timer, when it runs out, changes nothing.
     #[test]
@@ -1116,17 +1445,20 @@ mod tests {
     fn a_cycle_asked_during_a_session_runs_at_its_end() {
         Owner::new().with(|| {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
-            let transport = FakeTransport::new(SyncAccount::Remembered { email: None });
-            let (sync, _) = cycle(&store, &transport);
+            let transport = FakeTransport::signed_in();
+            let (sync, _, timers) = timed_cycle(&store, &transport);
             sync.hold();
             sync.run();
             sync.run();
             assert_eq!(transport.pull_calls(), 0, "deferred");
             sync.release();
+            assert_eq!(transport.pull_calls(), 0, "armed, not run at once");
+            fire(&timers);
             assert_eq!(transport.pull_calls(), 1, "once, at the session's end");
             transport.settle();
             sync.release();
-            assert_eq!(transport.pull_calls(), 1, "no token at hand: nothing more");
+            fire(&timers);
+            assert_eq!(transport.pull_calls(), 1, "nothing asked: nothing more");
         });
     }
 
@@ -1139,7 +1471,7 @@ mod tests {
             let store = FakeStore::new(Load::Ok(progress_fixture()));
             let transport = FakeTransport::signed_in();
             transport.set_drive(Some(&lapsed(progress_fixture()).to_json()));
-            let (sync, changed) = cycle(&store, &transport);
+            let (sync, changed, timers) = timed_cycle(&store, &transport);
             sync.run();
             sync.hold();
             assert!(transport.answer_pull());
@@ -1147,6 +1479,7 @@ mod tests {
             assert_eq!(changed.get(), 0, "no Reload banner");
             assert_eq!(transport.pushed(), Vec::<String>::new());
             sync.release();
+            fire(&timers);
             assert_eq!(transport.pull_calls(), 2);
             transport.settle();
             assert_eq!(store.saved(), vec![lapsed(progress_fixture())]);
@@ -1215,8 +1548,9 @@ mod tests {
             Owner::new().with(|| {
                 let store = FakeStore::new(Load::Ok(progress_fixture()));
                 let transport = FakeTransport::new(account.clone());
-                let (sync, _) = cycle(&store, &transport);
+                let (sync, _, timers) = timed_cycle(&store, &transport);
                 sync.when_ready();
+                fire(&timers);
                 assert_eq!(transport.pull_calls(), pulls, "{account:?}");
                 assert_eq!(transport.sign_ins_waiting(), 0, "never a window unasked");
             });
@@ -1237,5 +1571,49 @@ mod tests {
             assert_eq!(sync.status().get_untracked(), SyncStatus::Idle);
             assert_eq!(store.load(), Load::Ok(progress_fixture()));
         });
+    }
+
+    /// The web token's expiry reaches the cycle through the transport:
+    /// `check_account` is the one door (design: checked at each ask and at
+    /// the status line's minute refresh, no request).
+    #[test]
+    fn check_account_lets_the_transport_turn_an_expired_token_remembered() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _) = cycle(&store, &transport);
+            sync.check_account();
+            assert_eq!(transport.refreshes(), 1);
+            assert!(matches!(
+                sync.account().get_untracked(),
+                SyncAccount::SignedIn { .. }
+            ));
+            transport.expire_on_refresh();
+            sync.check_account();
+            assert!(matches!(
+                sync.account().get_untracked(),
+                SyncAccount::Remembered { .. }
+            ));
+            assert_eq!(transport.pull_calls(), 0, "no request is wasted");
+        });
+    }
+
+    /// Resume is a gesture: remembered with no token, it asks Google in
+    /// the tap (a sign-in), never a window unasked.
+    #[test]
+    fn resume_asks_for_a_token_in_the_gesture_when_paused() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::new(SyncAccount::Remembered { email: None });
+            let (sync, _) = cycle(&store, &transport);
+            sync.resume();
+            assert_eq!(transport.sign_ins_waiting(), 1);
+            assert_eq!(transport.pull_calls(), 0);
+        });
+    }
+
+    #[test]
+    fn the_wall_clock_is_the_epoch_in_milliseconds() {
+        assert!(wall_now_ms() > 1.7e12, "after 2023: {}", wall_now_ms());
     }
 }
