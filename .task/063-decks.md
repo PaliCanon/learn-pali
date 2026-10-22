@@ -1,6 +1,6 @@
 # 063 Decks: several decks in Learn, the Devanāgarī alphabet first, Anki import later
 
-status: building · rank: 6 · level: hard · type: feat · session: learn-pali-063-decks · request: the user, 2026-10-22 («j'aimerais bien apprendre le pali, l'alphabet. Devanāgarī. Est-ce que learn peut gérer des decks ?» · «on commence par devanagari seule d'abord. Regarde Anki … ce serait bien d'être compatible» · «je pensais surtout à importer. Mais commençons simple et lance un design que ça ne se perde pas») · after: [059]
+status: merged · rank: 6 · level: hard · type: feat · session: learn-pali-063-decks · request: the user, 2026-10-22 («j'aimerais bien apprendre le pali, l'alphabet. Devanāgarī. Est-ce que learn peut gérer des decks ?» · «on commence par devanagari seule d'abord. Regarde Anki … ce serait bien d'être compatible» · «je pensais surtout à importer. Mais commençons simple et lance un design que ça ne se perde pas») · after: [059]
 
 ## Summary
 Rank: difficulty 6 (the progress file's version 3 with a migration, a deck kind with its own facets, the home's chooser, a new builder command and an inventory, the sync per deck), impact 5 (every learner's progress file; a new way to learn) → 6.
@@ -88,3 +88,10 @@ Worktrees `wt/063/<lane>/learn-pali`, branch `feat/decks-<lane>`, each from the 
 | Fix 063b (check) | done | the New terms dialog a popup (dae89d0); ui-lib v0.4.1 (7169752 af45254 ): Pāli one size bigger, the + a drawn icon centred; 746 app tests, clippy ssr, fmt green |
 | Check 063b | doing | on learn.dev (feat/devanagari-deck · 9aec18e, runs 39796681223 and 39797603446): the chooser, the Devanāgarī deck, the New terms popup, Pāli one size bigger, the drawn +; waiting for the user |
 | Check 063b | done | the user, 2026-10-22: «tag et prod !» on 9aec18e |
+| Merge 063b | done | 935cc33 on main (squash); prod tag v0.1.12; 063c (the Anki import) becomes its own task file when it starts |
+
+## Retro
+By the orchestrator alone (the user's order 2026-10-22: no more agents). 063a: the lead and six lanes cost 256k + lanes before the order; the lead's plan read code for nine minutes (now: a lead opens no source file; then no lead at all). 063b by hand: ~1 hour, three check fixes from the user (popup, Pāli size, the + icon) in the same deploy. Errors: the DeckKind import path guessed wrong once; a golden fixture folder in ui-lib held the old classes (found by the test); four tests assumed a one-deck build (a test registry fixed them). Lessons: a check on dev brings the user's eye to everything on the screen, not only the task (three unrelated asks landed in one round: fine, each a commit); the inventory came from counting our own text through the API, no hand-picking. Retro 063 validated.
+
+## Merge
+063a: be2465d · 063b: 935cc33
