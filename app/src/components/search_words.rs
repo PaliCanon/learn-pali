@@ -23,15 +23,15 @@ use std::time::Duration;
 use learn_core::added::{AddError, blank_on, lemma_of};
 use learn_core::deck::{Example, Meaning, Pos, Term, TermId};
 use leptos::prelude::*;
-use leptos::task::spawn_local;
 use leptos_i18n::td_string;
 use palicanon_ui_lib::{Button, Icon, IconName, Pali, PaliSize, Size, Variant, language_signal};
 
 use crate::backend::Backend;
+use crate::backend::{SharedDictionary, Words};
 use crate::catalogue::{Locale, strings};
 use crate::components::add_word::{Standing, reason, standing};
 use crate::components::data_block::ProgressData;
-use crate::dictionary::{Entry, PassageAnswer, SearchAnswer, passage_for, search_words};
+use crate::dictionary::{Entry, PassageAnswer, SearchAnswer};
 use crate::learn::adding::{Refused, add_through};
 use crate::learn::words::pos_words;
 use crate::pages::home::HomeAction;
@@ -57,6 +57,8 @@ pub(crate) enum Phase {
     Empty,
     /// The dictionary could not be reached.
     Error,
+    /// This host has no dictionary (068: the app without its assets).
+    Unavailable,
 }
 
 /// One row's Add button, through its states.
@@ -137,7 +139,7 @@ pub(crate) fn AddWordScreen(
 #[component]
 pub(crate) fn SearchPanel() -> impl IntoView {
     let t = strings();
-    let search = Search::new();
+    let search = Search::new(Words::current());
     let phase = search.phase;
     // Ready to type on arrival: the screen mounts after the page loaded, so
     // `autofocus` alone does nothing; the field is focused once it exists.
@@ -172,9 +174,7 @@ pub(crate) fn SearchPanel() -> impl IntoView {
                     }
                 />
             </label>
-            <div data-search-results="">
-                {move || phase_view(&phase.get(), search, t.locale())}
-            </div>
+            <div data-search-results="">{move || phase_view(&phase.get(), search, t.locale())}</div>
         </div>
     }
 }
@@ -187,16 +187,23 @@ struct Search {
     timer: StoredValue<Option<TimeoutHandle>>,
     composing: StoredValue<bool>,
     last: StoredValue<String>,
+    /// The host's dictionary (068), read when the panel mounts.
+    words: StoredValue<Option<SharedDictionary>, LocalStorage>,
 }
 
 impl Search {
-    fn new() -> Search {
+    fn new(words: Option<SharedDictionary>) -> Search {
         Search {
-            phase: RwSignal::new(Phase::Idle),
+            phase: RwSignal::new(if words.is_some() {
+                Phase::Idle
+            } else {
+                Phase::Unavailable
+            }),
             seq: StoredValue::new(0),
             timer: StoredValue::new(None),
             composing: StoredValue::new(false),
             last: StoredValue::new(String::new()),
+            words: StoredValue::new_local(words),
         }
     }
 
@@ -239,14 +246,20 @@ impl Search {
         let Some(n) = n else {
             return;
         };
+        let Some(words) = self.words.try_get_value().flatten() else {
+            self.phase.set(Phase::Unavailable);
+            return;
+        };
         self.phase.set(Phase::Searching);
-        spawn_local(async move {
-            let answer = search_words(q).await;
-            if self.seq.try_get_value() != Some(n) {
-                return;
-            }
-            self.phase.try_set(phase_of(answer.ok()));
-        });
+        words.search(
+            q,
+            Box::new(move |answer| {
+                if self.seq.try_get_value() != Some(n) {
+                    return;
+                }
+                self.phase.try_set(phase_of(Some(answer)));
+            }),
+        );
     }
 }
 
@@ -292,6 +305,7 @@ fn note(text: &'static str) -> AnyView {
 fn phase_view(phase: &Phase, search: Search, locale: Locale) -> AnyView {
     match phase {
         Phase::Idle => status(td_string!(locale, search_hint)),
+        Phase::Unavailable => status(td_string!(locale, search_unavailable)),
         Phase::Searching => status(td_string!(locale, search_searching)),
         Phase::Empty => status(td_string!(locale, search_empty)),
         Phase::Error => view! {
@@ -347,7 +361,11 @@ fn EntryRow(
         .trim()
         .to_string();
     let pressed = entry.clone();
-    let press = Callback::new(move |_| press_add(pressed.clone(), slot, backend, data));
+    let words = use_context::<Words>();
+    let press = Callback::new(move |_| {
+        let dictionary = words.and_then(Words::current_of);
+        press_add(pressed.clone(), slot, backend, data, dictionary);
+    });
     view! {
         <li class="flex flex-col gap-1 py-4">
             <div class="flex min-h-11 items-center gap-3">
@@ -355,7 +373,9 @@ fn EntryRow(
                     <p>
                         <Pali size=PaliSize::Lemma>{entry.headword.clone()}</Pali>
                         {(!number.is_empty())
-                            .then(|| view! { <span class="ml-1 text-sm text-muted">{number}</span> })}
+                            .then(|| {
+                                view! { <span class="ml-1 text-sm text-muted">{number}</span> }
+                            })}
                         <span class="ml-2 text-sm text-muted">
                             {move || pos_words(language.get(), &entry.pos)}
                         </span>
@@ -394,7 +414,13 @@ fn slot_note(slot: &Slot, locale: Locale) -> Option<AnyView> {
     }
 }
 
-fn press_add(entry: Entry, slot: RwSignal<Slot>, backend: Backend, data: Option<ProgressData>) {
+fn press_add(
+    entry: Entry,
+    slot: RwSignal<Slot>,
+    backend: Backend,
+    data: Option<ProgressData>,
+    words: Option<SharedDictionary>,
+) {
     if matches!(
         slot.get_untracked(),
         Slot::Adding | Slot::Added | Slot::AddedNoLine
@@ -412,23 +438,31 @@ fn press_add(entry: Entry, slot: RwSignal<Slot>, backend: Backend, data: Option<
         slot.set(settle(add_through(None, backend, term), has_line, data));
         return;
     }
+    let Some(words) = words else {
+        slot.set(Slot::Failed(Failure::Transient));
+        return;
+    };
     slot.set(Slot::Adding);
-    spawn_local(async move {
-        let outcome = match passage_for(entry.clone()).await {
-            Ok(PassageAnswer::Found(example)) => settle(
-                add_through(None, backend, term_for(&entry, Some(example))),
-                true,
-                data,
-            ),
-            Ok(PassageAnswer::Miss(_)) => settle(
-                add_through(None, backend, term_for(&entry, None)),
-                false,
-                data,
-            ),
-            Ok(PassageAnswer::Transient) | Err(_) => Slot::Failed(Failure::Transient),
-        };
-        slot.try_set(outcome);
-    });
+    let asked = entry.clone();
+    words.passage(
+        asked,
+        Box::new(move |answer| {
+            let outcome = match answer {
+                PassageAnswer::Found(example) => settle(
+                    add_through(None, backend, term_for(&entry, Some(example))),
+                    true,
+                    data,
+                ),
+                PassageAnswer::Miss(_) => settle(
+                    add_through(None, backend, term_for(&entry, None)),
+                    false,
+                    data,
+                ),
+                PassageAnswer::Transient => Slot::Failed(Failure::Transient),
+            };
+            slot.try_set(outcome);
+        }),
+    );
 }
 
 /// The slot after the write: added (with or without its line; a word
@@ -648,6 +682,7 @@ mod tests {
     fn the_panel_has_the_field_with_the_focus_and_the_hint() {
         Owner::new().with(|| {
             provide_fakes(crate::store::Load::Empty);
+            provide_context(Words::new(std::rc::Rc::new(FakeWords)));
             let html = render(view! { <SearchPanel /> });
             assert!(html.contains(r#"type="search""#), "{html}");
             assert!(html.contains("autofocus"), "{html}");
@@ -673,7 +708,7 @@ mod tests {
             provide_fakes(crate::store::Load::Empty);
             let backend = Backend::current();
             let _ = backend;
-            render(phase_view(&phase, Search::new(), locale))
+            render(phase_view(&phase, Search::new(None), locale))
         })
     }
 
@@ -743,6 +778,63 @@ mod tests {
         assert!(why.contains("Nothing was added"), "{why}");
     }
 
+    /// A fake host dictionary: answers at once, from fixtures.
+    struct FakeWords;
+
+    impl crate::backend::Dictionary for FakeWords {
+        fn search(&self, q: String, on_done: Box<dyn FnOnce(SearchAnswer)>) {
+            let entries = if q.starts_with("vak") {
+                vec![vakkali()]
+            } else {
+                Vec::new()
+            };
+            on_done(SearchAnswer::Entries(entries));
+        }
+        fn passage(&self, _entry: Entry, on_done: Box<dyn FnOnce(PassageAnswer)>) {
+            on_done(PassageAnswer::Found(passage()));
+        }
+        fn lookup(&self, _form: String, on_done: Box<dyn FnOnce(crate::dictionary::LookupAnswer)>) {
+            on_done(crate::dictionary::LookupAnswer::Senses(Vec::new()));
+        }
+    }
+
+    #[test]
+    fn a_host_without_a_dictionary_says_so_and_a_host_with_one_lists_its_entries() {
+        Owner::new().with(|| {
+            provide_fakes(crate::store::Load::Empty);
+            let none = Search::new(None);
+            assert_eq!(none.phase.get_untracked(), Phase::Unavailable);
+            none.fire("vak".to_string());
+            assert_eq!(
+                none.phase.get_untracked(),
+                Phase::Unavailable,
+                "no call to make"
+            );
+            let html = render(phase_view(
+                &Phase::Unavailable,
+                none,
+                Locale::from(Language::En),
+            ));
+            assert!(html.contains("not available"), "{html}");
+            let some = Search::new(Some(std::rc::Rc::new(FakeWords)));
+            assert_eq!(some.phase.get_untracked(), Phase::Idle);
+            some.fire("vak".to_string());
+            assert_eq!(some.phase.get_untracked(), Phase::List(vec![vakkali()]));
+            some.fire("zz".to_string());
+            assert_eq!(some.phase.get_untracked(), Phase::Empty);
+        });
+    }
+
+    #[test]
+    fn the_panel_without_a_dictionary_says_it_is_not_available_here() {
+        Owner::new().with(|| {
+            provide_fakes(crate::store::Load::Empty);
+            let html = render(view! { <SearchPanel /> });
+            assert!(html.contains("not available"), "{html}");
+            assert!(!html.contains("Type at least two letters"), "{html}");
+        });
+    }
+
     #[test]
     fn every_string_is_in_the_three_locales_without_an_em_dash() {
         for file in [
@@ -766,6 +858,7 @@ mod tests {
                 "search_transient",
                 "search_count_1",
                 "search_count_n",
+                "search_unavailable",
             ] {
                 let line = file
                     .lines()

@@ -18,6 +18,7 @@ pub mod api;
 pub use learn_passage::{blank, segments, source};
 pub mod build;
 pub mod inflections;
+pub mod passages;
 pub mod reader;
 pub mod script;
 pub mod translate;
@@ -101,6 +102,15 @@ pub fn run(args: &[String], err: &mut dyn Write) -> i32 {
 
 /// [`run`] with the API token given (only read with `--api`).
 pub fn run_with_token(args: &[String], token: Option<String>, err: &mut dyn Write) -> i32 {
+    if args.first().is_some_and(|first| first == "passages") {
+        return match build_passages(&args[1..], err) {
+            Ok(()) => 0,
+            Err(message) => {
+                let _ = writeln!(err, "build-deck: {message}\n{PASSAGES_USAGE}");
+                2
+            }
+        };
+    }
     if args.first().is_some_and(|first| first == "devanagari") {
         return match build_script(&args[1..]) {
             Ok(()) => 0,
@@ -128,6 +138,68 @@ pub fn run_with_token(args: &[String], token: Option<String>, err: &mut dyn Writ
 
 /// Reads the inputs, builds, prints the report, writes the deck. A
 /// `--strict` failure writes nothing.
+/// The usage of the `passages` subcommand (068: every dictionary entry's
+/// line from the suttas, from the local corpus databases, no API).
+pub const PASSAGES_USAGE: &str = "usage: build-deck passages --dictionary <dictionary.db> --corpus <corpus.db> [--corpus-fr <db>] [--corpus-vi <db>] -o <passages.db>";
+
+/// `build-deck passages …`: the passages asset.
+fn build_passages(args: &[String], err: &mut dyn Write) -> Result<(), String> {
+    let (mut dictionary, mut corpus, mut fr, mut vi, mut out) = (None, None, None, None, None);
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        let value = rest.next().ok_or_else(|| format!("{arg} needs a value"))?;
+        let path = PathBuf::from(value);
+        match arg.as_str() {
+            "--dictionary" => dictionary = Some(path),
+            "--corpus" => corpus = Some(path),
+            "--corpus-fr" => fr = Some(path),
+            "--corpus-vi" => vi = Some(path),
+            "-o" => out = Some(path),
+            other => return Err(format!("unknown option {other}")),
+        }
+    }
+    let dictionary = dictionary.ok_or("missing --dictionary <dictionary.db>")?;
+    let corpus = corpus.ok_or("missing --corpus <corpus.db>")?;
+    let out = out.ok_or("missing -o <passages.db>")?;
+    if out.exists() {
+        return Err(format!("{} exists already", out.display()));
+    }
+    let dict = Connection::open_with_flags(&dictionary, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("cannot open {}: {e}", dictionary.display()))?;
+    let entries = passages::read_entries(&dict).map_err(|e| e.to_string())?;
+    let mut fetch = passages::CorpusFetch::open(&corpus, fr.as_deref(), vi.as_deref())?;
+    // Built beside, moved into place once complete: a build that stops
+    // leaves no asset that looks whole (review 068).
+    let part = out.with_extension("part");
+    let _ = std::fs::remove_file(&part);
+    let db =
+        Connection::open(&part).map_err(|e| format!("cannot create {}: {e}", part.display()))?;
+    let counts = passages::build(&entries, &mut fetch, &db).map_err(|e| e.to_string())?;
+    drop(db);
+    // The file itself is read back (not the connection that wrote it), and
+    // what it holds must be what the build counted.
+    let written = Connection::open_with_flags(&part, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|e| format!("cannot reopen {}: {e}", part.display()))?;
+    let read = passages::check_asset(&written)?;
+    drop(written);
+    if (read.entries, read.found) != (counts.entries, counts.found) {
+        return Err(format!(
+            "the asset holds {} rows, {} found; the build counted {}, {}",
+            read.entries, read.found, counts.entries, counts.found
+        ));
+    }
+    // `out` was refused above when it existed, so the move never overwrites
+    // (and build-deck runs on Unix; a stale `.part` is replaced).
+    std::fs::rename(&part, &out)
+        .map_err(|e| format!("cannot move {} into place: {e}", part.display()))?;
+    let _ = writeln!(
+        err,
+        "build-deck passages: {} entries, {} found, misses {:?}, lines {:?}",
+        counts.entries, counts.found, counts.misses, counts.lines
+    );
+    Ok(())
+}
+
 /// The usage of the `devanagari` subcommand (063b: a script deck from the
 /// reviewed inventory table, no DPD and no API).
 pub const SCRIPT_USAGE: &str = "usage: build-deck devanagari --inventory <table.tsv> -o <out.json>";

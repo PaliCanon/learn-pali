@@ -915,31 +915,39 @@ impl LiveWords {
         let entries = RwSignal::new(known);
         let state = RwSignal::new(LookupState::Pending);
         let label = Signal::derive(move || lookup_label(locale, state.get()));
+        // The host's dictionary (068), read here, in the component.
+        let words = StoredValue::new_local(crate::backend::Words::current());
         let lookup = Callback::new(move |form: String| {
             let key = form.to_lowercase();
             if entries.with_untracked(|map| map.contains_key(&key)) {
                 return;
             }
+            let Some(dictionary) = words.try_get_value().flatten() else {
+                state.set(LookupState::Unavailable);
+                return;
+            };
             state.set(LookupState::Pending);
-            leptos::task::spawn_local(async move {
-                let answer = crate::dictionary::lookup_word(form).await;
-                let senses = match answer {
-                    Ok(crate::dictionary::LookupAnswer::Senses(senses)) => senses,
-                    Ok(crate::dictionary::LookupAnswer::Unreachable) | Err(_) => {
-                        state.try_set(LookupState::Unreachable);
+            dictionary.lookup(
+                form,
+                Box::new(move |answer| {
+                    let senses = match answer {
+                        crate::dictionary::LookupAnswer::Senses(senses) => senses,
+                        crate::dictionary::LookupAnswer::Unreachable => {
+                            state.try_set(LookupState::Unreachable);
+                            return;
+                        }
+                    };
+                    if senses.is_empty() {
+                        state.try_set(LookupState::None);
                         return;
                     }
-                };
-                if senses.is_empty() {
-                    state.try_set(LookupState::None);
-                    return;
-                }
-                let found: Vec<WordEntry> =
-                    senses.into_iter().map(|s| live_entry(&s, locale)).collect();
-                entries.try_update(|map| {
-                    map.insert(key, found);
-                });
-            });
+                    let found: Vec<WordEntry> =
+                        senses.into_iter().map(|s| live_entry(&s, locale)).collect();
+                    entries.try_update(|map| {
+                        map.insert(key, found);
+                    });
+                }),
+            );
         });
         LiveWords {
             entries,
@@ -955,6 +963,8 @@ enum LookupState {
     Pending,
     None,
     Unreachable,
+    /// This host has no dictionary (068).
+    Unavailable,
 }
 
 fn lookup_label(locale: Locale, state: LookupState) -> String {
@@ -962,6 +972,7 @@ fn lookup_label(locale: Locale, state: LookupState) -> String {
         LookupState::Pending => td_string!(locale, lookup_pending),
         LookupState::None => td_string!(locale, lookup_none),
         LookupState::Unreachable => td_string!(locale, lookup_error),
+        LookupState::Unavailable => td_string!(locale, search_unavailable),
     }
     .to_string()
 }
@@ -2315,7 +2326,9 @@ pub(crate) mod tests {
             let pending = lookup_label(locale, LookupState::Pending);
             let none = lookup_label(locale, LookupState::None);
             let error = lookup_label(locale, LookupState::Unreachable);
+            let unavailable = lookup_label(locale, LookupState::Unavailable);
             assert!(!pending.is_empty() && !none.is_empty() && !error.is_empty());
+            assert_ne!(unavailable.len(), 0);
             assert_ne!(pending, none);
             assert!(!pending.contains('\u{2014}') && !none.contains('\u{2014}'));
         }

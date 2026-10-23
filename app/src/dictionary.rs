@@ -177,6 +177,38 @@ pub async fn lookup_word(
     }
 }
 
+/// The site's dictionary (068): the server functions, called from the
+/// browser (or run in place on the server). A transport failure answers
+/// Unreachable or Transient, as the server would. A build with no server
+/// (the native csr check) has them answer Unreachable at once.
+pub struct ServerDictionary;
+
+impl crate::backend::Dictionary for ServerDictionary {
+    fn search(&self, q: String, on_done: Box<dyn FnOnce(SearchAnswer)>) {
+        leptos::task::spawn_local(async move {
+            on_done(search_words(q).await.unwrap_or(SearchAnswer::Unreachable));
+        });
+    }
+
+    fn passage(&self, entry: Entry, on_done: Box<dyn FnOnce(PassageAnswer)>) {
+        leptos::task::spawn_local(async move {
+            on_done(passage_for(entry).await.unwrap_or(PassageAnswer::Transient));
+        });
+    }
+
+    fn lookup(&self, form: String, on_done: Box<dyn FnOnce(LookupAnswer)>) {
+        leptos::task::spawn_local(async move {
+            on_done(lookup_word(form).await.unwrap_or(LookupAnswer::Unreachable));
+        });
+    }
+}
+
+/// The site's dictionary as a shared handle, for its `LearnProvider`.
+#[must_use]
+pub fn web_dictionary() -> crate::backend::SharedDictionary {
+    std::rc::Rc::new(ServerDictionary)
+}
+
 #[cfg(feature = "ssr")]
 pub mod server {
     //! The server side: the API configuration, the `ureq` client behind

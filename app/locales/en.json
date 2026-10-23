@@ -166,5 +166,6 @@
   "search_count_n": "{{ count }} entries",
   "lookup_pending": "Looking up...",
   "lookup_none": "No entry for this word.",
-  "lookup_error": "The dictionary is not reachable right now."
+  "lookup_error": "The dictionary is not reachable right now.",
+  "search_unavailable": "The dictionary is not available in this app."
 }

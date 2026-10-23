@@ -43,12 +43,14 @@ use leptos_router::components::Route;
 use leptos_router::hooks::use_matched;
 use leptos_router::path;
 
-use crate::backend::{Backend, Hint};
+use crate::backend::{Backend, Hint, Words};
 pub use crate::backend::{
-    FileTransfer, HintMemory, PickFailed, ProgressStore, SaveError, SaveStatus, SharedFiles,
-    SharedHint, SharedStore, SharedSync, SyncAccount, SyncError, SyncTransport,
+    Dictionary, FileTransfer, HintMemory, PickFailed, ProgressStore, SaveError, SaveStatus,
+    SharedDictionary, SharedFiles, SharedHint, SharedStore, SharedSync, SyncAccount, SyncError,
+    SyncTransport,
 };
 use crate::components::data_block::{ImportConfirm, ProgressData, ProgressSection};
+pub use crate::dictionary::{Entry, LookupAnswer, Miss, PassageAnswer, SearchAnswer, Sense};
 use crate::pages::home::Home;
 pub use crate::store::{Load, classify};
 use crate::sync::{SyncCycle, browser_timer, clock_label};
@@ -111,12 +113,19 @@ pub fn LearnProvider(
     /// (task 059); none: the hint keeps its flag in memory for the tab.
     #[prop(optional_no_strip)]
     hint: Option<SharedHint>,
+    /// Where the words come from (task 068); none: the search and the live
+    /// lookups say the dictionary is not available on this host.
+    #[prop(optional_no_strip)]
+    dictionary: Option<SharedDictionary>,
     /// The host's screens, with [`LearnRoutes`] and [`LearnSettings`]
     /// somewhere inside them.
     children: Children,
 ) -> impl IntoView {
     let backend = Backend::new(store, files);
     provide_context(backend);
+    if let Some(dictionary) = dictionary {
+        provide_context(Words::new(dictionary));
+    }
     let data = ProgressData::new();
     // The kept failure follows the store's status while no page is mounted:
     // a memo is read when asked, and a `Failed` that came and went with

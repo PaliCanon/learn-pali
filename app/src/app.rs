@@ -15,6 +15,7 @@ use palicanon_ui_lib::{AppShell, IconName, NavEntry, NavList, NavSection, provid
 use palicanon_ui_lib::{HydrationRoot, language_attribute, theme_attribute};
 
 use crate::catalogue::strings;
+use crate::dictionary::web_dictionary;
 use crate::fragment::{LearnProvider, LearnRoutes, LearnSettings};
 #[cfg(feature = "ssr")]
 use crate::release::{ENV_META, ReleaseInfo, SHA_META};
@@ -128,7 +129,13 @@ fn nav(current: Signal<String>) -> NavList {
 fn Layout() -> impl IntoView {
     let location = use_location();
     view! {
-        <LearnProvider store=web_store() files=web_files() sync=web_sync() hint=Some(web_hint())>
+        <LearnProvider
+            store=web_store()
+            files=web_files()
+            sync=web_sync()
+            hint=Some(web_hint())
+            dictionary=Some(web_dictionary())
+        >
             <AppShell
                 nav=nav(location.pathname.into())
                 settings_extra=move || view! { <LearnSettings /> }

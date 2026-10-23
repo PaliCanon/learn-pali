@@ -166,5 +166,6 @@
   "search_count_n": "{{ count }} mục",
   "lookup_pending": "Đang tra...",
   "lookup_none": "Không có mục nào cho từ này.",
-  "lookup_error": "Hiện không kết nối được từ điển."
+  "lookup_error": "Hiện không kết nối được từ điển.",
+  "search_unavailable": "Từ điển không có trong ứng dụng này."
 }

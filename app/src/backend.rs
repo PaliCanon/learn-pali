@@ -20,6 +20,7 @@ use learn_core::progress::State;
 use leptos::prelude::*;
 
 use crate::deck::Decks;
+use crate::dictionary::{Entry, LookupAnswer, PassageAnswer, SearchAnswer};
 use crate::store::Load;
 
 /// Whether the progress is on disk, as a store reports it
@@ -222,6 +223,48 @@ pub trait HintMemory {
 
 /// A shared [`HintMemory`].
 pub type SharedHint = Rc<dyn HintMemory>;
+
+/// Where the words come from (068): the dictionary search, a word's line
+/// from the suttas, a form's exact senses. The site answers through its
+/// server functions (the API, the token on the server); the app through
+/// Tauri commands over the dictionary assets it ships. The contract: a
+/// host answers every call through `on_done`, exactly once, on the
+/// browser's thread, with a failure value when it cannot (`Unreachable`,
+/// `Transient`): the screens keep no timeout of their own. A host with no
+/// dictionary provides none, and the screens say so.
+pub trait Dictionary {
+    /// The entries whose headword starts with `q` (at least two letters).
+    fn search(&self, q: String, on_done: Box<dyn FnOnce(SearchAnswer)>);
+    /// The line from the suttas for `entry`, as the deck builds it.
+    fn passage(&self, entry: Entry, on_done: Box<dyn FnOnce(PassageAnswer)>);
+    /// The senses of `form`, the word as written in a line.
+    fn lookup(&self, form: String, on_done: Box<dyn FnOnce(LookupAnswer)>);
+}
+
+/// A shared handle on the host's [`Dictionary`].
+pub type SharedDictionary = Rc<dyn Dictionary>;
+
+/// The dictionary in the reactive context, when the host provides one.
+#[derive(Clone, Copy)]
+pub(crate) struct Words(StoredValue<SharedDictionary, LocalStorage>);
+
+impl Words {
+    /// Wraps the host's dictionary for the context (an `Rc`, kept on the
+    /// browser's thread by a local stored value).
+    pub(crate) fn new(dictionary: SharedDictionary) -> Self {
+        Words(StoredValue::new_local(dictionary))
+    }
+
+    /// The dictionary behind a context handle already taken.
+    pub(crate) fn current_of(words: Words) -> Option<SharedDictionary> {
+        words.0.try_get_value()
+    }
+
+    /// The host's dictionary, if any; read inside a component.
+    pub(crate) fn current() -> Option<SharedDictionary> {
+        use_context::<Words>().and_then(|w| w.0.try_get_value())
+    }
+}
 
 /// The host's [`HintMemory`], as a `Copy` handle in the Leptos context
 /// (provided only when the host gave one).

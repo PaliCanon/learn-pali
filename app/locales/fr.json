@@ -166,5 +166,6 @@
   "search_count_n": "{{ count }} entrées",
   "lookup_pending": "Recherche...",
   "lookup_none": "Aucune entrée pour ce mot.",
-  "lookup_error": "Le dictionnaire est injoignable pour le moment."
+  "lookup_error": "Le dictionnaire est injoignable pour le moment.",
+  "search_unavailable": "Le dictionnaire n'est pas disponible dans cette application."
 }
