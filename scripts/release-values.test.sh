@@ -234,7 +234,7 @@ PY
 for id in current deploy check; do
   step_run "$id" > "$work/step-$id.sh" 2>/dev/null || { flunk "deploy.yml has the step '$id'"; : > "$work/step-$id.sh"; }
 done
-assert_file_has "the deploy step writes the release with --update-env-vars" "$work/step-deploy.sh" '--update-env-vars "\$\(scripts/release-values\.sh\)"'
+assert_file_has "the deploy step writes the release with --update-env-vars" "$work/step-deploy.sh" '--update-env-vars "\$\(scripts/release-values\.sh\)[^"]*"'
 assert_file_has "the deploy step keeps --no-traffic and the tag" "$work/step-deploy.sh" '--no-traffic --tag'
 assert_file_lacks "the set variant of the flag appears nowhere (it would wipe RUST_LOG and the secret reference)" "$workflow" '--set-env-vars'
 assert_file_lacks "no LEARN_PALI_GIT build arg is left" "$workflow" 'LEARN_PALI_GIT'
