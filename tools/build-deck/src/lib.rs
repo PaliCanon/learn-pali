@@ -14,13 +14,12 @@
 //! fetches nothing twice. The token is never printed.
 
 pub mod api;
-pub mod blank;
+/// The passage modules now live in `learn_passage` (062); the paths stay.
+pub use learn_passage::{blank, segments, source};
 pub mod build;
 pub mod inflections;
 pub mod reader;
 pub mod script;
-pub mod segments;
-pub mod source;
 pub mod translate;
 pub mod words;
 

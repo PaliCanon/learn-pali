@@ -128,7 +128,7 @@ pub fn added_term(entry: &WordEntry, passage: &Example, pressed: &str) -> Term {
 
 /// The headword without its homonym number (`abhiññā 1` → `abhiññā`,
 /// `sati 1.1` → `sati`).
-fn lemma_of(headword: &str) -> &str {
+pub fn lemma_of(headword: &str) -> &str {
     match headword.rsplit_once(' ') {
         Some((lemma, number))
             if !number.is_empty() && number.chars().all(|c| c.is_ascii_digit() || c == '.') =>
@@ -140,7 +140,7 @@ fn lemma_of(headword: &str) -> &str {
 }
 
 /// The text split around the first whole word equal to `pressed`, if any.
-fn blank_on(text: &str, pressed: &str) -> Option<Blank> {
+pub fn blank_on(text: &str, pressed: &str) -> Option<Blank> {
     let wanted: Vec<char> = pressed.chars().map(fold).collect();
     if wanted.is_empty() {
         return None;

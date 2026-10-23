@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# The API token of learn-pali (task 062): the bearer the site's server sends
+# to the PaliCanon API for the dictionary search and a word's passage. It
+# lives in Secret Manager (`learn-pali-api-token-<env>`, read by the service
+# as LEARN_PALI_API_TOKEN). Tofu creates the empty secret; this script fills
+# it from the macOS keychain, where the API's `scripts/token new learn --env
+# <env>` output was stored by the person (account `pali-canon-api`, service
+# `pali-api-token-<env>-learn`). The value never touches a command line, a
+# log or this repository.
+#
+#   api-token create <dev|prod>   add the keychain value as the secret's
+#                                 version (does nothing when a version exists)
+#   api-token rotate <dev|prod>   add the keychain value as a new version
+#   api-token check  <dev|prod>   print OK, or "not OK" and the failing check:
+#                                   version   an enabled version exists
+#                                   keychain  the keychain holds the value
+set -euo pipefail
+
+PROJECT=${PROJECT:-palicanon-app}
+
+usage() {
+  echo "usage: api-token <create|rotate|check> <dev|prod>" >&2
+  exit 2
+}
+
+cmd=${1:-}
+env_name=${2:-}
+case "$cmd" in create | rotate | check) ;; *) usage ;; esac
+case "$env_name" in dev | prod) ;; *) usage ;; esac
+
+secret="learn-pali-api-token-$env_name"
+service="pali-api-token-$env_name-learn"
+
+has_version() {
+  local found
+  found=$(gcloud secrets versions list "$secret" --project "$PROJECT" --filter 'state=enabled' --limit 1 --format 'value(name)')
+  [ -n "$found" ]
+}
+
+in_keychain() {
+  security find-generic-password -a pali-canon-api -s "$service" -w >/dev/null 2>&1
+}
+
+add_version() {
+  # The value flows from the keychain into gcloud's stdin: no argument, no echo.
+  security find-generic-password -a pali-canon-api -s "$service" -w \
+    | tr -d '\n' \
+    | gcloud secrets versions add "$secret" --project "$PROJECT" --data-file=- >/dev/null
+  echo "api-token: $secret: version added"
+}
+
+case "$cmd" in
+  create)
+    if has_version; then
+      echo "api-token: $secret already has a version"
+      exit 0
+    fi
+    in_keychain || { echo "api-token: the keychain has no $service" >&2; exit 1; }
+    add_version
+    ;;
+  rotate)
+    in_keychain || { echo "api-token: the keychain has no $service" >&2; exit 1; }
+    add_version
+    ;;
+  check)
+    if ! has_version; then echo "not OK version"; exit 1; fi
+    if ! in_keychain; then echo "not OK keychain"; exit 1; fi
+    echo OK
+    ;;
+esac

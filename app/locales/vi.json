@@ -148,5 +148,20 @@
   "sync_update_app": "Hãy cập nhật ứng dụng",
   "unit_cards": "thẻ",
   "word_added": "Đã thêm",
-  "words_more": "+ {{ count }} nữa"
+  "words_more": "+ {{ count }} nữa",
+  "search_open": "Thêm một từ",
+  "search_title": "Thêm một từ",
+  "search_placeholder": "Một từ Pāli",
+  "search_hint": "Gõ ít nhất hai chữ cái, có hoặc không có dấu.",
+  "search_searching": "Đang tìm...",
+  "search_empty": "Không có từ nào cho các chữ cái đã gõ.",
+  "search_error": "Hiện không kết nối được từ điển. Hãy thử lại sau giây lát.",
+  "search_retry": "Thử lại",
+  "search_add": "Thêm",
+  "search_adding": "Đang thêm...",
+  "search_added": "Đã thêm",
+  "search_added_no_line": "Đã thêm. Không có dòng kinh nào cho từ này.",
+  "search_transient": "Không đọc được dòng kinh. Chưa thêm gì cả. Hãy thử lại.",
+  "search_count_1": "1 mục",
+  "search_count_n": "{{ count }} mục"
 }

@@ -1,0 +1,17 @@
+[package]
+name = "learn_passage"
+description = "learn-pali: a word's line from the suttas, as the deck builds it (the DPD source to a SuttaCentral uid, the example matched in the API's text, the translations, the headword blanked); used by build-deck at build time and by the site at request time (062)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+learn_core = { version = "0.1.0", path = "../core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+unicode-normalization = "0.1"
+
+[lints]
+workspace = true

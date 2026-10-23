@@ -266,4 +266,5 @@ jobs:
       - run: bash scripts/rollout-check.test.sh
       - run: bash scripts/release-values.test.sh
       - run: bash infra/scripts/origin-secret.test.sh
+      - run: bash infra/scripts/api-token.test.sh
       - run: bash infra/scripts/lifecycle.test.sh

@@ -24,6 +24,10 @@ leptos_router.workspace = true
 # ui-lib's): read in ui-lib's `language_signal`, not leptos_i18n's.
 leptos_i18n = { version = "0.6.2", default-features = false }
 leptos_axum = { workspace = true, optional = true }
+# The server's HTTP client toward the PaliCanon API (062): synchronous, so
+# learn_passage's Fetch is implemented over it inside spawn_blocking.
+ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
+learn_passage = { version = "0.1.0", path = "../passage", optional = true }
 axum = { version = "0.8", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
 # The origin guard compares the Worker's secret in constant time (`origin.rs`).
@@ -55,6 +59,7 @@ js-sys = { version = "0.3", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 # The web sync reads Google's JSON answers (task 050), in pure functions the
 # native tests cover; already in the lock through learn_core.
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [build-dependencies]
@@ -135,6 +140,8 @@ hydrate = [
 csr = ["leptos/csr", "palicanon-ui-lib/csr", "browser"]
 ssr = [
   "dep:axum",
+  "dep:ureq",
+  "dep:learn_passage",
   "dep:tokio",
   "dep:leptos_axum",
   "dep:subtle",

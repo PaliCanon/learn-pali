@@ -1,90 +1,17 @@
-//! The examples' translations, from the PaliCanon API.
-//!
-//! For one example: its source as a uid ([`source_uid`]), the texts the
-//! sutta has, the Pāli text and the segments the example covers
-//! ([`match_segments`]), then for each of [`LANGS`] the sutta has, the same
-//! segments of that translation ([`translations_for`]) and its translator.
-//! An example that cannot be placed is skipped with the reason; a language
-//! whose text is not segment-aligned is left out with a note. Nothing here
-//! panics on what the API answers.
+//! The deck's terms get their examples' translations from the PaliCanon
+//! API. The passage itself (the source as a uid, the Pāli text matched, each
+//! language's line) lives in `learn_passage::translate` since 062 and is
+//! re-exported here; this module keeps `translate_terms`, which walks the
+//! terms and counts into the build's report.
 
-use std::collections::BTreeMap;
+use learn_core::deck::Term;
 
-use learn_core::deck::{Example, Term, Translation};
+pub use learn_passage::translate::{Found, LANGS, Why, translate_example};
 
-use crate::api::{Fetch, SuttaInfo, SuttaText, get_json};
+use crate::api::Fetch;
 use crate::build::Report;
-use crate::segments::{match_segments, translations_for};
-use crate::source::source_uid;
 
 /// The languages looked for, in the deck's order.
-pub const LANGS: [&str; 3] = ["en", "fr", "vi"];
-
-/// What one example gave: its translations, and a note per language left out.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub struct Found {
-    /// The translations by language.
-    pub translations: BTreeMap<String, Translation>,
-    /// Why a language the sutta has was not taken.
-    pub notes: Vec<String>,
-}
-
-/// The translations of one example.
-///
-/// # Errors
-/// Why the example is skipped: its source maps to no uid, the API has no
-/// such sutta, a call failed, or the example is not in the Pāli text.
-pub fn translate_example(example: &Example, fetch: &mut dyn Fetch) -> Result<Found, String> {
-    let uid = source_uid(&example.source)
-        .ok_or_else(|| format!("the source {} maps to no uid", example.source))?;
-    let info: SuttaInfo = get_json(fetch, &format!("/v1/sutta/{uid}"))
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("{uid} not found in the API"))?;
-    let pli: SuttaText = get_json(fetch, &format!("/v1/sutta/{uid}/pli"))
-        .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("{uid} has no Pāli text"))?;
-    let keys = match_segments(&pli.segments, &example.text);
-    if keys.is_empty() {
-        return Err(format!("the example is not found in {uid}"));
-    }
-    let mut found = Found::default();
-    for lang in LANGS {
-        if info.texts.iter().any(|text| text.lang == lang) {
-            translate_lang(fetch, &uid, lang, &keys, &mut found);
-        }
-    }
-    Ok(found)
-}
-
-/// The `keys` of the sutta's `lang` text into `found`, or a note why not.
-fn translate_lang(
-    fetch: &mut dyn Fetch,
-    uid: &str,
-    lang: &str,
-    keys: &[String],
-    found: &mut Found,
-) {
-    match get_json::<SuttaText>(fetch, &format!("/v1/sutta/{uid}/{lang}")) {
-        Ok(Some(text)) => match translations_for(keys, &text.segments) {
-            Some(line) => {
-                let translation = Translation {
-                    text: line,
-                    translator: text.translator,
-                };
-                found.translations.insert(lang.to_string(), translation);
-            }
-            None => found.notes.push(format!(
-                "{lang}: {uid} ({}) is not segment-aligned with the example",
-                text.translator
-            )),
-        },
-        Ok(None) => found
-            .notes
-            .push(format!("{lang}: {uid} has no {lang} text")),
-        Err(error) => found.notes.push(format!("{lang}: {error}")),
-    }
-}
-
 /// Gives every term's example its translations; the counts per language
 /// and a note per skipped example or language go to `report`.
 pub fn translate_terms(terms: &mut [Term], fetch: &mut dyn Fetch, report: &mut Report) {
@@ -117,8 +44,11 @@ pub fn translate_terms(terms: &mut [Term], fetch: &mut dyn Fetch, report: &mut R
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
+
     use crate::api::Cached;
     use crate::api::fixture::Recorded;
+    use learn_core::deck::Example;
 
     fn example(source: &str, text: &str) -> Example {
         Example {
@@ -211,7 +141,9 @@ mod tests {
     #[test]
     fn an_unmapped_source_is_skipped_without_a_call() {
         let mut fetch = Recorded::default();
-        let reason = translate_example(&example("KHP5", "x"), &mut fetch).unwrap_err();
+        let reason = translate_example(&example("KHP5", "x"), &mut fetch)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("KHP5"), "{reason}");
         assert_eq!(fetch.asked.len(), 0);
     }
@@ -219,7 +151,9 @@ mod tests {
     #[test]
     fn a_sutta_the_api_does_not_have_is_skipped() {
         let mut fetch = Recorded::default();
-        let reason = translate_example(&example("SN1.1", "x"), &mut fetch).unwrap_err();
+        let reason = translate_example(&example("SN1.1", "x"), &mut fetch)
+            .unwrap_err()
+            .to_string();
         assert!(
             reason.contains("sn1.1") && reason.contains("not found"),
             "{reason}"
@@ -232,7 +166,9 @@ mod tests {
             refuse: Some(401),
             ..Recorded::default()
         };
-        let reason = translate_example(&vakkali(), &mut fetch).unwrap_err();
+        let reason = translate_example(&vakkali(), &mut fetch)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("HTTP 401"), "{reason}");
     }
 
@@ -240,7 +176,9 @@ mod tests {
     fn an_example_not_in_the_text_is_skipped() {
         let mut fetch = Recorded::default();
         let other = example("SN22.87", "sabbe saṅkhārā aniccā'ti, yadā paññāya passati");
-        let reason = translate_example(&other, &mut fetch).unwrap_err();
+        let reason = translate_example(&other, &mut fetch)
+            .unwrap_err()
+            .to_string();
         assert!(reason.contains("not found in sn22.87"), "{reason}");
     }
 

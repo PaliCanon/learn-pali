@@ -12,7 +12,7 @@ use std::collections::HashMap;
 
 use unicode_normalization::UnicodeNormalization;
 
-use crate::api::Segment;
+use crate::fetch::Segment;
 
 /// The text as compared: NFC, lower case, `ṃ` as `ṁ`, letters only.
 pub fn normalise(text: &str) -> String {
@@ -215,7 +215,7 @@ fn strip_unpaired(text: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::SuttaText;
+    use crate::fetch::SuttaText;
 
     fn text(name: &str) -> SuttaText {
         let path = format!(

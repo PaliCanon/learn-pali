@@ -230,8 +230,14 @@ jobs:
           set -euo pipefail
           SERVICE="learn-pali-$ENV"
           TAG="sha-${GITHUB_SHA::7}"
+          # The PaliCanon API for the dictionary search (062): the URL per
+          # environment and the token by reference to its secret, set here
+          # because tofu ignores the container's env (060).
+          API_URL=https://api-dev.palicanon.app
+          [ "$ENV" = prod ] && API_URL=https://api.palicanon.app
           gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE_HASH" \
-            --update-env-vars "$(scripts/release-values.sh)" \
+            --update-env-vars "$(scripts/release-values.sh),LEARN_PALI_API_URL=$API_URL" \
+            --update-secrets "LEARN_PALI_API_TOKEN=learn-pali-api-token-$ENV:latest" \
             --no-traffic --tag "$TAG" --quiet \
             || { echo "::error::gcloud could not deploy a ready revision of $SERVICE: read its error above (usual causes: the startup probe, or the origin secret has no version: infra/scripts/origin-secret create $ENV); the traffic is untouched"; exit 1; }
           DESCRIBED=$(gcloud run services describe "$SERVICE" --project "$PROJECT" --region "$REGION" --format json)

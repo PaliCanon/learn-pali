@@ -178,6 +178,12 @@ fn forbidden() -> Response {
 pub fn router(options: LeptosOptions, origin: Origin) -> axum::Router {
     let routes = generate_route_list(App);
     axum::Router::new()
+        // The server functions (062: the dictionary search and a word's
+        // passage) answer under /api; the Worker passes POST there.
+        .route(
+            "/api/{*fn_name}",
+            axum::routing::get(leptos_axum::handle_server_fns).post(leptos_axum::handle_server_fns),
+        )
         .leptos_routes(&options, routes, {
             let options = options.clone();
             move || shell(options.clone())

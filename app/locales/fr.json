@@ -148,5 +148,20 @@
   "sync_update_app": "Mettez l’application à jour",
   "unit_cards": "cartes",
   "word_added": "Ajouté",
-  "words_more": "+ {{ count }} de plus"
+  "words_more": "+ {{ count }} de plus",
+  "search_open": "Ajouter un mot",
+  "search_title": "Ajouter un mot",
+  "search_placeholder": "Un mot pāli",
+  "search_hint": "Tapez au moins deux lettres, avec ou sans diacritiques.",
+  "search_searching": "Recherche...",
+  "search_empty": "Aucun mot pour les lettres tapées.",
+  "search_error": "Le dictionnaire est injoignable pour le moment. Réessayez dans un instant.",
+  "search_retry": "Réessayer",
+  "search_add": "Ajouter",
+  "search_adding": "Ajout...",
+  "search_added": "Ajouté",
+  "search_added_no_line": "Ajouté. Pas de ligne des suttas pour ce mot.",
+  "search_transient": "La ligne des suttas n'a pas pu être lue. Rien n'a été ajouté. Réessayez.",
+  "search_count_1": "1 entrée",
+  "search_count_n": "{{ count }} entrées"
 }

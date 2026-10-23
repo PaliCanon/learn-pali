@@ -148,5 +148,20 @@
   "sync_update_app": "Update the app",
   "unit_cards": "cards",
   "word_added": "Added",
-  "words_more": "+ {{ count }} more"
+  "words_more": "+ {{ count }} more",
+  "search_open": "Add a word",
+  "search_title": "Add a word",
+  "search_placeholder": "A Pāli word",
+  "search_hint": "Type at least two letters, with or without diacritics.",
+  "search_searching": "Searching...",
+  "search_empty": "No word found for the letters typed.",
+  "search_error": "The dictionary is not reachable right now. Try again in a moment.",
+  "search_retry": "Retry",
+  "search_add": "Add",
+  "search_adding": "Adding...",
+  "search_added": "Added",
+  "search_added_no_line": "Added. No line from the suttas for this word.",
+  "search_transient": "Could not fetch the line from the suttas. Nothing was added. Try again.",
+  "search_count_1": "1 entry",
+  "search_count_n": "{{ count }} entries"
 }

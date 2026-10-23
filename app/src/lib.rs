@@ -20,6 +20,7 @@ pub mod backend;
 mod catalogue;
 mod components;
 mod deck;
+pub mod dictionary;
 pub mod drive_location;
 pub mod fragment;
 mod learn;

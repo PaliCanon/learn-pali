@@ -53,11 +53,12 @@ COPY ui-lib/build ./ui-lib/build
 COPY ui-lib/locales ./ui-lib/locales
 COPY ui-lib/src ./ui-lib/src
 COPY ui-lib/style ./ui-lib/style
-# learn-pali: the workspace needs the manifest of all four members to load
-# (cli, tools); only `app` and `core` are compiled.
+# learn-pali: the workspace needs the manifest of all five members to load
+# (cli, tools); `app`, `core` and `passage` are compiled.
 COPY learn-pali/Cargo.toml learn-pali/Cargo.lock ./learn-pali/
 COPY learn-pali/app ./learn-pali/app
 COPY learn-pali/core ./learn-pali/core
+COPY learn-pali/passage ./learn-pali/passage
 COPY learn-pali/cli ./learn-pali/cli
 COPY learn-pali/tools ./learn-pali/tools
 WORKDIR /src/learn-pali

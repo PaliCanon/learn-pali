@@ -46,6 +46,19 @@ resource "google_secret_manager_secret" "origin" {
 # origin secret, on that secret only: the site reads nothing else from GCP
 # (the deck is embedded in the binary, the progress lives in the visitor's
 # browser). A role added here is a decision to write down, not a default.
+# The API token (062): the bearer the site's server sends to the PaliCanon
+# API for the dictionary search and a word's passage. Tofu creates the
+# secret and NEVER a version (the value would sit in its state):
+# `infra/scripts/api-token create <env>` adds the version from the token
+# issued by the API's `scripts/token new learn --env <env>`.
+resource "google_secret_manager_secret" "api_token" {
+  for_each  = var.envs
+  secret_id = "learn-pali-api-token-${each.key}"
+  replication {
+    auto {}
+  }
+}
+
 resource "google_service_account" "app" {
   for_each     = var.envs
   account_id   = "learn-pali-${each.key}"
@@ -72,6 +85,13 @@ resource "google_secret_manager_secret_iam_member" "app_reads_origin" {
 # the origin secret and nothing else. Consequence (task 031, as search-front
 # 007's R3): every repository listed in `github_repos` of the site's infra can
 # read this one secret.
+resource "google_secret_manager_secret_iam_member" "app_reads_api_token" {
+  for_each  = var.envs
+  secret_id = google_secret_manager_secret.api_token[each.key].id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.app[each.key].email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "deployer_reads_origin" {
   for_each  = var.envs
   secret_id = google_secret_manager_secret.origin[each.key].id
@@ -118,6 +138,21 @@ resource "google_cloud_run_v2_service" "app" {
       # By reference to the secret, never a value (it would sit in the state
       # and in the revision JSON). Read when an instance starts: a new
       # version needs a new revision (README, "Rotation").
+      # The PaliCanon API for the dictionary search (062): the URL per
+      # environment, the token by reference to its secret.
+      env {
+        name  = "LEARN_PALI_API_URL"
+        value = each.key == "prod" ? "https://api.palicanon.app" : "https://api-dev.palicanon.app"
+      }
+      env {
+        name = "LEARN_PALI_API_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.api_token[each.key].secret_id
+            version = "latest"
+          }
+        }
+      }
       env {
         name = "ORIGIN_SECRET"
         value_source {
@@ -165,6 +200,7 @@ resource "google_cloud_run_v2_service" "app" {
   }
   depends_on = [
     google_secret_manager_secret_iam_member.app_reads_origin,
+    google_secret_manager_secret_iam_member.app_reads_api_token,
     google_service_account_iam_member.deployer_acts_as,
   ]
 }

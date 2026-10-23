@@ -71,7 +71,7 @@ fn lookup(deck: &'static Deck, form: &str, headword: &str) -> Option<&'static De
 
 /// Where `id` stands for the practice, read from the store and the run.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum Standing {
+pub(crate) enum Standing {
     /// The stored progress can take the word, which is not started.
     Open,
     /// The word is started (in the run, or in the store).
@@ -85,7 +85,11 @@ enum Standing {
 /// run says so or the stored progress does. Read when the panel opens and
 /// again on the press, so a word started elsewhere in between (another tab,
 /// a sync) is not started twice.
-fn standing(run: Option<RwSignal<ReviewRun>>, backend: Backend, id: &TermId) -> Standing {
+pub(crate) fn standing(
+    run: Option<RwSignal<ReviewRun>>,
+    backend: Backend,
+    id: &TermId,
+) -> Standing {
     let stored = backend.load();
     if matches!(
         stored,
@@ -147,7 +151,7 @@ enum Slot {
 }
 
 /// The line that says why a word was not added.
-fn reason(locale: Locale, refused: &Refused) -> &'static str {
+pub(crate) fn reason(locale: Locale, refused: &Refused) -> &'static str {
     match refused {
         Refused::Unusable => td_string!(locale, add_refused_unusable),
         Refused::Newer => td_string!(locale, add_refused_newer),

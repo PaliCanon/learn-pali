@@ -54,6 +54,7 @@ use crate::components::data_block::StoreWrites;
 use crate::components::deck_chooser::{DeckChooser, offered};
 use crate::components::new_terms::{AddButton, NewTermsPicker, Pick};
 use crate::components::save_strip::SaveStrip;
+use crate::components::search_words::{AddWordScreen, SearchButton};
 use crate::components::session::{Phase, SessionView, practice_phase, singular, start_phase};
 use crate::components::sync_hint::SyncHint;
 use crate::components::sync_status::SyncStatusLine;
@@ -73,6 +74,12 @@ const CTA_BOX: &str = "flex flex-col gap-4";
 
 /// A state's wrapper: the box, then what sits under it.
 const FRAME: &str = "flex flex-col gap-6";
+/// The page's column: one centred column from `sm` up, in the middle of
+/// the page's height when shorter (008).
+const PAGE: &str = "flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] flex-1 sm:justify-center";
+/// The same column kept at the top (the search screen, 062).
+const PAGE_TOP: &str =
+    "flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] flex-1";
 
 /// The row of the state's CTA (HC), one thin row: at least a compact
 /// button's height (`h-8`), the skeleton's too, so the layout does not move
@@ -121,6 +128,9 @@ pub(crate) enum HomeAction {
     /// Review what is due ('▶ Practice · N'): a session on the stored
     /// progress, in place; stages move.
     Review,
+    /// Add a word by search (062): the search screen, in place, like a
+    /// session; nothing in the progress changes until a word is added.
+    AddWord,
     /// Practise ahead (nothing due): the `n` started terms with the nearest
     /// next review, of stage `only` when given; nothing in the progress
     /// changes.
@@ -149,6 +159,9 @@ pub(crate) enum Mode {
     Home,
     /// A review session ([`SessionView`]) under the brand.
     Session(Phase),
+    /// The 'Add a word' screen (062) under the brand: the field, the
+    /// entries, Add; the brand or Back home returns to the home.
+    AddWord,
 }
 
 /// The page: the brand, then the home's content (a skeleton until the
@@ -169,14 +182,18 @@ pub(crate) fn Home(
     view! {
         <div
             data-page="home"
-            class="flex flex-col gap-8 px-6 pt-4 pb-12 sm:pt-6 sm:mx-auto sm:w-full sm:max-w-[40rem] flex-1 sm:justify-center"
+            class=move || {
+                // The search screen (062) stays at the top: a list that
+                // empties must not jump to the middle of the page.
+                if matches!(page.mode.get(), Mode::AddWord) { PAGE_TOP } else { PAGE }
+            }
         >
             <SaveStrip />
             {move || {
                 let mode = page.mode.get();
                 let model = match mode {
                     Mode::Home => page.model.get(),
-                    Mode::Session(_) => Model::default(),
+                    Mode::Session(_) | Mode::AddWord => Model::default(),
                 };
                 view! {
                     <HomeScreen
@@ -214,7 +231,7 @@ fn session_over(mode: Mode) -> bool {
         Mode::Session(Phase::Running(run)) => {
             run.with(|run| run.current().is_none() && run.done() > 0)
         }
-        Mode::Home | Mode::Session(Phase::Broken(_)) => false,
+        Mode::Home | Mode::AddWord | Mode::Session(Phase::Broken(_)) => false,
     }
 }
 
@@ -284,6 +301,11 @@ impl Page {
         let (start, ahead) = starters(owner, backend, (mode, paused, sync), refresh);
         let home = back_home(refresh, mode, sync);
         let on_action = Callback::new(move |action| {
+            // The search screen is a mode, like a session: nothing to perform.
+            if action == HomeAction::AddWord {
+                mode.set(Mode::AddWord);
+                return;
+            }
             perform(
                 action,
                 backend,
@@ -398,7 +420,7 @@ fn HomeScreen(
     on_home: Callback<()>,
 ) -> impl IntoView {
     let t = strings();
-    let in_session = matches!(mode, Mode::Session(_));
+    let in_session = matches!(mode, Mode::Session(_) | Mode::AddWord);
     let body = match mode {
         Mode::Home => {
             let Model {
@@ -445,6 +467,7 @@ fn HomeScreen(
             view! { <SessionView phase=phase paused=paused on_reload=on_reload on_home=on_home /> }
                 .into_any()
         }
+        Mode::AddWord => view! { <AddWordScreen on_home=on_home /> }.into_any(),
     };
     view! {
         <BrandLink base=base in_session=in_session stage=stage on_home=on_home />
@@ -506,6 +529,8 @@ fn perform(
     match action {
         HomeAction::Review => go(),
         HomeAction::PracticeAhead { n, only } => ahead(n, only),
+        // Handled before `perform`: a mode of the home, nothing to do here.
+        HomeAction::AddWord => {}
         HomeAction::StartAgain => {
             // Q3: only a damaged progress may be started again; the button
             // is offered for no other, and nothing is written over the rest.
@@ -791,11 +816,11 @@ fn press(cta: CtaSlot, act: Callback<HomeAction>) {
     }
 }
 
-/// The CTA box: `children` (the Empty state's sentence) above the CTA row.
-/// Nothing when it would be empty.
+/// The CTA box: `children` (the Empty state's sentence) above the CTA row,
+/// which always holds the search icon (062).
 #[component]
 fn CtaBox(
-    /// The row's content; none: no row.
+    /// The row's left content; none in the Empty state (the icon stays).
     cta: Option<CtaSlot>,
     /// Performs the learner's choice.
     act: Callback<HomeAction>,
@@ -803,28 +828,29 @@ fn CtaBox(
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
-    let row = cta.map(|cta| view! { <CtaRow cta=cta act=act /> });
-    (children.is_some() || row.is_some()).then(|| {
-        view! {
-            <div data-cta-box="" class=CTA_BOX>
-                {children.map(|children| children())}
-                {row}
-            </div>
-        }
-    })
+    // The search icon sits on the row whatever the state (062: a way in,
+    // like the +), so the row always renders.
+    view! {
+        <div data-cta-box="" class=CTA_BOX>
+            {children.map(|children| children())}
+            <CtaRow cta=cta act=act />
+        </div>
+    }
 }
 
-/// The CTA row (HC), one thin row: the state's [`Cta`].
+/// The CTA row (HC), one thin row: the state's [`Cta`] when it has one,
+/// and the search icon that opens the 'Add a word' screen (062), always.
 #[component]
 fn CtaRow(
-    /// What it shows.
-    cta: CtaSlot,
+    /// What it shows at the left; none in the Empty state.
+    cta: Option<CtaSlot>,
     /// Performs the CTA.
     act: Callback<HomeAction>,
 ) -> impl IntoView {
     view! {
         <div data-cta-row="" class=CTA_ROW>
-            <Cta cta=cta act=act />
+            {cta.map(|cta| view! { <Cta cta=cta act=act /> })}
+            <SearchButton act=act />
         </div>
     }
 }
@@ -1516,11 +1542,21 @@ mod tests {
             for absent in ["to review", "Nothing due today"] {
                 assert!(!html.contains(absent), "{state:?} {absent}: {html}");
             }
-            if html.contains("data-cta-box") {
-                let cta_box = element_at(&html, at(&html, "data-cta-box"));
-                assert!(!cta_box.contains("<h2"), "{state:?}: {cta_box}");
+            if html.contains("data-cta-row") {
+                let row = element_at(&html, at(&html, "data-cta-row"));
+                assert!(!row.contains("<h2"), "{state:?}: {row}");
             }
         }
+    }
+
+    /// The CTA row of a state with no CTA (062): the search icon alone,
+    /// named 'Add a word', and no Practice.
+    fn icon_only_row(html: &str) {
+        let row = element_at(html, at(html, "data-cta-row"));
+        assert_eq!(row.matches("<button").count(), 1, "the icon alone: {row}");
+        assert!(row.contains(r#"aria-label="Add a word""#), "{row}");
+        assert!(!row.contains(">Practice<"), "{row}");
+        assert!(!row.contains("New terms"), "no '+' on the row: {row}");
     }
 
     /// The CTA row holds the state's CTA alone: the '+' left it for the
@@ -1535,8 +1571,16 @@ mod tests {
                 row.contains("flex flex-wrap items-center justify-center gap-3"),
                 "{row}"
             );
-            assert_eq!(row.matches("<button").count(), 1, "{row}");
+            assert_eq!(
+                row.matches("<button").count(),
+                2,
+                "Practice and the search icon: {row}"
+            );
             assert!(row.contains(">Practice<"), "{row}");
+            assert!(
+                row.contains(r#"aria-label="Add a word""#),
+                "the search icon (062): {row}"
+            );
             assert!(!row.contains("New terms"), "no '+' on the row: {row}");
             assert!(
                 !row.contains("role=\"dialog\""),
@@ -1753,12 +1797,13 @@ mod tests {
 
     // ---- T3: the states ----
 
-    /// Nothing due, nothing started: no CTA, no date, no CTA row; the '+'
-    /// sits right-aligned where the list would be, under the strip, small.
+    /// Nothing due, nothing started: no CTA, no date, the row holds the
+    /// search icon alone (062); the '+' sits right-aligned where the list
+    /// would be, under the strip, small.
     #[test]
     fn nothing_to_review_and_nothing_started_has_the_plus_where_the_list_would_be() {
         let html = en(HomeState::NothingDue, 10);
-        assert!(!html.contains("data-cta-row"), "{html}");
+        icon_only_row(&html);
         assert!(!html.contains("Next review"), "{html}");
         let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "{row}");
@@ -1775,14 +1820,15 @@ mod tests {
 
     /// The Empty state: the teaching sentence, then 'New terms' at the same
     /// right-aligned place, small, then its picker (user, 2026-10-06: no
-    /// 'Start with 5 terms', the picker is the way in); no CTA row.
+    /// 'Start with 5 terms', the picker is the way in); the row holds the
+    /// search icon alone (062).
     #[test]
     fn the_empty_state_teaches_and_offers_new_terms_at_the_right() {
         let html = en(HomeState::Empty, 50);
         assert!(!html.contains(r#"aria-busy="true""#), "{html}");
         let teach = at(&html, "A term is one word, asked four ways");
         assert!(!html.contains("Start with 5"), "{html}");
-        assert!(!html.contains("data-cta-row"), "no CTA row: {html}");
+        icon_only_row(&html);
         let row = element_at(&html, at(&html, r#"aria-label="New terms""#));
         assert_eq!(row.matches("<button").count(), 1, "the '+' alone: {row}");
         assert!(row.contains("justify-center"), "at the right: {row}");
@@ -2247,7 +2293,7 @@ mod tests {
         }
         tag_before(&html, "button", r#"aria-label="New terms""#);
         let html = en(none, 0);
-        assert!(!html.contains("data-cta-row"), "{html}");
+        icon_only_row(&html);
         assert!(!html.contains("New terms"), "{html}");
         assert!(!html.contains("All terms started"), "{html}");
     }
@@ -2542,7 +2588,7 @@ mod tests {
 
     /// The first paint's row has the loaded CTA row's height (a compact
     /// button's and the '+', `h-8`): the layout does not move when the
-    /// store has been read. A state with nothing on the row has no row.
+    /// store has been read. Every state has the row (062: the search icon).
     #[test]
     fn the_cta_row_has_the_same_height_from_the_first_paint() {
         let rows: Vec<(HomeState, String)> = every_state()
@@ -2553,9 +2599,9 @@ mod tests {
                     .then(|| (state, tag_around(&html, "data-cta-row").to_owned()))
             })
             .collect();
-        // The first paint and the two with a CTA (cards due): the '+' left
-        // the row, so a state with no CTA has no row.
-        assert_eq!(rows.len(), 3, "{rows:?}");
+        // Every state but the two broken ones (the raw copy, no row): the
+        // search icon keeps the row even with no CTA (062).
+        assert_eq!(rows.len(), 6, "{rows:?}");
         for (state, row) in &rows {
             let classes: Vec<&str> = row.split(['"', ' ']).collect();
             assert!(classes.contains(&"min-h-8"), "{state:?}: {row}");

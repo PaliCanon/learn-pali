@@ -9,6 +9,7 @@ pub mod deck_chooser;
 pub mod new_terms;
 pub mod passage_badge;
 pub mod save_strip;
+pub mod search_words;
 pub mod session;
 pub mod sync_hint;
 pub mod sync_panel;
