@@ -1,6 +1,6 @@
 # 062 Add a word by search; Practice with its count in a popup
 
-status: review · rank: 5 · level: hard · type: feat · session: learn-pali-062-add-word-by-search · request: the user, 2026-10-22 («On peut ajouter un search dans le learn ? si on veut ajouter des termes ?»; «à la place du slide … le practice et un icône search»)
+status: merged · rank: 5 · level: hard · type: feat · session: learn-pali-062-add-word-by-search · request: the user, 2026-10-22 («On peut ajouter un search dans le learn ? si on veut ajouter des termes ?»; «à la place du slide … le practice et un icône search»)
 
 ## Summary
 Rank: difficulty 5 (a new gateway endpoint in the api repo, build-deck's passage modules moved to a library and run at request time, a server function, two popups, the CTA change), impact 4 (every learner; the home's main row) → 5.
@@ -47,3 +47,10 @@ flowchart TB
 | Fix T3 (check 2) | done | the page becomes a mode of the home (no route), the home's frame, the icon in the field, a count line and dividers; 766 app tests, clippy, fmt green |
 | Check T3 | doing | on learn.dev (feat/add-word-by-search · 3de62d0, run 39896859158): the icon opens the screen in place, hydrated, no panic; waiting for the user |
 | Check T3 | done | the user, 2026-10-23: «ok tag et deploy prod» on f9764ab |
+| Merge | done | e77264b on main (squash); prod tag v0.1.13; the API's dictionary route deployed to prod by hand (h-f519f11e38e1422c, checked, serving) |
+
+## Retro
+By the orchestrator alone (no agents). The design (consensus v3) was built as drawn, then the user's three checks on dev rewrote its surface: a popup (v3) became a page like the sutta search (v4), then a mode of the home, not a route (v5), then five retouches. Lessons: a UI designed as a popup for a list should have been checked against the site's own precedents first (the sutta search exists; the home's modes exist); the consensus's voices did not ask «what does the site already do for a list?». Errors: the /api route was not registered (leptos_routes registers no server function) and passage_for's struct argument needed JSON, both found by probing dev; the API names headword/lemma the other way round from the design's assumption; the DPD's <b> markup reached the stored line until the deck's blank rule was reused; a copy of the home's frame was pasted for the page before the mode took it. The two leads of the day cost 190k and 256k before the user stopped agents; the orchestrator built the rest by hand in one evening. Retro 062 validated.
+
+## Merge
+e77264b
