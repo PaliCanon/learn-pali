@@ -1,6 +1,6 @@
 # 066 CI green on main again
 
-status: review · rank: 2 · level: simple · type: fix · request: found 2026-10-23 while bumping the desktop app to fragment-v0.4.0 (CI on main red at f87390b: four jobs) · light path
+status: merged · rank: 2 · level: simple · type: fix · request: found 2026-10-23 while bumping the desktop app to fragment-v0.4.0 (CI on main red at f87390b: four jobs) · light path
 
 ## Summary
 Rank: difficulty 2 (test fixtures, a licence line, a cfg, a crate bump), impact 3 (CI, the app's build) → 2.
@@ -11,3 +11,10 @@ Four failures on main, each from a merged task whose local matrix did not run th
 | --- | --- | --- |
 | Build | done | 5092e6a 3f4a26a 0e21dd3 ; rollout-check.test.sh 1259 ok; cargo deny check 0; native csr check 0; clippy csr --all-targets wasm 0, hydrate 0, ssr 0; 770 ssr tests; the headless csr tests 18 ok (wasm-bindgen-test-runner, as CI) |
 | Check | done | orchestrator: CI's own commands, locally; CI on main read after the push |
+| Merge | done | 1a6be2f on main (squash); CI on main read after the push |
+
+## Retro
+Light path by the orchestrator alone. Four tasks had merged on green local matrices while CI on main was red: the local matrix must be CI's own commands (now in quality.md and a lesson), and main's CI is read after every push. Retro 066 validated.
+
+## Merge
+1a6be2f
