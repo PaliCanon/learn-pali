@@ -118,7 +118,17 @@ pub async fn search_words(
     /// The letters typed, at least two.
     q: String,
 ) -> Result<SearchAnswer, ServerFnError> {
-    Ok(server::search(q).await)
+    #[cfg(feature = "ssr")]
+    {
+        Ok(server::search(q).await)
+    }
+    // A native build without `ssr` (the app's tests build the fragment for
+    // the host): the macro keeps the body there, and no server exists.
+    #[cfg(not(feature = "ssr"))]
+    {
+        let _ = q;
+        Ok(SearchAnswer::Unreachable)
+    }
 }
 
 /// The line from the suttas for `entry`, as the deck would build it. The
@@ -131,7 +141,17 @@ pub async fn passage_for(
     /// The entry whose line is wanted.
     entry: Entry,
 ) -> Result<PassageAnswer, ServerFnError> {
-    Ok(server::passage(entry).await)
+    #[cfg(feature = "ssr")]
+    {
+        Ok(server::passage(entry).await)
+    }
+    // A native build without `ssr` (the app's tests build the fragment for
+    // the host): the macro keeps the body there, and no server exists.
+    #[cfg(not(feature = "ssr"))]
+    {
+        let _ = entry;
+        Ok(PassageAnswer::Transient)
+    }
 }
 
 /// The senses of `form`, the word as written in a line (065): the API's
@@ -144,7 +164,17 @@ pub async fn lookup_word(
     /// The word as written, as the passage cuts it.
     form: String,
 ) -> Result<LookupAnswer, ServerFnError> {
-    Ok(server::lookup(form).await)
+    #[cfg(feature = "ssr")]
+    {
+        Ok(server::lookup(form).await)
+    }
+    // A native build without `ssr` (the app's tests build the fragment for
+    // the host): the macro keeps the body there, and no server exists.
+    #[cfg(not(feature = "ssr"))]
+    {
+        let _ = form;
+        Ok(LookupAnswer::Unreachable)
+    }
 }
 
 #[cfg(feature = "ssr")]

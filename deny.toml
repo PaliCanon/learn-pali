@@ -25,6 +25,9 @@ allow = [
     "CC0-1.0",
     # Boost, permissive — xxhash-rust, via leptos.
     "BSL-1.0",
+    # The Mozilla root certificates bundle (webpki-roots, under rustls, under
+    # ureq: the site's calls to the API, 062).
+    "CDLA-Permissive-2.0",
 ]
 confidence-threshold = 0.9
 # The allow list is a policy, not an inventory of the current tree.

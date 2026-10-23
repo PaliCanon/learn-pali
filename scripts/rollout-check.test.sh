@@ -1176,7 +1176,7 @@ out="$(step deploy)"
 rc=$?
 assert_eq "deploy: succeeds" "0" "$rc"
 assert_match "deploy: --no-traffic with the tag" "run deploy learn-pali-dev .*--no-traffic --tag sha-abc1234" "$(calls)"
-assert_match "deploy: writes the release of a push to main onto the revision" "run deploy learn-pali-dev .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234( |$)" "$(calls)"
+assert_match "deploy: writes the release of a push to main onto the revision" "run deploy learn-pali-dev .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234(,| |$)" "$(calls)"
 assert_absent "deploy: never the set variant of the flag" "--set-env-vars" "$(calls)"
 assert_eq "deploy: one deploy call" "1" "$(grep -c '^gcloud run deploy' "$STUB/calls")"
 assert_eq "deploy: the tagged revision URL is an output" "https://sha-abc1234---x.a.run.app" "$(output url)"
@@ -1184,11 +1184,11 @@ assert_eq "deploy: the new revision's name is an output" "learn-pali-dev-00002-b
 # 060: a tag writes the tag and no sha; a dispatch of a branch writes both.
 reset_stub "registry/learn-pali:h-old"
 out="$(step deploy GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
-assert_match "deploy (tag v0.1.8): the release is the tag and an empty sha" "--update-env-vars LEARN_PALI_ENV=v0.1.8,LEARN_PALI_SHA=( |$)" "$(calls)"
+assert_match "deploy (tag v0.1.8): the release is the tag and an empty sha" "--update-env-vars LEARN_PALI_ENV=v0.1.8,LEARN_PALI_SHA=(,| |$)" "$(calls)"
 assert_absent "deploy (tag): never the set variant of the flag" "--set-env-vars" "$(calls)"
 reset_stub "registry/learn-pali:h-old"
 out="$(step deploy GITHUB_REF_TYPE=branch GITHUB_REF_NAME=feat/x)"
-assert_match "deploy (dispatch of feat/x): the release is the branch and the sha7" "--update-env-vars LEARN_PALI_ENV=feat/x,LEARN_PALI_SHA=abc1234( |$)" "$(calls)"
+assert_match "deploy (dispatch of feat/x): the release is the branch and the sha7" "--update-env-vars LEARN_PALI_ENV=feat/x,LEARN_PALI_SHA=abc1234(,| |$)" "$(calls)"
 # The same image already serving with another release: current says
 # running=false, and the deploy that follows writes the new env.
 reset_stub "registry/learn-pali:h-new"

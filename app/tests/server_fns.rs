@@ -3,6 +3,9 @@
 //! configured a search answers `Unreachable` as data, never a 404 or a
 //! 500. Driven through `tower::ServiceExt::oneshot`, no network.
 
+// The server's side only: the router and axum exist under `ssr`.
+#![cfg(feature = "ssr")]
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode, header};

@@ -239,7 +239,7 @@ impl SyncCycle {
     }
 
     /// Sets where the sync stands (the render tests, which are `ssr`).
-    #[cfg(all(test, feature = "ssr"))]
+    #[cfg(test)]
     pub(crate) fn set_status(self, status: SyncStatus) {
         self.0.with_value(|cycle| cycle.status.set(status));
     }
@@ -302,7 +302,7 @@ impl SyncCycle {
 
     /// Sets when the last cycle ended and how many terms came from another
     /// device (the render tests, which are `ssr`).
-    #[cfg(all(test, feature = "ssr"))]
+    #[cfg(test)]
     pub(crate) fn set_synced(self, at: Option<f64>, from_other: usize) {
         self.0.with_value(|cycle| {
             cycle.synced_at.set(at);
@@ -312,7 +312,7 @@ impl SyncCycle {
 
     /// Marks the cycle mounted without a cycle (the render tests, which are
     /// `ssr`).
-    #[cfg(all(test, feature = "ssr"))]
+    #[cfg(test)]
     pub(crate) fn set_mounted(self) {
         self.0.with_value(|cycle| cycle.mounted.set(true));
     }

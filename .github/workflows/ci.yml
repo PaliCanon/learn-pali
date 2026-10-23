@@ -194,6 +194,9 @@ jobs:
       # --locked: the committed Cargo.lock is what the MSRV claim is verified
       # against; a fresh resolution could pull a dependency with a higher MSRV.
       - run: cargo check --locked -p learn_pali --features ssr
+      # The app builds the fragment for the host too (its native tests): no
+      # server function body may need the server there (066).
+      - run: cargo check --locked -p learn_pali --no-default-features --features csr
       - run: cargo check --locked -p learn_core -p learn_cli -p build_deck
 
   deny:

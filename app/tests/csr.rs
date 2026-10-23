@@ -302,21 +302,28 @@ async fn the_home_runs_a_review_under_learn_and_saves_each_answer() {
 /// 063a): the home has no `[role=group][aria-label]` node, the one
 /// registered deck being the words deck.
 ///
-/// Mutation, not run here: with `offered` in `components/deck_chooser.rs`
-/// reading `backend.decks().len() > 0` (the `<= 1` guard turned into
-/// `<= 0`), the chooser mounts for the one deck and this test fails.
+/// Since 063b the build teaches two decks (words, Devanāgarī): the chooser
+/// is on the home, one chip per deck, the words one pressed by default.
+/// Mutation, not run here: with the Devanāgarī deck removed from the
+/// registry (`deck.rs`), `offered` is false and this test fails.
 #[wasm_bindgen_test]
-async fn the_home_has_no_deck_chooser_while_one_deck_exists() {
-    let (_store, _page) = mount_at("csr-learn-nochooser", "/learn");
+async fn the_home_has_the_deck_chooser_with_two_decks() {
+    let (_store, _page) = mount_at("csr-learn-chooser", "/learn");
     settle().await;
 
     assert!(
-        first("csr-learn-nochooser", r#"[data-page="home"]"#).is_some(),
+        first("csr-learn-chooser", r#"[data-page="home"]"#).is_some(),
         "the home appears"
     );
+    let group = first("csr-learn-chooser", r#"[role="group"][aria-label]"#);
+    assert!(group.is_some(), "the deck chooser");
     assert!(
-        first("csr-learn-nochooser", r#"[role="group"][aria-label]"#).is_none(),
-        "no deck chooser"
+        first(
+            "csr-learn-chooser",
+            r#"[role="group"] [aria-pressed="true"]"#
+        )
+        .is_some(),
+        "one chip pressed"
     );
 }
 
