@@ -163,5 +163,8 @@
   "search_added_no_line": "Ajouté. Pas de ligne des suttas pour ce mot.",
   "search_transient": "La ligne des suttas n'a pas pu être lue. Rien n'a été ajouté. Réessayez.",
   "search_count_1": "1 entrée",
-  "search_count_n": "{{ count }} entrées"
+  "search_count_n": "{{ count }} entrées",
+  "lookup_pending": "Recherche...",
+  "lookup_none": "Aucune entrée pour ce mot.",
+  "lookup_error": "Le dictionnaire est injoignable pour le moment."
 }

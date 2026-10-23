@@ -15,7 +15,9 @@
 //! `LEARN_PALI_API_TOKEN` are read once from the environment, both set or
 //! neither (then every search is Unreachable, with one log line); the
 //! browser never sees it and no answer or log line carries it. Every call
-//! has a 2 s timeout; a search retries once, silently, on a connection
+//! has a 5 s timeout (a scale-to-zero API answers its first call in a few
+//! seconds: 2 s made the first lookup after idle fail, 065); a search
+//! retries once, silently, on a connection
 //! failure, a 503 or a timeout (never on 401 or 429); the whole passage has
 //! 8 s, after which it is Transient (a slow day must not store a word
 //! without its line for good). The calls are synchronous (`ureq`, the
@@ -83,6 +85,30 @@ pub enum PassageAnswer {
     Transient,
 }
 
+/// One sense of a word looked up by its exact form (065), as the API's
+/// `/v1/dpd/{word}` serves it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Sense {
+    /// The DPD lemma, with its homonym number.
+    pub lemma: String,
+    /// The part of speech.
+    pub pos: String,
+    /// The English meaning.
+    pub en: String,
+    /// The French meaning, when the DPD has it.
+    #[serde(default)]
+    pub fr: Option<String>,
+}
+
+/// What a lookup answers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LookupAnswer {
+    /// The senses found; empty when the form is unknown.
+    Senses(Vec<Sense>),
+    /// The dictionary cannot be reached right now.
+    Unreachable,
+}
+
 /// The dictionary entries whose headword starts with `q`.
 ///
 /// # Errors
@@ -108,6 +134,19 @@ pub async fn passage_for(
     Ok(server::passage(entry).await)
 }
 
+/// The senses of `form`, the word as written in a line (065): the API's
+/// exact-form lookup.
+///
+/// # Errors
+/// Only the transport between the browser and this server.
+#[server(prefix = "/api", endpoint = "lookup_word")]
+pub async fn lookup_word(
+    /// The word as written, as the passage cuts it.
+    form: String,
+) -> Result<LookupAnswer, ServerFnError> {
+    Ok(server::lookup(form).await)
+}
+
 #[cfg(feature = "ssr")]
 pub mod server {
     //! The server side: the API configuration, the `ureq` client behind
@@ -121,14 +160,14 @@ pub mod server {
     use learn_passage::fetch::{Fetch, FetchError};
     use learn_passage::translate::{Why, translate_example};
 
-    use super::{Entry, Miss, PassageAnswer, SearchAnswer};
+    use super::{Entry, LookupAnswer, Miss, PassageAnswer, SearchAnswer, Sense};
 
     /// The variable holding the API's base URL.
     pub const URL_VAR: &str = "LEARN_PALI_API_URL";
     /// The variable holding the API's token.
     pub const TOKEN_VAR: &str = "LEARN_PALI_API_TOKEN";
-    /// One call's timeout.
-    pub const CALL_TIMEOUT: Duration = Duration::from_secs(2);
+    /// One call's timeout: wide enough for a cold API's first answer.
+    pub const CALL_TIMEOUT: Duration = Duration::from_secs(5);
     /// The whole passage's budget.
     pub const PASSAGE_BUDGET: Duration = Duration::from_secs(8);
     const N: usize = 10;
@@ -318,6 +357,54 @@ pub mod server {
         out
     }
 
+    /// The lookup, through the configured API; `Unreachable` when none.
+    pub async fn lookup(form: String) -> LookupAnswer {
+        let Some(config) = config() else {
+            return LookupAnswer::Unreachable;
+        };
+        let config = config.clone();
+        tokio::task::spawn_blocking(move || lookup_in(&config, &form))
+            .await
+            .unwrap_or(LookupAnswer::Unreachable)
+    }
+
+    /// The lookup against `config`: `GET /v1/dpd/{form}`; a 404 is no
+    /// sense; one silent retry on a connection failure, a 503 or a timeout.
+    pub fn lookup_in(config: &ApiConfig, form: &str) -> LookupAnswer {
+        let mut fetch = UreqFetch::new(config.clone());
+        let path = format!("/v1/dpd/{}", percent(form.trim()));
+        let first = fetch.get(&path);
+        let result = match &first {
+            Err(FetchError::Status(_, 503) | FetchError::Transport(..)) => fetch.get(&path),
+            _ => first,
+        };
+        match result {
+            Ok(Some(body)) => parse_senses(&body),
+            Ok(None) => LookupAnswer::Senses(Vec::new()),
+            Err(FetchError::Status(_, code @ (401 | 403))) => {
+                eprintln!("learn-pali: lookup: ERROR the API refused the token (HTTP {code})");
+                LookupAnswer::Unreachable
+            }
+            Err(error) => {
+                eprintln!("learn-pali: lookup: unreachable: {}", kind(&error));
+                LookupAnswer::Unreachable
+            }
+        }
+    }
+
+    fn parse_senses(body: &str) -> LookupAnswer {
+        #[derive(serde::Deserialize)]
+        struct Response {
+            senses: Vec<Sense>,
+        }
+        if let Ok(response) = serde_json::from_str::<Response>(body) {
+            LookupAnswer::Senses(response.senses)
+        } else {
+            eprintln!("learn-pali: lookup: unreachable: body");
+            LookupAnswer::Unreachable
+        }
+    }
+
     /// The passage, through the configured API, within the budget.
     pub async fn passage(entry: Entry) -> PassageAnswer {
         let Some(config) = config() else {
@@ -473,8 +560,23 @@ pub mod server {
             }
         }
 
+        async fn dpd(Path(word): Path<String>, headers: HeaderMap) -> (StatusCode, String) {
+            if !authorised(&headers) {
+                return (StatusCode::UNAUTHORIZED, String::new());
+            }
+            if word == "dhammo" {
+                (
+                    StatusCode::OK,
+                    r#"{"word":"dhammo","senses":[{"lemma":"dhamma 1.01","pos":"masc","en":"nature; character","fr":"nature"},{"lemma":"dhamma 1.02","pos":"masc","en":"quality","fr":null}]}"#.into(),
+                )
+            } else {
+                (StatusCode::NOT_FOUND, r#"{"error":"not_found"}"#.into())
+            }
+        }
+
         async fn serve(fake: Fake) -> ApiConfig {
             let app = axum::Router::new()
+                .route("/v1/dpd/{word}", get(dpd))
                 .route("/v1/dictionary", get(dictionary))
                 .route("/v1/sutta/{uid}", get(sutta))
                 .route("/v1/sutta/{uid}/{lang}", get(text))
@@ -677,6 +779,33 @@ pub mod server {
             assert_eq!(
                 blocking(move || passage_in(&dead, &vakkali())).await,
                 PassageAnswer::Transient
+            );
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_form_is_looked_up_exactly_and_an_unknown_one_has_no_sense() {
+            let config = serve(fake()).await;
+            let c = config.clone();
+            let answer = blocking(move || lookup_in(&c, "dhammo")).await;
+            let LookupAnswer::Senses(senses) = answer else {
+                panic!("{answer:?}");
+            };
+            assert_eq!(senses.len(), 2);
+            assert_eq!(senses[0].lemma, "dhamma 1.01");
+            assert_eq!(senses[0].fr.as_deref(), Some("nature"));
+            assert_eq!(senses[1].fr, None);
+            let c = config.clone();
+            assert_eq!(
+                blocking(move || lookup_in(&c, "zzz")).await,
+                LookupAnswer::Senses(Vec::new())
+            );
+            let dead = ApiConfig {
+                base: "http://127.0.0.1:9".into(),
+                token: TOKEN.into(),
+            };
+            assert_eq!(
+                blocking(move || lookup_in(&dead, "dhammo")).await,
+                LookupAnswer::Unreachable
             );
         }
 

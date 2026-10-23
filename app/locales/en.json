@@ -163,5 +163,8 @@
   "search_added_no_line": "Added. No line from the suttas for this word.",
   "search_transient": "Could not fetch the line from the suttas. Nothing was added. Try again.",
   "search_count_1": "1 entry",
-  "search_count_n": "{{ count }} entries"
+  "search_count_n": "{{ count }} entries",
+  "lookup_pending": "Looking up...",
+  "lookup_none": "No entry for this word.",
+  "lookup_error": "The dictionary is not reachable right now."
 }

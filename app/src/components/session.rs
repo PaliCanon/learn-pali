@@ -867,7 +867,7 @@ fn example_words(
     locale: Locale,
     action: Option<EntryAction>,
 ) -> impl IntoView + use<> {
-    let entries = passage_entries(&text);
+    let live = LiveWords::new(passage_entries(&text), locale);
     let more_label = Callback::new(move |count: usize| more_words(locale, count));
     // The prop is optional, not an `Option`: two arms, the same look.
     match action {
@@ -875,10 +875,12 @@ fn example_words(
             <PaliText
                 id=id
                 text=text
-                entries=entries
+                entries=live.entries
                 more_label=more_label
                 entry_action=action
                 layout="whitespace-pre-line"
+                lookup=live.lookup
+                empty_label=live.label
             />
         }
         .into_any(),
@@ -886,17 +888,98 @@ fn example_words(
             <PaliText
                 id=id
                 text=text
-                entries=entries
+                entries=live.entries
                 more_label=more_label
                 layout="whitespace-pre-line"
+                lookup=live.lookup
+                empty_label=live.label
             />
         }
         .into_any(),
     }
 }
 
-/// The deck's words as [`PaliText`] entries, by [`word_key`]: built once,
-/// on first use.
+/// The words of one line, tappable everywhere (065): the deck's compiled
+/// entries first; a word the deck does not know is looked up by its exact
+/// form through the server (`lookup_word`) when opened, and its senses
+/// join the map in place; the panel says looking up, then no entry.
+#[derive(Clone, Copy)]
+struct LiveWords {
+    entries: RwSignal<HashMap<String, Vec<WordEntry>>>,
+    label: Signal<String>,
+    lookup: Callback<String>,
+}
+
+impl LiveWords {
+    fn new(known: HashMap<String, Vec<WordEntry>>, locale: Locale) -> LiveWords {
+        let entries = RwSignal::new(known);
+        let state = RwSignal::new(LookupState::Pending);
+        let label = Signal::derive(move || lookup_label(locale, state.get()));
+        let lookup = Callback::new(move |form: String| {
+            let key = form.to_lowercase();
+            if entries.with_untracked(|map| map.contains_key(&key)) {
+                return;
+            }
+            state.set(LookupState::Pending);
+            leptos::task::spawn_local(async move {
+                let answer = crate::dictionary::lookup_word(form).await;
+                let senses = match answer {
+                    Ok(crate::dictionary::LookupAnswer::Senses(senses)) => senses,
+                    Ok(crate::dictionary::LookupAnswer::Unreachable) | Err(_) => {
+                        state.try_set(LookupState::Unreachable);
+                        return;
+                    }
+                };
+                if senses.is_empty() {
+                    state.try_set(LookupState::None);
+                    return;
+                }
+                let found: Vec<WordEntry> =
+                    senses.into_iter().map(|s| live_entry(&s, locale)).collect();
+                entries.try_update(|map| {
+                    map.insert(key, found);
+                });
+            });
+        });
+        LiveWords {
+            entries,
+            label,
+            lookup,
+        }
+    }
+}
+
+/// Where a live lookup stands, for the panel's line.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum LookupState {
+    Pending,
+    None,
+    Unreachable,
+}
+
+fn lookup_label(locale: Locale, state: LookupState) -> String {
+    match state {
+        LookupState::Pending => td_string!(locale, lookup_pending),
+        LookupState::None => td_string!(locale, lookup_none),
+        LookupState::Unreachable => td_string!(locale, lookup_error),
+    }
+    .to_string()
+}
+
+/// A live sense as the panel shows it: the lemma, the part of speech, the
+/// meaning in the page's language when the DPD has it, else English.
+fn live_entry(sense: &crate::dictionary::Sense, locale: Locale) -> WordEntry {
+    let meaning = match locale {
+        Locale::fr => sense.fr.clone().unwrap_or_else(|| sense.en.clone()),
+        _ => sense.en.clone(),
+    };
+    WordEntry {
+        headword: sense.lemma.clone(),
+        tag: Some(sense.pos.clone()),
+        meaning,
+    }
+}
+
 static DICTIONARY: LazyLock<HashMap<String, Vec<WordEntry>>> = LazyLock::new(|| {
     deck()
         .words
@@ -2200,6 +2283,49 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_live_sense_shows_its_lemma_pos_and_the_pages_meaning() {
+        let sense = crate::dictionary::Sense {
+            lemma: "dhamma 1.01".into(),
+            pos: "masc".into(),
+            en: "nature; character".into(),
+            fr: Some("nature".into()),
+        };
+        let en = live_entry(&sense, Locale::from(Language::En));
+        assert_eq!(en.headword, "dhamma 1.01");
+        assert_eq!(en.tag.as_deref(), Some("masc"));
+        assert_eq!(en.meaning, "nature; character");
+        assert_eq!(
+            live_entry(&sense, Locale::from(Language::Fr)).meaning,
+            "nature"
+        );
+        let no_fr = crate::dictionary::Sense { fr: None, ..sense };
+        assert_eq!(
+            live_entry(&no_fr, Locale::from(Language::Fr)).meaning,
+            "nature; character",
+            "English when the DPD has no French"
+        );
+        let vietnamese = Locale::from(Language::Vi);
+        assert_eq!(live_entry(&no_fr, vietnamese).meaning, "nature; character");
+    }
+
+    #[test]
+    fn the_lookup_label_follows_the_state_in_every_language() {
+        for language in [Language::En, Language::Fr, Language::Vi] {
+            let locale = Locale::from(language);
+            let pending = lookup_label(locale, LookupState::Pending);
+            let none = lookup_label(locale, LookupState::None);
+            let error = lookup_label(locale, LookupState::Unreachable);
+            assert!(!pending.is_empty() && !none.is_empty() && !error.is_empty());
+            assert_ne!(pending, none);
+            assert!(!pending.contains('\u{2014}') && !none.contains('\u{2014}'));
+        }
+        assert_eq!(
+            lookup_label(Locale::from(Language::En), LookupState::None),
+            "No entry for this word."
+        );
+    }
+
+    #[test]
     fn the_context_front_has_no_word_button_until_revealed_and_never_on_the_answer() {
         let hidden = front_with(Language::En, kho(Facet::Context), false);
         assert_eq!(word_buttons(&hidden, "pc-").len(), 0, "{hidden}");
@@ -2216,8 +2342,11 @@ pub(crate) mod tests {
         assert!(before > 0 && after > 0, "{shown}");
     }
 
+    /// 065: every word is a button; a word the deck does not know is looked
+    /// up live when opened (its panel says so), a variant spelling is found
+    /// in the deck's entries.
     #[test]
-    fn a_word_the_deck_does_not_know_stays_plain_and_a_variant_spelling_is_found() {
+    fn a_word_the_deck_does_not_know_is_a_button_too_and_a_variant_spelling_is_found() {
         let html = Owner::new().with(|| {
             palicanon_ui_lib::provide_language().set(Language::En);
             let text = "Alaṁ, zzzq sampādethā’ti.".to_string();
@@ -2225,8 +2354,10 @@ pub(crate) mod tests {
         });
         assert!(html.contains(">Alaṁ</button>"), "{html}");
         assert!(html.contains(">sampādethā’ti</button>"), "{html}");
-        assert!(!html.contains(">zzzq</button>"), "{html}");
-        assert!(html.contains("zzzq"), "{html}");
+        assert!(
+            html.contains(">zzzq</button>"),
+            "tappable, looked up live: {html}"
+        );
     }
 
     #[test]

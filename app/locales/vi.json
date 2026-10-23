@@ -163,5 +163,8 @@
   "search_added_no_line": "Đã thêm. Không có dòng kinh nào cho từ này.",
   "search_transient": "Không đọc được dòng kinh. Chưa thêm gì cả. Hãy thử lại.",
   "search_count_1": "1 mục",
-  "search_count_n": "{{ count }} mục"
+  "search_count_n": "{{ count }} mục",
+  "lookup_pending": "Đang tra...",
+  "lookup_none": "Không có mục nào cho từ này.",
+  "lookup_error": "Hiện không kết nối được từ điển."
 }
