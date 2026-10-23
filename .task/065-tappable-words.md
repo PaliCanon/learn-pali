@@ -1,6 +1,6 @@
 # 065 Tappable words everywhere a Pāli line shows
 
-status: review · rank: 4 · level: standard · type: feat · request: the user, 2026-10-23 («pourquoi je ne peux pas avoir la définition des mots du sutta ?» on an added word's line; «mot tapable partout») · after: [062]
+status: merged · rank: 4 · level: standard · type: feat · request: the user, 2026-10-23 («pourquoi je ne peux pas avoir la définition des mots du sutta ?» on an added word's line; «mot tapable partout») · after: [062]
 
 ## Summary
 Rank: difficulty 4 (a server function over the API's exact-form lookup, the word panel fed live, two screens), impact 4 (every passage not compiled in the deck) → 4. No agents (the user's order): the orchestrator builds.
@@ -15,3 +15,10 @@ Today a Pāli line is tappable only where the deck compiled the entries of its w
 | Fix 065 | done | the per-call timeout 5 s (a cold api-dev timed out the first lookup at 2 s; the dictionary tests unchanged) |
 | Check 065 | doing | on learn.dev (feat/tappable-words · 5cb2016, run 39903309392): lookup_word answers senses once the API is warm; the idle probe runs; waiting for the user |
 | Check 065 | done | the user, 2026-10-23: «tag alors» on 5cb2016; the idle probe: senses in 9.4 s on a cold API |
+| Merge | done | 43231eb on main (squash); prod tag v0.1.14 |
+
+## Retro
+By the orchestrator alone (no agents), one morning: the ui-lib addition first (two optional props, the golden markup kept by rendering the empty-panel row as a list item, not an Option), then the server function and the lines. Errors: the ui-lib task number and tag collided with another session's work the same morning (075 / v0.4.2: renumbered 076, released v0.4.3; a lesson in memory); the first lookup after idle timed out at 2 s on the cold API (found by the dev probe, 5 s now). Open: an added word's live senses have no Add button in the panel (the panel's action knows the deck's entries only); the search screen's rows show no line. Retro 065 validated.
+
+## Merge
+43231eb
