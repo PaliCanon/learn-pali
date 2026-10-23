@@ -1,6 +1,6 @@
 # 068 The passages asset and the fragment's dictionary port
 
-status: review · rank: 6 · level: hard · type: feat · request: the user, 2026-10-23 («dico pas dans l'app ?», «on a pas besoin de taper l'API, on a déjà tout en local», «lance dictionnaire et app») · session: learn-pali-068-passages-and-dictionary-port
+status: merged · rank: 6 · level: hard · type: feat · request: the user, 2026-10-23 («dico pas dans l'app ?», «on a pas besoin de taper l'API, on a déjà tout en local», «lance dictionnaire et app») · session: learn-pali-068-passages-and-dictionary-port
 
 ## Summary
 Rank: difficulty 6 (a pipeline over three corpus databases, a new asset, a port in the fragment with two implementations), impact 5 (the app gets the dictionary; the site's Add stops calling the API five times) → 6. No agents (the user's order): the orchestrator builds.
@@ -27,3 +27,9 @@ Open: the asset's exact schema; the app's size (≈ 55 MB more).
 
 ### Round 2 — 2026-10-24 (@deep, the fix diff)
 Points 2 and 5 closed as mechanism; residual: `check_asset` pinned nothing but the row count — TAKEN: `COLUMNS` (what `SCHEMA` stands for) compared to `PRAGMA table_info`, one found row read through every column, the file reopened read-only after the write (not the writing connection), its counts compared to the build's; T2 extended (a dropped column is refused). Footnote on `rename` over an existing `out`: `out` is refused before the build, said in a comment. Rulings 1, 3, 4 stand (Deep: "do close what I raised"). The rebuilt asset is byte-identical to `passages-2026-10-24.db`. Two rounds: the loop ends (rank 4–7).
+
+## Merge
+966db20 on main (squash of 40398b0), 2026-10-24; tag `fragment-v0.5.0` for the app.
+
+## Retro
+No agents (user, 2026-10-22): one line. What cost time: a worktree folder shared with another repository's task of the same number (`wt/068/ui-lib` was ui-lib 068's, at 0.3.0: the `[patch]` went unused, Cargo.lock was rewritten, and after the move `env!(CARGO_MANIFEST_DIR)` stayed baked in the test binaries until a `cargo clean`); gcloud's sliced download crashing on 77 MB files (curl with an access token worked). What the review caught: nothing pinned the asset's schema and a stopped build left a whole-looking file. Lesson: a worktree folder carries the repository's name when two repositories can share a task number (`wt/<repo>-<NNN>/`).
