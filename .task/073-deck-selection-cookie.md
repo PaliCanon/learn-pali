@@ -1,6 +1,6 @@
 # 073 The selected deck survives the first paint
 
-status: building · rank: 3 · level: standard · type: fix · request: the user, 2026-10-24 (« des fois il m'affiche Words 0 et je suis sur le devanagari »)
+status: merged · rank: 3 · level: standard · type: fix · request: the user, 2026-10-24 (« des fois il m'affiche Words 0 et je suis sur le devanagari »)
 worktree: /Users/lsh/projects/palicanon/wt/learn-pali-073/learn-pali (branch `fix/deck-selection-cookie`), paired `wt/learn-pali-073/ui-lib` at v0.4.5
 
 ## Summary
@@ -28,4 +28,8 @@ Ruled out: hiding the deck-specific content until hydration (a blank flash inste
 6. No `storage` event for a cookie — closed with reason: a second tab keeps its selection until reload, as the theme does.
 T1 (store wins over the old key) not added: `DeviceStore` needs ui-lib's store context; the order is two lines.
 
+## Merge
+4b7e175 on main (squash of `fix/deck-selection-cookie`, tip 7625d47); prod tag v0.1.19. Review entry `review-073-deck-selection-cookie` archived; worktrees removed.
+
 ## Retro
+No agents: one line. A device setting kept where the server cannot read it flashes on every load; the cookie store existed since the theme, the deck should have used it in 063a (a value captured at one time and read at another: design names the owner). Deep's write-through finding was the one that mattered.
