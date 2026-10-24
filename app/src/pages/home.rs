@@ -817,10 +817,11 @@ fn press(cta: CtaSlot, act: Callback<HomeAction>) {
 }
 
 /// The CTA box: `children` (the Empty state's sentence) above the CTA row,
-/// which always holds the search icon (062).
+/// which renders only when the state has a CTA (069: the search icon sits
+/// beside Practice on the full home, not on an empty one).
 #[component]
 fn CtaBox(
-    /// The row's left content; none in the Empty state (the icon stays).
+    /// The row's left content; none in the Empty state (then no row).
     cta: Option<CtaSlot>,
     /// Performs the learner's choice.
     act: Callback<HomeAction>,
@@ -828,8 +829,6 @@ fn CtaBox(
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
-    // The search icon sits on the row whatever the state (062: a way in,
-    // like the +), so the row always renders.
     view! {
         <div data-cta-box="" class=CTA_BOX>
             {children.map(|children| children())}
@@ -838,8 +837,10 @@ fn CtaBox(
     }
 }
 
-/// The CTA row (HC), one thin row: the state's [`Cta`] when it has one,
-/// and the search icon that opens the 'Add a word' screen (062), always.
+/// The CTA row (HC), one thin row: the state's [`Cta`] centred, alone
+/// (069: the search icon moved beside the '+', [`NewTerms::plus_with_search`]).
+/// No CTA, no row (user 2026-10-24: « seulement sur l'accueil quand on a
+/// tout »): an empty home keeps its '+' alone.
 #[component]
 fn CtaRow(
     /// What it shows at the left; none in the Empty state.
@@ -847,12 +848,13 @@ fn CtaRow(
     /// Performs the CTA.
     act: Callback<HomeAction>,
 ) -> impl IntoView {
-    view! {
-        <div data-cta-row="" class=CTA_ROW>
-            {cta.map(|cta| view! { <Cta cta=cta act=act /> })}
-            <SearchButton act=act />
-        </div>
-    }
+    cta.map(|cta| {
+        view! {
+            <div data-cta-row="" class=CTA_ROW>
+                <Cta cta=cta act=act />
+            </div>
+        }
+    })
 }
 
 /// The row's left slot, one component a later change can restyle alone:
@@ -1126,6 +1128,25 @@ impl NewTerms {
         (new_left > 0)
             .then(|| ViewFn::from(move || view! { <AddTermsButton new_left=new_left open=open /> }))
     }
+
+    /// The '+' with the search icon beside it (069, user 2026-10-24:
+    /// « essaie le search près du add »), on the full home only; the
+    /// search alone when every term is started.
+    fn plus_with_search(self) -> ViewFn {
+        let NewTerms {
+            new_left,
+            open,
+            act,
+        } = self;
+        ViewFn::from(move || {
+            view! {
+                <span data-add-with-search="" class="inline-flex items-center gap-4">
+                    {(new_left > 0).then(|| view! { <AddTermsButton new_left=new_left open=open /> })}
+                    <SearchButton act=act />
+                </span>
+            }
+        })
+    }
 }
 
 /// The disclosure that opens [`NewTermsDialog`]: a '+', small, Accent,
@@ -1213,9 +1234,11 @@ fn HomeProgress(
     new_terms: NewTerms,
     deck: &'static Deck,
 ) -> impl IntoView {
-    let add = new_terms.plus();
     let list = match saved {
         Some(Saved { state }) => {
+            // The full home (a progress saved): the '+' with the search
+            // beside it (069).
+            let add = Some(new_terms.plus_with_search());
             let orphans = orphan_rows(&state, deck);
             view! {
                 <StageTerms progress=state stage=stage add=add deck=deck />
@@ -1223,7 +1246,10 @@ fn HomeProgress(
             }
             .into_any()
         }
-        None => add.map(|add| view! { <AddRow add=add /> }).into_any(),
+        None => new_terms
+            .plus()
+            .map(|add| view! { <AddRow add=add /> })
+            .into_any(),
     };
     view! {
         <StageStrip counts=counts stage=stage />
@@ -1549,14 +1575,43 @@ mod tests {
         }
     }
 
-    /// The CTA row of a state with no CTA (062): the search icon alone,
-    /// named 'Add a word', and no Practice.
+    #[test]
+    fn the_search_icon_sits_beside_the_plus_under_the_list_on_the_full_home() {
+        for state in [HomeState::Due(3), NOTHING_DUE] {
+            let html = with_progress(Language::En, state, None);
+            let row = element_at(&html, at(&html, "data-cta-row"));
+            assert!(
+                !row.contains("Add a word"),
+                "the CTA alone on its row: {row}"
+            );
+            let pair = element_at(&html, at(&html, "data-add-with-search"));
+            let plus = at(pair, r#"aria-label="New terms""#);
+            let search = at(pair, r#"aria-label="Add a word""#);
+            assert!(plus < search, "the '+' then the search: {pair}");
+            assert_eq!(pair.matches("<button").count(), 2, "{pair}");
+        }
+        let html = view_of(Language::En, HomeState::Due(3), 10, STARTED);
+        assert!(
+            !html.contains("Add a word"),
+            "no progress saved: no search: {html}"
+        );
+        let html = en(HomeState::Empty, 0);
+        assert!(!html.contains("data-cta-row"), "no CTA: no row: {html}");
+        assert!(
+            !html.contains("Add a word"),
+            "no search on the empty home: {html}"
+        );
+    }
+
+    /// A state with no CTA has no row at all (069): no search icon, no
+    /// Practice; the '+' stands alone where it is.
     fn icon_only_row(html: &str) {
-        let row = element_at(html, at(html, "data-cta-row"));
-        assert_eq!(row.matches("<button").count(), 1, "the icon alone: {row}");
-        assert!(row.contains(r#"aria-label="Add a word""#), "{row}");
-        assert!(!row.contains(">Practice<"), "{row}");
-        assert!(!row.contains("New terms"), "no '+' on the row: {row}");
+        assert!(
+            !html.contains("data-cta-row"),
+            "no row without a CTA: {html}"
+        );
+        assert!(!html.contains(r#"aria-label="Add a word""#), "{html}");
+        assert!(!html.contains(">Practice<"), "{html}");
     }
 
     /// The CTA row holds the state's CTA alone: the '+' left it for the
@@ -1569,16 +1624,12 @@ mod tests {
             let row = element_at(&html, at(&html, "data-cta-row"));
             assert!(
                 row.contains("flex flex-wrap items-center justify-center gap-3"),
-                "{row}"
+                "the CTA alone, centred (069): {row}"
             );
-            assert_eq!(
-                row.matches("<button").count(),
-                2,
-                "Practice and the search icon: {row}"
-            );
+            assert_eq!(row.matches("<button").count(), 1, "Practice alone: {row}");
             assert!(row.contains(">Practice<"), "{row}");
             assert!(
-                row.contains(r#"aria-label="Add a word""#),
+                !row.contains(r#"aria-label="Add a word""#),
                 "the search icon (062): {row}"
             );
             assert!(!row.contains("New terms"), "no '+' on the row: {row}");
@@ -2589,6 +2640,9 @@ mod tests {
     /// The first paint's row has the loaded CTA row's height (a compact
     /// button's and the '+', `h-8`): the layout does not move when the
     /// store has been read. Every state has the row (062: the search icon).
+    /// How many of [`every_state`] render a CTA row (069).
+    const ROWS_WITH_A_CTA: usize = 3;
+
     #[test]
     fn the_cta_row_has_the_same_height_from_the_first_paint() {
         let rows: Vec<(HomeState, String)> = every_state()
@@ -2599,9 +2653,9 @@ mod tests {
                     .then(|| (state, tag_around(&html, "data-cta-row").to_owned()))
             })
             .collect();
-        // Every state but the two broken ones (the raw copy, no row): the
-        // search icon keeps the row even with no CTA (062).
-        assert_eq!(rows.len(), 6, "{rows:?}");
+        // The states with a CTA, and the skeleton's placeholder (069: no
+        // CTA, no row).
+        assert_eq!(rows.len(), ROWS_WITH_A_CTA, "{rows:?}");
         for (state, row) in &rows {
             let classes: Vec<&str> = row.split(['"', ' ']).collect();
             assert!(classes.contains(&"min-h-8"), "{state:?}: {row}");
