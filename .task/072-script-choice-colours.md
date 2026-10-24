@@ -1,6 +1,6 @@
 # 072 The script deck's cards answered by choice on both facets, the choice in colour
 
-status: review · rank: 3 · level: standard · type: feat · request: the user, 2026-10-24 (« le résultat plutôt en vert quand c'est bon, sinon en rouge et le bon en vert » ; « du pali vers l'alphabet pourquoi on n'a pas 4 choix aussi ? »)
+status: merged · rank: 3 · level: standard · type: feat · request: the user, 2026-10-24 (« le résultat plutôt en vert quand c'est bon, sinon en rouge et le bon en vert » ; « du pali vers l'alphabet pourquoi on n'a pas 4 choix aussi ? »)
 worktree: /Users/lsh/projects/palicanon/wt/learn-pali-072/learn-pali (branch `feat/script-choice-colours`), paired `wt/learn-pali-072/ui-lib` at v0.4.5 (078: the success token)
 
 ## Summary
@@ -29,3 +29,9 @@ Ruled out: colouring through ui-lib's Button variants (the choice's states are t
 5. The Chip look forked — TAKEN as a note: the open chip copies ui-lib's Chip classes; to fold into a ui-lib variant when the choice component moves there (concepts).
 6. A paused card looks tappable — closed with the code: the card box is `inert` while paused.
 Also, from the capture: the read card's wrong caption now says "It reads" (`quiz_wrong_read`, three locales).
+
+## Merge
+2410a32 on main (squash), 2026-10-24; prod v0.1.18 (the user checks on the phone in prod).
+
+## Retro
+No agents: one line. A colour the service needed went straight to ui-lib (078, v0.4.5) and cost one worktree pair and one tag, not a fork; the choice's own look, though, is a copy of the Chip classes (noted for a ui-lib variant).
