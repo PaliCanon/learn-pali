@@ -169,6 +169,7 @@
   "lookup_error": "The dictionary is not reachable right now.",
   "search_unavailable": "The dictionary is not available in this app.",
   "quiz_right": "Right.",
+  "quiz_wrong_read": "Not that one. It reads",
   "quiz_wrong": "Not that one. The sign is",
   "quiz_next": "Next",
   "quiz_choices": "Four signs: pick the one written"

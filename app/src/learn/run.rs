@@ -140,12 +140,13 @@ impl ReviewRun {
         self.current = self.session.next().cloned();
     }
 
-    /// The four signs a script deck's write card offers (071): the answer
-    /// and three distractors in an order fixed by the term and the day;
-    /// `None` for every other card (a words deck, a Meaning card).
+    /// The four terms a script deck's card offers (071, 072): the answer
+    /// and three distractors in an order fixed by the term and the day; a
+    /// write card shows their signs, a read card their romanisations.
+    /// `None` for a words deck's card.
     pub(crate) fn choices(&self) -> Option<Vec<&'static Term>> {
         let question = self.current.as_ref()?;
-        if self.deck.kind != DeckKind::Script || question.facet != Facet::Recall {
+        if self.deck.kind != DeckKind::Script {
             return None;
         }
         let term = self.session.term(&question.term)?;
@@ -324,10 +325,14 @@ mod tests {
     }
 
     #[test]
-    fn a_script_read_card_and_a_words_card_offer_no_choices() {
+    fn a_script_read_card_offers_choices_too_a_words_card_none() {
         let read = script_run("क", &[]);
         assert_eq!(read.card().unwrap().facet, Facet::Meaning);
-        assert!(read.choices().is_none());
+        assert_eq!(
+            read.choices().unwrap().len(),
+            4,
+            "072: the read card chooses among four"
+        );
         let words = run_on("kho", &[], Stage::Day);
         assert!(words.choices().is_none());
     }

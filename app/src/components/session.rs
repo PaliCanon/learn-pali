@@ -522,26 +522,20 @@ fn choice_card(
         return ().into_any();
     };
     let answer = card.term.id.clone();
-    let chosen = Signal::derive({
-        let key = key.clone();
-        move || {
-            tapped.with(|t| {
-                t.as_ref()
-                    .filter(|(k, _)| *k == key)
-                    .map(|(_, id)| id.clone())
-            })
-        }
-    });
-    let answered = Signal::derive(move || chosen.with(Option::is_some));
-    let right = Signal::derive({
-        let answer = answer.clone();
-        move || chosen.with(|c| c.as_ref() == Some(&answer))
-    });
+    let (chosen, answered, right) = choice_signals(tapped, &key, &answer);
+    let row = ChoiceRow {
+        answer: answer.clone(),
+        key: key.clone(),
+        facet: card.facet,
+        tapped,
+        chosen,
+        answered,
+    };
     let buttons = choices
         .into_iter()
-        .map(|term| choice_button(term, &answer, &key, tapped, chosen, answered, paused))
+        .map(|term| choice_button(term, &row))
         .collect_view();
-    let answer_sign: &'static str = card.term.lemma.as_str();
+    let answer_sign: &'static str = choice_text(card.term, card.facet);
     view! {
         <div data-choice-card="">
             {front_view(card, language, answered)}
@@ -552,7 +546,7 @@ fn choice_card(
                 class="flex flex-wrap gap-2 px-4"
             >
                 {buttons}
-            </div> {choice_verdict(answered, right, answer_sign, locale)}
+            </div> {choice_verdict(answered, right, answer_sign, card.facet, locale)}
             {choice_next(run, backend, answered, right, paused, locale)}
         </div>
     }
@@ -564,6 +558,7 @@ fn choice_verdict(
     answered: Signal<bool>,
     right: Signal<bool>,
     answer_sign: &'static str,
+    facet: Facet,
     locale: Locale,
 ) -> impl IntoView {
     // The live region is there from the start, empty, and filled on the
@@ -575,8 +570,10 @@ fn choice_verdict(
                     {move || {
                         if right.get() {
                             td_string!(locale, quiz_right).to_string()
-                        } else {
+                        } else if facet == Facet::Recall {
                             td_string!(locale, quiz_wrong).to_string()
+                        } else {
+                            td_string!(locale, quiz_wrong_read).to_string()
                         }
                     }}
                 </p>
@@ -640,37 +637,143 @@ fn choice_next(
     }
 }
 
-/// One of the four signs: a chip, pressed once tapped, named right once
-/// the card is answered (`data-right`), disabled after the tap.
-fn choice_button(
-    term: &'static Term,
-    answer: &TermId,
+/// What a choice shows once the card is answered (072, user: « en vert
+/// quand c'est bon, sinon en rouge et le bon en vert »).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChoiceState {
+    /// Not answered yet: a chip to tap.
+    Open,
+    /// The answer, tapped or not: green.
+    Right,
+    /// Tapped and not the answer: red.
+    Wrong,
+    /// Neither, once answered: dimmed.
+    Other,
+}
+
+/// The classes of a choice in `state`: the whole look per state, nothing
+/// toggled on one property (ui-components.md).
+fn choice_classes(state: ChoiceState) -> &'static str {
+    match state {
+        ChoiceState::Open => {
+            "inline-flex min-w-0 flex-1 cursor-pointer select-none items-center justify-center \
+             gap-2 rounded-full border border-line bg-chip px-3 py-2 text-muted transition \
+             hover:border-gold/60 hover:text-heading active:bg-chip-hover focus-visible:outline-2 \
+             focus-visible:outline-offset-2 focus-visible:outline-gold disabled:cursor-default"
+        }
+        ChoiceState::Right => {
+            "inline-flex min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full \
+             border border-success bg-success/10 px-3 py-2 text-success transition disabled:cursor-default"
+        }
+        ChoiceState::Wrong => {
+            "inline-flex min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full \
+             border border-danger bg-danger/10 px-3 py-2 text-danger transition disabled:cursor-default"
+        }
+        ChoiceState::Other => {
+            "inline-flex min-w-0 flex-1 select-none items-center justify-center gap-2 rounded-full \
+             border border-line bg-chip px-3 py-2 text-muted opacity-50 transition disabled:cursor-default"
+        }
+    }
+}
+
+/// The state of the choice `id` on a card whose answer is `answer`.
+fn choice_state(id: &TermId, answer: &TermId, chosen: Option<&TermId>) -> ChoiceState {
+    match chosen {
+        None => ChoiceState::Open,
+        Some(_) if id == answer => ChoiceState::Right,
+        Some(tapped) if tapped == id => ChoiceState::Wrong,
+        Some(_) => ChoiceState::Other,
+    }
+}
+
+/// The card's three signals from the tap: the sign chosen on this card
+/// (by key), whether it is answered, whether the choice was right.
+fn choice_signals(
+    tapped: RwSignal<Option<(String, TermId)>>,
     key: &str,
+    answer: &TermId,
+) -> (Signal<Option<TermId>>, Signal<bool>, Signal<bool>) {
+    let chosen = Signal::derive({
+        let key = key.to_string();
+        move || {
+            tapped.with(|t| {
+                t.as_ref()
+                    .filter(|(k, _)| *k == key)
+                    .map(|(_, id)| id.clone())
+            })
+        }
+    });
+    let answered = Signal::derive(move || chosen.with(Option::is_some));
+    let right = Signal::derive({
+        let answer = answer.clone();
+        move || chosen.with(|c| c.as_ref() == Some(&answer))
+    });
+    (chosen, answered, right)
+}
+
+/// What a choice shows, and the verdict names: the sign on a write card
+/// (Recall: the romanisation is the prompt), the romanisation on a read
+/// card (Meaning: the sign is the prompt). In a script deck the item's
+/// `meaning` is its romanisation (063).
+fn choice_text(term: &'static Term, facet: Facet) -> &'static str {
+    if facet == Facet::Recall {
+        term.lemma.as_str()
+    } else {
+        term.meaning.en.as_str()
+    }
+}
+
+/// What every choice of a card shares: the answer, the card's key and
+/// facet, and the card's signals.
+#[derive(Clone)]
+struct ChoiceRow {
+    answer: TermId,
+    key: String,
+    facet: Facet,
     tapped: RwSignal<Option<(String, TermId)>>,
     chosen: Signal<Option<TermId>>,
     answered: Signal<bool>,
-    paused: Signal<bool>,
-) -> impl IntoView {
+}
+
+/// One of the four choices: the sign on a write card, the romanisation on a
+/// read card; a chip until the tap, then green (the answer), red (a wrong
+/// tap) or dimmed; `aria-pressed` on the tapped one, `data-right` on the
+/// answer once answered; disabled after the tap.
+fn choice_button(term: &'static Term, row: &ChoiceRow) -> impl IntoView {
+    let (tapped, chosen, answered, facet) = (row.tapped, row.chosen, row.answered, row.facet);
     let id = term.id.clone();
-    let is_answer = id == *answer;
+    let answer = row.answer.clone();
+    let key = row.key.clone();
+    let is_answer = id == answer;
+    let state = Signal::derive({
+        let (id, answer) = (id.clone(), answer.clone());
+        move || chosen.with(|c| choice_state(&id, &answer, c.as_ref()))
+    });
     let pressed = Signal::derive({
         let id = id.clone();
         move || chosen.with(|c| c.as_ref() == Some(&id))
     });
-    let key = key.to_string();
+    let text = choice_text(term, facet);
+    let shown = if facet == Facet::Recall {
+        view! { <Pali size=PaliSize::Display>{text}</Pali> }.into_any()
+    } else {
+        view! { <span class="text-xl text-heading">{text}</span> }.into_any()
+    };
     view! {
-        <Button
-            variant=Variant::Chip
-            size=Size::Lg
-            layout="min-w-0 flex-1"
-            disabled=Signal::derive(move || answered.get() || paused.get())
-            on_click=move |_| tapped.set(Some((key.clone(), id.clone())))
-            {..}
+        <button
+            type="button"
+            class=move || choice_classes(state.get())
+            aria-disabled=move || answered.get().then_some("true")
             aria-pressed=move || pressed.get().to_string()
             data-right=move || (is_answer && answered.get()).then_some("")
+            on:click=move |_| {
+                if !answered.get_untracked() {
+                    tapped.set(Some((key.clone(), id.clone())));
+                }
+            }
         >
-            <Pali size=PaliSize::Display>{term.lemma.clone()}</Pali>
-        </Button>
+            {shown}
+        </button>
     }
 }
 
@@ -1407,6 +1510,10 @@ pub(crate) mod tests {
         let next = tag_before(&html, ">Next<");
         assert!(next.contains("disabled"), "Next waits for the tap: {next}");
         assert!(
+            !row.contains("aria-disabled"),
+            "the choices are live before the tap: {row}"
+        );
+        assert!(
             next.contains("data-choice-next"),
             "the focus target: {next}"
         );
@@ -1414,10 +1521,63 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_script_read_card_keeps_the_reveal_card() {
+    fn a_script_read_card_offers_four_romanisations_to_tap() {
         let html = render(script_run("क", &[]));
-        assert!(!html.contains("data-choice-card"), "{html}");
-        assert!(html.contains("Show the answer"), "{html}");
+        assert!(
+            html.contains("data-choice-card"),
+            "072: the read card chooses too: {html}"
+        );
+        assert!(!html.contains("Show the answer"), "{html}");
+        let start = html.find("data-choices").expect("the row");
+        let row = &html[start
+            ..html[start..]
+                .find("data-verdict")
+                .map_or(html.len(), |i| start + i)];
+        assert!(
+            row.contains(">ka<"),
+            "the answer's romanisation among the four: {row}"
+        );
+        assert!(!row.contains(">क<"), "a read card offers no sign: {row}");
+        assert_eq!(row.matches("<button").count(), 4, "{row}");
+    }
+
+    #[test]
+    fn a_choice_is_a_chip_then_green_red_or_dimmed() {
+        let (a, b, c) = (TermId("अ".into()), TermId("आ".into()), TermId("इ".into()));
+        assert_eq!(choice_state(&a, &a, None), ChoiceState::Open);
+        assert_eq!(
+            choice_state(&a, &a, Some(&a)),
+            ChoiceState::Right,
+            "tapped right: green"
+        );
+        assert_eq!(
+            choice_state(&a, &a, Some(&b)),
+            ChoiceState::Right,
+            "the answer, not tapped: green"
+        );
+        assert_eq!(
+            choice_state(&b, &a, Some(&b)),
+            ChoiceState::Wrong,
+            "tapped wrong: red"
+        );
+        assert_eq!(
+            choice_state(&c, &a, Some(&b)),
+            ChoiceState::Other,
+            "the rest: dimmed"
+        );
+        assert!(choice_classes(ChoiceState::Right).contains("border-success"));
+        assert!(choice_classes(ChoiceState::Wrong).contains("border-danger"));
+        assert!(
+            choice_classes(ChoiceState::Open).contains("hover:"),
+            "only the open chip hovers"
+        );
+        for state in [ChoiceState::Right, ChoiceState::Wrong, ChoiceState::Other] {
+            assert!(!choice_classes(state).contains("hover:"), "{state:?}");
+            assert!(
+                !choice_classes(state).contains("cursor-pointer"),
+                "{state:?}"
+            );
+        }
     }
 
     #[test]
@@ -1427,6 +1587,7 @@ pub(crate) mod tests {
             for s in [
                 td_string!(locale, quiz_right).to_string(),
                 td_string!(locale, quiz_wrong).to_string(),
+                td_string!(locale, quiz_wrong_read).to_string(),
                 td_string!(locale, quiz_next).to_string(),
                 td_string!(locale, quiz_choices).to_string(),
             ] {
