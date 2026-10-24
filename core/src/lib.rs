@@ -38,6 +38,7 @@ pub mod grow;
 pub mod kind;
 pub mod merge;
 pub mod progress;
+pub mod quiz;
 pub mod session;
 mod shuffle;
 pub mod stage;

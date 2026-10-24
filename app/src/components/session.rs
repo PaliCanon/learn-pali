@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::sync::LazyLock;
 
 use learn_core::date::Date;
-use learn_core::deck::{Blank, Deck, Example};
+use learn_core::deck::{Blank, Deck, Example, Term, TermId};
 use learn_core::facet::Facet;
 use learn_core::progress::State;
 use learn_core::session::{Answer, Session, nearest};
@@ -463,23 +463,214 @@ fn FacetCard(
     // its own.
     let handed = RwSignal::new(None::<Signal<bool>>);
     let shown = Signal::derive(move || handed.get().is_some_and(|signal| signal.get()));
+    // The sign tapped on a choice card (071), with the key of the card it
+    // was tapped on: another card reads untapped.
+    let tapped = RwSignal::new(None::<(String, TermId)>);
     move || {
         let locale = Locale::from(language.get());
+        let choices = run.with(ReviewRun::choices);
         view! {
             <div class=CARD_BOX inert=move || paused.get().then_some("")>
-                <RevealCard
-                    front=move || view! { <CardFront run=run revealed=shown /> }
-                    reveal=move || view! { <CardReveal run=run /> }
-                    actions=move |is_revealed| {
-                        revealed.set_value(Some(is_revealed));
-                        handed.set(Some(is_revealed));
-                        grade_buttons(run, backend, paused, is_revealed, locale)
+                {match choices {
+                    Some(choices) => {
+                        let answered = Signal::derive(move || {
+                            tapped.with(|t| t.as_ref().is_some_and(|(k, _)| *k == key.get()))
+                        });
+                        revealed.set_value(None);
+                        handed.set(Some(answered));
+                        choice_card(run, backend, paused, tapped, choices, language.get())
+                            .into_any()
                     }
-                    key=key
-                    reveal_label=td_string!(locale, review_show)
-                />
+                    None => {
+                        // The grade keys stay shut on a choice card: the tap
+                        // judges, a key must not (review 071).
+                        view! {
+                            <RevealCard
+                                front=move || view! { <CardFront run=run revealed=shown /> }
+                                reveal=move || view! { <CardReveal run=run /> }
+                                actions=move |is_revealed| {
+                                    revealed.set_value(Some(is_revealed));
+                                    handed.set(Some(is_revealed));
+                                    grade_buttons(run, backend, paused, is_revealed, locale)
+                                }
+                                key=key
+                                reveal_label=td_string!(locale, review_show)
+                            />
+                        }
+                            .into_any()
+                    }
+                }}
             </div>
         }
+    }
+}
+
+/// A script deck's write card (071): the romanisation, four signs to tap;
+/// the tap judges at once (the tapped sign pressed, the right one named),
+/// and Next gives the grade. No 'Show the answer': the app judges.
+fn choice_card(
+    run: RwSignal<ReviewRun>,
+    backend: Backend,
+    paused: Signal<bool>,
+    tapped: RwSignal<Option<(String, TermId)>>,
+    choices: Vec<&'static Term>,
+    language: Language,
+) -> AnyView {
+    let locale = Locale::from(language);
+    let key = run.with(ReviewRun::key);
+    let Some(card) = run.with(ReviewRun::card) else {
+        return ().into_any();
+    };
+    let answer = card.term.id.clone();
+    let chosen = Signal::derive({
+        let key = key.clone();
+        move || {
+            tapped.with(|t| {
+                t.as_ref()
+                    .filter(|(k, _)| *k == key)
+                    .map(|(_, id)| id.clone())
+            })
+        }
+    });
+    let answered = Signal::derive(move || chosen.with(Option::is_some));
+    let right = Signal::derive({
+        let answer = answer.clone();
+        move || chosen.with(|c| c.as_ref() == Some(&answer))
+    });
+    let buttons = choices
+        .into_iter()
+        .map(|term| choice_button(term, &answer, &key, tapped, chosen, answered, paused))
+        .collect_view();
+    let answer_sign: &'static str = card.term.lemma.as_str();
+    view! {
+        <div data-choice-card="">
+            {front_view(card, language, answered)}
+            <div
+                data-choices=""
+                role="group"
+                aria-label=td_string!(locale, quiz_choices)
+                class="flex flex-wrap gap-2 px-4"
+            >
+                {buttons}
+            </div> {choice_verdict(answered, right, answer_sign, locale)}
+            {choice_next(run, backend, answered, right, paused, locale)}
+        </div>
+    }
+    .into_any()
+}
+
+/// Once answered: right, or not that one and the sign.
+fn choice_verdict(
+    answered: Signal<bool>,
+    right: Signal<bool>,
+    answer_sign: &'static str,
+    locale: Locale,
+) -> impl IntoView {
+    // The live region is there from the start, empty, and filled on the
+    // tap: a region created with its content is not announced (review 071).
+    view! {
+        <div data-verdict="" role="status" aria-live="polite" class="flex flex-col gap-2 px-4">
+            <Show when=move || answered.get()>
+                <p class=CAPTION>
+                    {move || {
+                        if right.get() {
+                            td_string!(locale, quiz_right).to_string()
+                        } else {
+                            td_string!(locale, quiz_wrong).to_string()
+                        }
+                    }}
+                </p>
+                <Show when=move || !right.get()>
+                    <Pali size=PaliSize::Display>{answer_sign}</Pali>
+                </Show>
+            </Show>
+        </div>
+    }
+}
+
+/// Moves the focus to Next once a sign is tapped (the four chips go
+/// disabled, which would drop the focus to the body); the browser only.
+fn focus_next() {
+    #[cfg(feature = "browser")]
+    {
+        use wasm_bindgen::JsCast;
+        if let Some(next) = document()
+            .query_selector("[data-choice-next]")
+            .ok()
+            .flatten()
+            .and_then(|el| el.dyn_into::<web_sys::HtmlElement>().ok())
+        {
+            let _ = next.focus();
+        }
+    }
+}
+
+/// Next: gives the grade the tap earned (Pass when right, Fail otherwise).
+fn choice_next(
+    run: RwSignal<ReviewRun>,
+    backend: Backend,
+    answered: Signal<bool>,
+    right: Signal<bool>,
+    paused: Signal<bool>,
+    locale: Locale,
+) -> impl IntoView {
+    // The focus moves to Next once the DOM has enabled it: after the tap's
+    // render, not inside the tap's handler (review 071, round 2).
+    Effect::new(move |_| {
+        if answered.get() {
+            focus_next();
+        }
+    });
+    view! {
+        <div class="flex gap-3 p-4">
+            <Button
+                variant=Variant::Primary
+                size=Size::Lg
+                layout="flex-1"
+                disabled=Signal::derive(move || !answered.get() || paused.get())
+                on_click=move |_| {
+                    give(run, backend, if right.get() { Answer::Pass } else { Answer::Fail });
+                }
+                {..}
+                data-choice-next=""
+            >
+                {td_string!(locale, quiz_next)}
+            </Button>
+        </div>
+    }
+}
+
+/// One of the four signs: a chip, pressed once tapped, named right once
+/// the card is answered (`data-right`), disabled after the tap.
+fn choice_button(
+    term: &'static Term,
+    answer: &TermId,
+    key: &str,
+    tapped: RwSignal<Option<(String, TermId)>>,
+    chosen: Signal<Option<TermId>>,
+    answered: Signal<bool>,
+    paused: Signal<bool>,
+) -> impl IntoView {
+    let id = term.id.clone();
+    let is_answer = id == *answer;
+    let pressed = Signal::derive({
+        let id = id.clone();
+        move || chosen.with(|c| c.as_ref() == Some(&id))
+    });
+    let key = key.to_string();
+    view! {
+        <Button
+            variant=Variant::Chip
+            size=Size::Lg
+            layout="min-w-0 flex-1"
+            disabled=Signal::derive(move || answered.get() || paused.get())
+            on_click=move |_| tapped.set(Some((key.clone(), id.clone())))
+            {..}
+            aria-pressed=move || pressed.get().to_string()
+            data-right=move || (is_answer && answered.get()).then_some("")
+        >
+            <Pali size=PaliSize::Display>{term.lemma.clone()}</Pali>
+        </Button>
     }
 }
 
@@ -1169,6 +1360,80 @@ pub(crate) mod tests {
 
     fn today() -> Date {
         Date::parse("2026-10-05").unwrap()
+    }
+
+    /// A run on the Devanāgarī deck with `sign` started and `passed` passed
+    /// (071).
+    fn script_run(sign: &str, passed: &[Facet]) -> ReviewRun {
+        let deck = crate::deck::devanagari();
+        let mut entry = Progress::new(TermId(sign.to_string()), today());
+        for facet in passed {
+            entry.passed.insert(*facet);
+        }
+        let mut before = State::empty();
+        before.progress.push(entry);
+        let session = Session::start(deck, before.clone(), today(), 0).unwrap();
+        ReviewRun::new(session, deck, before)
+    }
+
+    #[test]
+    fn a_script_write_card_is_four_signs_to_tap_and_next_with_no_reveal() {
+        let html = render(script_run("क", &[Facet::Meaning]));
+        assert!(html.contains("data-choice-card"), "{html}");
+        let start = html.find("data-choices").expect("the row");
+        let row = &html[start
+            ..html[start..]
+                .find("data-verdict")
+                .map_or(html.len(), |i| start + i)];
+        assert!(row.matches("<button").count() >= 4, "four signs: {row}");
+        assert!(row.contains(">क<"), "the answer among them: {row}");
+        assert!(row.contains(r#"aria-pressed="false""#), "{row}");
+        assert!(
+            !row.contains("data-right"),
+            "nothing named before a tap: {row}"
+        );
+        assert!(
+            !html.contains("Show the answer"),
+            "no reveal on a choice card: {html}"
+        );
+        assert!(
+            html.contains(r#"role="status""#),
+            "a live region from the start: {html}"
+        );
+        assert!(
+            !html.contains("Not that one") && !html.contains(">Right.<"),
+            "the region is empty before a tap: {html}"
+        );
+        let next = tag_before(&html, ">Next<");
+        assert!(next.contains("disabled"), "Next waits for the tap: {next}");
+        assert!(
+            next.contains("data-choice-next"),
+            "the focus target: {next}"
+        );
+        assert!(!html.contains("Knew it"), "no grade buttons: {html}");
+    }
+
+    #[test]
+    fn a_script_read_card_keeps_the_reveal_card() {
+        let html = render(script_run("क", &[]));
+        assert!(!html.contains("data-choice-card"), "{html}");
+        assert!(html.contains("Show the answer"), "{html}");
+    }
+
+    #[test]
+    fn the_quiz_strings_are_in_the_three_locales_without_an_em_dash() {
+        for language in [Language::En, Language::Fr, Language::Vi] {
+            let locale = Locale::from(language);
+            for s in [
+                td_string!(locale, quiz_right).to_string(),
+                td_string!(locale, quiz_wrong).to_string(),
+                td_string!(locale, quiz_next).to_string(),
+                td_string!(locale, quiz_choices).to_string(),
+            ] {
+                assert_ne!(s.len(), 0);
+                assert!(!s.contains('\u{2014}'), "{s}");
+            }
+        }
     }
 
     /// A run on one started term with `passed` facets already passed.

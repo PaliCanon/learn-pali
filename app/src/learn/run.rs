@@ -6,7 +6,9 @@ use learn_core::added::AddError;
 use learn_core::deck::{Deck, Form, Term, TermId};
 use learn_core::facet::Facet;
 use learn_core::forms::forms_question;
+use learn_core::kind::DeckKind;
 use learn_core::progress::State;
+use learn_core::quiz;
 use learn_core::session::{Answer, Question, Session};
 
 use crate::deck::pinned;
@@ -138,6 +140,26 @@ impl ReviewRun {
         self.current = self.session.next().cloned();
     }
 
+    /// The four signs a script deck's write card offers (071): the answer
+    /// and three distractors in an order fixed by the term and the day;
+    /// `None` for every other card (a words deck, a Meaning card).
+    pub(crate) fn choices(&self) -> Option<Vec<&'static Term>> {
+        let question = self.current.as_ref()?;
+        if self.deck.kind != DeckKind::Script || question.facet != Facet::Recall {
+            return None;
+        }
+        let term = self.session.term(&question.term)?;
+        let seed = quiz::seed_for(term, self.session.today().days());
+        let ids = quiz::choices(term, self.deck, seed);
+        let terms: Vec<&'static Term> = ids
+            .iter()
+            .filter_map(|id| self.deck.terms.iter().find(|t| t.id == *id))
+            .map(pinned)
+            .collect();
+        // A deck too small for four signs keeps the reveal card.
+        (terms.len() == ids.len() && terms.len() == quiz::CHOICES).then_some(terms)
+    }
+
     /// The card of the current question, `None` when nothing is asked.
     pub(crate) fn card(&self) -> Option<Card> {
         let question = self.current.as_ref()?;
@@ -247,6 +269,68 @@ mod tests {
 
     use super::{NotAdded, ReviewRun};
     use crate::deck::deck;
+
+    /// A run on the Devanāgarī deck with `sign` started, `passed` already
+    /// passed today (071).
+    fn script_run(sign: &str, passed: &[Facet]) -> ReviewRun {
+        let deck = crate::deck::devanagari();
+        let mut entry = Progress::new(TermId(sign.to_string()), today());
+        for facet in passed {
+            entry.passed.insert(*facet);
+        }
+        let mut before = State::empty();
+        before.progress.push(entry);
+        let session = Session::start(deck, before.clone(), today(), 0).unwrap();
+        ReviewRun::new(session, deck, before)
+    }
+
+    #[test]
+    fn a_script_write_card_offers_four_signs_the_answer_among_them() {
+        let run = script_run("क", &[Facet::Meaning]);
+        assert_eq!(run.card().unwrap().facet, Facet::Recall);
+        let choices = run.choices().unwrap();
+        assert_eq!(choices.len(), 4);
+        assert_eq!(choices.iter().filter(|t| t.id.0 == "क").count(), 1);
+        let again = run.choices().unwrap();
+        assert_eq!(
+            choices.iter().map(|t| &t.id).collect::<Vec<_>>(),
+            again.iter().map(|t| &t.id).collect::<Vec<_>>(),
+            "the same row on a re-render"
+        );
+    }
+
+    #[test]
+    fn a_failed_choice_card_comes_back_under_a_new_key_untapped() {
+        let mut run = script_run("क", &[Facet::Meaning]);
+        let first = run.key();
+        run.grade(Answer::Fail, |_| {});
+        let later = (0..20)
+            .find_map(|_| {
+                let key = run.key();
+                let same = run
+                    .card()
+                    .is_some_and(|c| c.term.id.0 == "क" && c.facet == Facet::Recall);
+                if same {
+                    return Some(key);
+                }
+                run.grade(Answer::Pass, |_| {});
+                None
+            })
+            .expect("the failed card asked again");
+        assert_ne!(
+            later, first,
+            "a new presentation, a new key: the tap does not carry over"
+        );
+    }
+
+    #[test]
+    fn a_script_read_card_and_a_words_card_offer_no_choices() {
+        let read = script_run("क", &[]);
+        assert_eq!(read.card().unwrap().facet, Facet::Meaning);
+        assert!(read.choices().is_none());
+        let words = run_on("kho", &[], Stage::Day);
+        assert!(words.choices().is_none());
+    }
 
     /// `(term, facet, practice)`.
     type Asked = (String, Facet, bool);

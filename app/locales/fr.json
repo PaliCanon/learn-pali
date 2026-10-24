@@ -167,5 +167,9 @@
   "lookup_pending": "Recherche...",
   "lookup_none": "Aucune entrée pour ce mot.",
   "lookup_error": "Le dictionnaire est injoignable pour le moment.",
-  "search_unavailable": "Le dictionnaire n'est pas disponible dans cette application."
+  "search_unavailable": "Le dictionnaire n'est pas disponible dans cette application.",
+  "quiz_right": "Juste.",
+  "quiz_wrong": "Pas celui-là. Le signe est",
+  "quiz_next": "Suivant",
+  "quiz_choices": "Quatre signes : choisissez celui qui s'écrit"
 }

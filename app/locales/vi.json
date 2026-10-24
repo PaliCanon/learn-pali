@@ -167,5 +167,9 @@
   "lookup_pending": "Đang tra...",
   "lookup_none": "Không có mục nào cho từ này.",
   "lookup_error": "Hiện không kết nối được từ điển.",
-  "search_unavailable": "Từ điển không có trong ứng dụng này."
+  "search_unavailable": "Từ điển không có trong ứng dụng này.",
+  "quiz_right": "Đúng.",
+  "quiz_wrong": "Không phải. Ký tự là",
+  "quiz_next": "Tiếp",
+  "quiz_choices": "Bốn ký tự: chọn ký tự được viết"
 }
