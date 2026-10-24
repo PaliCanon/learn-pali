@@ -1,6 +1,6 @@
 # 071 The script deck's write facet answered by choice
 
-status: review · rank: 4 · level: standard · type: feat · request: the user, 2026-10-24 (« réponse à 4 choix me paraît bien ! »), from `followup-script-choice-answer` (063b)
+status: merged · rank: 4 · level: standard · type: feat · request: the user, 2026-10-24 (« réponse à 4 choix me paraît bien ! »), from `followup-script-choice-answer` (063b)
 session: learn-pali-071-script-choice-answer
 worktree: /Users/lsh/projects/palicanon/wt/learn-pali-071/learn-pali (branch `feat/script-choice-answer`), paired `wt/learn-pali-071/ui-lib` at v0.4.3
 
@@ -41,3 +41,9 @@ Viewer: learn-pali-071-script-choice-answer/design, from 063's `quiz` node.
 Two rounds at rank 4: the loop ends.
 
 ## Retro
+
+## Merge
+03f1e4c on main (squash), 2026-10-24; prod v0.1.17 (the user checks on the phone in prod: dev is not reachable from it).
+
+## Retro
+No agents: one line. The review's two rounds caught what a headless check cannot: a focus call that could not fire, a live region that would not announce, a golden test that printed instead of asserting. Four failed viewer posts were one missing brace, blamed twice on the tooling before the error's column was read.
