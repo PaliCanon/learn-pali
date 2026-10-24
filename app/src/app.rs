@@ -497,6 +497,43 @@ mod tests {
         assert!(open.contains(r#"data-theme="dark""#), "{open}");
     }
 
+    /// The selected deck is a cookie too (073): the server paints the
+    /// chosen deck, not the words deck with a switch after hydration.
+    #[test]
+    fn the_document_paints_the_deck_the_cookie_selects() {
+        let html = render_document("/", Some("pc_learn_deck=devanagari"));
+        let at = html
+            .find("Devan\u{101}gar\u{12b}")
+            .expect("the chooser names the deck");
+        let chip = &html[html[..at].rfind("<button").expect("a chip")..at];
+        assert!(chip.contains(r#"aria-pressed="true""#), "{chip}");
+        let words = html.find(">Words<").expect("the words chip");
+        let chip = &html[html[..words].rfind("<button").expect("a chip")..words];
+        assert!(chip.contains(r#"aria-pressed="false""#), "{chip}");
+        assert_eq!(
+            html.matches(r#"aria-pressed="true""#).count(),
+            1,
+            "one deck selected: {html}"
+        );
+    }
+
+    /// A cookie naming a deck this build does not teach, or empty (the
+    /// cookie is shared by the subdomains): the words deck, no panic.
+    #[test]
+    fn a_cookie_naming_no_deck_of_this_build_paints_the_words_deck() {
+        for cookie in ["pc_learn_deck=esperanto", "pc_learn_deck="] {
+            let html = render_document("/", Some(cookie));
+            let words = html.find(">Words<").expect("the words chip");
+            let chip = &html[html[..words].rfind("<button").expect("a chip")..words];
+            assert!(chip.contains(r#"aria-pressed="true""#), "{cookie}: {chip}");
+            assert_eq!(
+                html.matches(r#"aria-pressed="true""#).count(),
+                1,
+                "{cookie}"
+            );
+        }
+    }
+
     #[test]
     fn without_cookies_the_document_is_english_and_follows_the_system_theme() {
         let html = render_document("/", None);

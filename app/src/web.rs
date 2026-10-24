@@ -1,6 +1,7 @@
 //! The site's host side: the progress in the browser's
 //! `localStorage[pc_learn]` ([`web_store`]), the selected deck beside it in
-//! `localStorage[pc_learn_deck]` (a device setting), and the files through
+//! the device store's `pc_learn_deck` (a cookie on the site, `localStorage`
+//! in the app: 073; 063a kept it in `localStorage` only), and the files through
 //! a Blob download and a file input ([`web_files`]). Today's behaviour,
 //! behind the two traits of [`crate::backend`].
 //!
@@ -31,7 +32,37 @@ use learn_core::book::{Book, DeckId};
 /// another tab writes the key (the `storage` event).
 #[must_use]
 pub fn web_store() -> SharedStore {
-    Rc::new(WebStore::with_deck_storage(BrowserKv, BrowserStorage))
+    Rc::new(WebStore::with_deck_storage(BrowserKv, DeviceStore))
+}
+
+/// Where the selected deck lives (073): ui-lib's device store, a cookie
+/// on the site (the server reads it from the request, so the first paint
+/// already shows the selected deck, like the theme and the language) and
+/// `localStorage` under the app's `Store::Local`. A browser whose store
+/// holds nothing reads the key once where 063a kept it, `localStorage`,
+/// so today's learners keep their selection; the next select writes the
+/// store.
+struct DeviceStore;
+
+impl Storage for DeviceStore {
+    fn get_item(&self, key: &str) -> Result<Option<String>, Unavailable> {
+        if let Some(value) = palicanon_ui_lib::Store::current().read(key) {
+            return Ok(Some(value));
+        }
+        // 063a's key, once: written through to the store, so the next load's
+        // first paint already has it (review 073).
+        let old = BrowserStorage.get_item(key)?;
+        if let Some(value) = &old {
+            let _ = palicanon_ui_lib::Store::current().write(key, value);
+        }
+        Ok(old)
+    }
+
+    fn set_item(&self, key: &str, text: &str) -> Result<(), Unavailable> {
+        palicanon_ui_lib::Store::current()
+            .write(key, text)
+            .map_err(|_| Unavailable)
+    }
 }
 
 /// The file transfer of the web site: the export is a Blob URL download,
