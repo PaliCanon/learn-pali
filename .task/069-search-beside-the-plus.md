@@ -20,8 +20,8 @@ Ruled out, in order: both at the edges (« je suis pas fan »), Practice centred
 | Check (round 3) | ✗ | the user, on the centred layout: « essaie le search près du add » → the loupe moved beside the '+' under the list |
 | Check | ✓ | the user, 2026-10-24, on 127.0.0.1:3068 (branch 9203643, ui-lib v0.4.3): « c'est mieux merge deploy prod » |
 
-## Retro
-a8de775 on main (squash), 2026-10-24; prod tag v0.1.15.
+## Merge
+a8de775 on main (squash), 2026-10-24; bookkeeping 4ef5865 = prod tag v0.1.15, fragment-v0.5.1.
 
 ## Retro
 No agents: one line. Three user rounds on one row: the first question offered three layouts but the chosen one was rejected on sight, and the place the user wanted (beside the '+') was not among them. Lesson: for a placement, show the candidates on the real page (captures), not as ASCII previews; and when the user names an element to move, ask what it should sit next to.
