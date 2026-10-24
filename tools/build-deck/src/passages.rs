@@ -250,12 +250,14 @@ pub struct Counts {
 
 /// The reason's name for the asset and the counts.
 fn miss_name(why: &Why) -> &'static str {
+    use learn_passage::asset::{MissName, RETRY};
     match why {
-        Why::UnmappedSource(_) => "unmapped_source",
-        Why::NotServed(_) => "text_not_served",
-        Why::NoPali(_) => "no_pali",
-        Why::NotMatched(_) => "not_matched",
-        Why::Fetch(_) => "fetch",
+        Why::UnmappedSource(_) => MissName::UnmappedSource.as_str(),
+        Why::NotServed(_) => MissName::TextNotServed.as_str(),
+        Why::NoPali(_) => MissName::NoPali.as_str(),
+        Why::NotMatched(_) => MissName::NotMatched.as_str(),
+        // Not a miss: the reader retries it live (review 070).
+        Why::Fetch(_) => RETRY,
     }
 }
 

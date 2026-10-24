@@ -109,6 +109,9 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Fetch the passages asset the image ships (070)
+        if: steps.check-image.outputs.exists != 'true'
+        run: bash scripts/fetch-passages.sh app/assets.lock assets/passages.db
       - uses: docker/setup-buildx-action@v3
         if: steps.check-image.outputs.exists != 'true'
       - uses: docker/build-push-action@v6

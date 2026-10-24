@@ -214,7 +214,9 @@ pub mod server {
     //! The server side: the API configuration, the `ureq` client behind
     //! `learn_passage`'s `Fetch`, and the two calls.
 
-    use std::sync::OnceLock;
+    use std::sync::{Mutex, OnceLock};
+
+    use learn_passage::asset::Asset;
     use std::time::Duration;
 
     use learn_core::deck::Example;
@@ -469,12 +471,37 @@ pub mod server {
 
     /// The passage, through the configured API, within the budget.
     pub async fn passage(entry: Entry) -> PassageAnswer {
-        let Some(config) = config() else {
+        passage_with(passages(), config(), entry).await
+    }
+
+    /// [`passage`] over a given asset and config (tests).
+    pub async fn passage_with(
+        asset: Option<&'static Mutex<Asset>>,
+        config: Option<&'static ApiConfig>,
+        entry: Entry,
+    ) -> PassageAnswer {
+        // One deadline for the whole answer (review 070, round 2): what the
+        // asset read takes is taken from the live method's budget.
+        let started = std::time::Instant::now();
+        if let Some(asset) = asset {
+            let lemma = entry.lemma.clone();
+            let read = tokio::task::spawn_blocking(move || passage_from_asset(asset, &lemma));
+            match tokio::time::timeout(PASSAGE_BUDGET, read).await {
+                Ok(Ok(Some(answer))) => return answer,
+                Ok(Ok(None)) => {}
+                Ok(Err(join)) => {
+                    eprintln!("learn-pali: passage: the asset read failed ({join}), live");
+                }
+                Err(_) => eprintln!("learn-pali: passage: the asset read passed the budget, live"),
+            }
+        }
+        let Some(config) = config else {
             return PassageAnswer::Transient;
         };
         let config = config.clone();
         let work = tokio::task::spawn_blocking(move || passage_in(&config, &entry));
-        match tokio::time::timeout(PASSAGE_BUDGET, work).await {
+        let remaining = PASSAGE_BUDGET.saturating_sub(started.elapsed());
+        match tokio::time::timeout(remaining, work).await {
             Ok(Ok(answer)) => answer,
             Ok(Err(_)) => PassageAnswer::Transient,
             Err(_) => {
@@ -484,8 +511,79 @@ pub mod server {
         }
     }
 
+    /// The passages asset the server reads first (070): the path of a file
+    /// `build-deck passages` wrote, set by the image (`/app/passages.db`).
+    pub const PASSAGES_VAR: &str = "LEARN_PALI_PASSAGES";
+
+    /// The passages asset, opened once at startup by [`init_passages`]
+    /// (070, review: a broken asset must not pass for a missing row).
+    fn passages() -> Option<&'static Mutex<Asset>> {
+        PASSAGES.get().and_then(Option::as_ref)
+    }
+
+    static PASSAGES: OnceLock<Option<Mutex<Asset>>> = OnceLock::new();
+
+    /// Opens the asset [`PASSAGES_VAR`] names, once, at startup: the server
+    /// then reads it first for every passage. No variable: the live method
+    /// only (`Ok(None)`).
+    ///
+    /// # Errors
+    /// The variable names a file that does not open, is of another schema
+    /// or is not complete: the server must not start on it (the deploy's
+    /// rollout check refuses the revision).
+    pub fn init_passages(get: impl Fn(&str) -> Option<String>) -> Result<Option<String>, String> {
+        let Some(path) = get(PASSAGES_VAR) else {
+            PASSAGES.get_or_init(|| None);
+            return Ok(None);
+        };
+        let asset = Asset::open(std::path::Path::new(&path))
+            .map_err(|why| format!("{PASSAGES_VAR}={path}: {why}"))?;
+        PASSAGES.get_or_init(|| Some(Mutex::new(asset)));
+        Ok(Some(path))
+    }
+
+    /// The entry's answer from the open asset (070): a row found or missed;
+    /// `None` when the asset has no row for the lemma, or asks a retry (a
+    /// fetch that failed at build time, a name this reader does not know),
+    /// so the live method runs.
+    pub fn passage_from_asset(asset: &Mutex<Asset>, lemma: &str) -> Option<PassageAnswer> {
+        use learn_passage::asset::{MissName, Row};
+        let asset = asset
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let answer = match asset.row(lemma) {
+            Ok(Some(Row::Found(example))) => PassageAnswer::Found(example),
+            Ok(Some(Row::Miss(name))) => PassageAnswer::Miss(match name {
+                MissName::UnmappedSource => Miss::UnmappedSource,
+                MissName::TextNotServed | MissName::NoPali => Miss::TextNotServed,
+                MissName::NotMatched => Miss::NotMatched,
+            }),
+            Ok(Some(Row::Retry(name))) => {
+                eprintln!(
+                    "learn-pali: passage: the asset asks a retry for {lemma:?} ({name}), live"
+                );
+                return None;
+            }
+            Ok(None) => {
+                eprintln!("learn-pali: passage: no row in the asset for {lemma:?}, live");
+                return None;
+            }
+            Err(why) => {
+                eprintln!("learn-pali: passage: ERROR the asset could not be read ({why}), live");
+                return None;
+            }
+        };
+        let outcome = match &answer {
+            PassageAnswer::Found(_) => "found".to_string(),
+            PassageAnswer::Miss(miss) => format!("miss {miss:?}"),
+            PassageAnswer::Transient => "transient".to_string(),
+        };
+        eprintln!("learn-pali: passage: {outcome} (asset)");
+        Some(answer)
+    }
+
     /// The passage against `config`: the deck's `translate_example`, its
-    /// reasons sorted into a Miss or a Transient.
+    /// reasons sorted into a Miss or a Transient (the live method, 062).
     pub fn passage_in(config: &ApiConfig, entry: &Entry) -> PassageAnswer {
         let (Some(text), Some(source)) = (entry.example.as_deref(), entry.source.as_deref()) else {
             return PassageAnswer::Miss(Miss::NoExample);
@@ -523,7 +621,7 @@ pub mod server {
             PassageAnswer::Miss(miss) => format!("miss {miss:?}"),
             PassageAnswer::Transient => "transient".to_string(),
         };
-        eprintln!("learn-pali: passage: {outcome}");
+        eprintln!("learn-pali: passage: {outcome} (live)");
         answer
     }
 
@@ -531,6 +629,74 @@ pub mod server {
     mod tests {
         //! Against a fake API on a local port: the token is checked there and
         //! never appears in an answer or a log line.
+        fn fixture_asset(name: &str) -> &'static Mutex<Asset> {
+            let path =
+                std::env::temp_dir().join(format!("pc-passages-{name}-{}.db", std::process::id()));
+            let _ = std::fs::remove_file(&path);
+            learn_passage::asset::write_fixture(&path);
+            Box::leak(Box::new(Mutex::new(Asset::open(&path).unwrap())))
+        }
+
+        #[test]
+        fn the_asset_answers_found_missed_or_asks_the_live_method() {
+            let asset = fixture_asset("rows");
+            let Some(PassageAnswer::Found(example)) = passage_from_asset(asset, "dhamma 1.01")
+            else {
+                panic!("found from the asset")
+            };
+            assert_eq!(example.source, "SN22.87");
+            assert_eq!(example.translations["en"].translator, "sujato");
+            assert_eq!(
+                passage_from_asset(asset, "vakkali"),
+                Some(PassageAnswer::Miss(Miss::NotMatched))
+            );
+            assert_eq!(
+                passage_from_asset(asset, "kho"),
+                None,
+                "a failed fetch: live"
+            );
+            assert_eq!(
+                passage_from_asset(asset, "ca"),
+                None,
+                "an unknown name: live"
+            );
+            assert_eq!(passage_from_asset(asset, "nobody"), None, "no row: live");
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_passage_from_the_asset_asks_the_api_nothing_and_a_missing_row_asks_it() {
+            // The fake API finds vakkali's line in sn22.87 (the live method
+            // answers Found); the asset says not_matched for `vakkali` and
+            // has no row for `nobody`: the answers tell which path ran.
+            let config: &'static ApiConfig = Box::leak(Box::new(serve(fake()).await));
+            let asset = fixture_asset("routing");
+            let missed = passage_with(Some(asset), Some(config), vakkali()).await;
+            assert_eq!(
+                missed,
+                PassageAnswer::Miss(Miss::NotMatched),
+                "from the asset"
+            );
+            let mut nobody = vakkali();
+            nobody.lemma = "nobody".into();
+            let live = passage_with(Some(asset), Some(config), nobody).await;
+            assert!(
+                matches!(live, PassageAnswer::Found(_)),
+                "no row in the asset: the live method found it: {live:?}"
+            );
+            let none = passage_with(None, Some(config), vakkali()).await;
+            assert!(
+                matches!(none, PassageAnswer::Found(_)),
+                "no asset: live: {none:?}"
+            );
+        }
+
+        #[test]
+        fn a_configured_asset_that_does_not_open_refuses_to_start() {
+            let nowhere = std::env::temp_dir().join("pc-passages-nowhere.db");
+            let get = |name: &str| (name == PASSAGES_VAR).then(|| nowhere.display().to_string());
+            let why = init_passages(get).unwrap_err();
+            assert!(why.contains(PASSAGES_VAR) && why.contains("open"), "{why}");
+        }
 
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};

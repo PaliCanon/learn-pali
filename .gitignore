@@ -1,2 +1,5 @@
 /target
 .a2m/
+
+# The deploy fetches the passages asset here before the image build (070).
+/assets/

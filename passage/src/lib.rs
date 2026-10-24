@@ -6,6 +6,7 @@
 //! implements over curl with a cache and the site over an HTTP client in
 //! a blocking task; this crate holds no client of its own.
 
+pub mod asset;
 pub mod blank;
 pub mod fetch;
 pub mod segments;

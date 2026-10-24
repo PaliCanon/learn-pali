@@ -78,9 +78,13 @@ WORKDIR /app
 # files (learn-pali.<hash>.js/.wasm); site/ is LEPTOS_SITE_ROOT.
 COPY --from=builder --chown=app:app /out/learn_pali /out/hash.txt ./
 COPY --from=builder --chown=app:app /out/site ./site
+# The passages asset (070): fetched by the deploy into learn-pali/assets/
+# (app/assets.lock names it and its digest) before this build.
+COPY --chown=app:app learn-pali/assets/passages.db ./passages.db
 # `get_configuration(None)` reads these and nothing else: no Cargo.toml in
 # the image. Cloud Run sends its traffic to 8080.
-ENV LEPTOS_OUTPUT_NAME=learn-pali \
+ENV LEARN_PALI_PASSAGES=/app/passages.db \
+    LEPTOS_OUTPUT_NAME=learn-pali \
     LEPTOS_SITE_ROOT=site \
     LEPTOS_SITE_PKG_DIR=pkg \
     LEPTOS_SITE_ADDR=0.0.0.0:8080 \

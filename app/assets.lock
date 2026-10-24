@@ -1,0 +1,4 @@
+# The passages asset the image ships (070): the object under
+# gs://palicanon-app-assets/passages/ and its SHA-256. Rebuilt with the
+# dictionary by `build-deck passages` (068); a new asset is a new line.
+passages passages-2026-10-24.db 6eda1cb001940f6958d23891db56a09638acb444f2d59f1b590eb15877502547

@@ -18,6 +18,14 @@ async fn main() {
             std::process::exit(1);
         }
     };
+    match learn_pali::dictionary::server::init_passages(|name| std::env::var(name).ok()) {
+        Ok(Some(path)) => println!("learn-pali: passages: {path}"),
+        Ok(None) => println!("learn-pali: passages: none, the live method"),
+        Err(err) => {
+            eprintln!("learn-pali: passages: {err}");
+            std::process::exit(1);
+        }
+    }
     println!("{}", origin.log_line());
     println!("{}", learn_pali::release::ReleaseInfo::server().log_line());
 

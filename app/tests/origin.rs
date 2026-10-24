@@ -159,8 +159,8 @@ fn writers(text: &str) -> Vec<&str> {
 
 /// A rejected request writes nothing: the guard (all of `origin.rs` but its
 /// tests) has no write call and no trace layer, and `main.rs` writes only
-/// the boot line, the start-up refusal and the listening line, before any
-/// request is served.
+/// the boot lines (the origin, the passages asset, the release), the
+/// start-up refusals and the listening line, before any request is served.
 #[test]
 fn a_rejected_request_writes_nothing() {
     let origin = source("src/origin.rs");
@@ -171,6 +171,9 @@ fn a_rejected_request_writes_nothing() {
     let found = writers(&main);
     let wanted = [
         r#"eprintln!("learn-pali: {err}");"#,
+        r#"Ok(Some(path)) => println!("learn-pali: passages: {path}"),"#,
+        r#"Ok(None) => println!("learn-pali: passages: none, the live method"),"#,
+        r#"eprintln!("learn-pali: passages: {err}");"#,
         r#"println!("{}", origin.log_line());"#,
         r#"println!("{}", learn_pali::release::ReleaseInfo::server().log_line());"#,
         r#"println!("learn-pali on http://{addr}");"#,

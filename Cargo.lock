@@ -1198,6 +1198,7 @@ name = "learn_passage"
 version = "0.1.0"
 dependencies = [
  "learn_core",
+ "rusqlite",
  "serde",
  "serde_json",
  "unicode-normalization",
