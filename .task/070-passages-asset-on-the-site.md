@@ -1,6 +1,6 @@
 # 070 The site reads the passages asset
 
-status: review · rank: 4 · level: standard · type: feat · request: the user, 2026-10-24 (« learn pali fix les 5 calls »), from `followup-site-passages-asset` (068)
+status: merged · rank: 4 · level: standard · type: feat · request: the user, 2026-10-24 (« learn pali fix les 5 calls »), from `followup-site-passages-asset` (068)
 session: learn-pali-070-passages-asset-on-the-site
 worktree: /Users/lsh/projects/palicanon/wt/learn-pali-070/learn-pali (branch `feat/passages-asset-on-the-site`), paired `wt/learn-pali-070/ui-lib` at v0.4.3
 
@@ -38,3 +38,9 @@ Tests: T1 routing (the asset answers, the fake API is not asked; no row asks it)
 1, 2, 3, 4 closed by the voice. Still open for it: (a) `init_passages` with no call site — it is called in `main.rs` (the diff's `app/src/main.rs` hunk, cut by the paste's length): the server exits on `Err`, and `tests/origin.rs` pins the boot lines; closed. (b) The budget does not cancel the blocking read, a wedged file piles threads on the mutex — ruled out with the reason: the read is one row by primary key in a local SQLite file opened read-only; a wedge there is a disk failure, where the live method is no better; the budget bounds the answer the learner waits for, which is what 062 set it for. (c) Worst case 2× the budget — TAKEN: one deadline, the live method gets the remainder. Minor: `init_passages` twice keeps the first asset (startup only); a request-time query error logs per request (rare, wanted loud). Two rounds at rank 4: the loop ends.
 
 ## Retro
+
+## Merge
+cec3fac on main (squash), 2026-10-24; the dev deploy builds the image with the asset; prod tag after.
+
+## Retro
+No agents: one line. The review found what the build missed: a broken asset falling silently to the live path, a transient frozen as a miss, two budgets in a row. A post to a voice is a file, not a heredoc: two round posts failed on a shell-quoted python script before landing. Lesson: a reader of a shared file checks its schema and fails loud at startup; write the viewer posts from a script file.
