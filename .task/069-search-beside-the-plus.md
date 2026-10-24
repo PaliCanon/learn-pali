@@ -1,6 +1,6 @@
 # 069 The search icon beside the '+', Practice alone on its row
 
-status: review · rank: 1 · level: simple · type: feat · request: the user, 2026-10-24 (« tu peux me mettre le bouton practice à gauche et search à droite ? »; asked which of three layouts, chose « écartés aux bords »)
+status: merged · rank: 1 · level: simple · type: feat · request: the user, 2026-10-24 (« tu peux me mettre le bouton practice à gauche et search à droite ? »; asked which of three layouts, chose « écartés aux bords »)
 worktree: /Users/lsh/projects/palicanon/wt/learn-pali-069/learn-pali (branch `feat/cta-row-edges`, named for the first layout), paired `wt/learn-pali-069/ui-lib` at v0.4.3
 
 ## Summary
@@ -21,3 +21,7 @@ Ruled out, in order: both at the edges (« je suis pas fan »), Practice centred
 | Check | ✓ | the user, 2026-10-24, on 127.0.0.1:3068 (branch 9203643, ui-lib v0.4.3): « c'est mieux merge deploy prod » |
 
 ## Retro
+a8de775 on main (squash), 2026-10-24; prod tag v0.1.15.
+
+## Retro
+No agents: one line. Three user rounds on one row: the first question offered three layouts but the chosen one was rejected on sight, and the place the user wanted (beside the '+') was not among them. Lesson: for a placement, show the candidates on the real page (captures), not as ASCII previews; and when the user names an element to move, ask what it should sit next to.
