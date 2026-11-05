@@ -29,8 +29,8 @@
 //! caller's `seed` like the queue, so it changes nothing in the state
 //! whatever the answers. The order never changes an outcome: the questions
 //! are the same, only their sequence differs. The practice questions a
-//! failure adds still come after the whole queue. [`nearest`] picks those terms: the
-//! started ones with the nearest next review.
+//! failure adds still come after the whole queue. [`sample_started`] draws a
+//! random subset of started terms for extra practice.
 //!
 //! [`Session::into_state`] gives the state back with `last_today` recorded;
 //! a later session refuses a `today` before it.
@@ -357,6 +357,22 @@ pub fn nearest(state: &State, deck: &Deck, only: Option<Stage>, n: usize) -> Vec
         .take(n)
         .map(|(_, term)| term.id.clone())
         .collect()
+}
+
+/// Draws up to `n` distinct started terms uniformly for extra practice.
+/// Includes added words, skips missing terms, and respects the optional stage.
+/// The seed makes the selection reproducible; progress is never changed.
+pub fn sample_started(
+    state: &State,
+    deck: &Deck,
+    only: Option<Stage>,
+    n: usize,
+    seed: u64,
+) -> Vec<TermId> {
+    let mut terms = nearest(state, deck, only, usize::MAX);
+    shuffle(&mut terms, seed);
+    terms.truncate(n);
+    terms
 }
 
 /// The pass transition: the facet is passed; when every facet of the term
@@ -1222,6 +1238,31 @@ mod tests {
 
     fn names(ids: &[TermId]) -> Vec<&str> {
         ids.iter().map(|id| id.0.as_str()).collect()
+    }
+
+    #[test]
+    fn extra_practice_samples_the_pool_without_replacement() {
+        let deck = practice_deck();
+        let state = nearest_state();
+        let original = state.clone();
+        let pick = |seed| sample_started(&state, &deck, None, 2, seed);
+        assert_eq!(pick(42), pick(42));
+        let mut subsets = std::collections::BTreeSet::new();
+        for seed in 0..64 {
+            let mut terms = pick(seed);
+            assert_eq!(terms.len(), 2);
+            assert_ne!(terms[0], terms[1]);
+            assert!(!names(&terms).contains(&"ghost"));
+            terms.sort_by(|a, b| a.0.cmp(&b.0));
+            subsets.insert(names(&terms).join(","));
+            let filtered = sample_started(&state, &deck, Some(Stage::Week), 99, seed);
+            assert_eq!(filtered.len(), 2);
+            assert!(!names(&filtered).contains(&"ca"));
+        }
+        assert_eq!(subsets.len(), 3, "every pair can be drawn");
+        assert_eq!(sample_started(&state, &deck, None, 0, 0).len(), 0);
+        assert_eq!(sample_started(&state, &deck, None, 99, 0).len(), 3);
+        assert_eq!(state, original);
     }
 
     #[test]

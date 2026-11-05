@@ -123,7 +123,7 @@
   "sync_from_other_n": "{{ count }} thuật ngữ từ thiết bị khác",
   "sync_hint_dismiss": "Để sau",
   "sync_hint_open": "Mở Cài đặt",
-  "sync_hint_text": "Dùng Learn trên nhiều thiết bị? Hãy đồng bộ với Google Drive.",
+  "sync_hint_text": "Dùng Learn trên nhiều thiết bị?\nHãy đồng bộ với Google Drive.",
   "sync_last": "Đồng bộ lần cuối lúc {{ time }}",
   "sync_line_not_synced": "Chưa được đồng bộ",
   "sync_line_synced": "Đã đồng bộ",

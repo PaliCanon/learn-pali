@@ -123,7 +123,7 @@
   "sync_from_other_n": "{{ count }} terms from another device",
   "sync_hint_dismiss": "Not now",
   "sync_hint_open": "Open Settings",
-  "sync_hint_text": "Use Learn on several devices? Sync with Google Drive.",
+  "sync_hint_text": "Use Learn on several devices?\nSync with Google Drive.",
   "sync_last": "Last synced at {{ time }}",
   "sync_line_not_synced": "Not synced",
   "sync_line_synced": "Synced",

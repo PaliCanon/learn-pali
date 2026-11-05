@@ -123,7 +123,7 @@
   "sync_from_other_n": "{{ count }} termes venus d’un autre appareil",
   "sync_hint_dismiss": "Pas maintenant",
   "sync_hint_open": "Ouvrir les paramètres",
-  "sync_hint_text": "Vous utilisez Learn sur plusieurs appareils ? Synchronisez avec Google Drive.",
+  "sync_hint_text": "Vous utilisez Learn sur plusieurs appareils ?\nSynchronisez avec Google Drive.",
   "sync_last": "Dernière synchronisation à {{ time }}",
   "sync_line_not_synced": "Non synchronisé",
   "sync_line_synced": "Synchronisé",
