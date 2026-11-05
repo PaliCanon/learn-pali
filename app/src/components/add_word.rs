@@ -213,7 +213,7 @@ fn add_slot(
 /// The 'Add to practice' button.
 fn button(press: Callback<leptos::ev::MouseEvent>, locale: Locale) -> impl IntoView {
     view! {
-        <Button variant=Variant::Ghost size=Size::Sm on_click=press>
+        <Button variant=Variant::Chip size=Size::Sm on_click=press>
             {td_string!(locale, add_word)}
         </Button>
     }
@@ -329,10 +329,10 @@ mod tests {
     }
 
     #[test]
-    fn the_button_is_a_ghost_of_the_small_size_with_no_class_of_its_own() {
+    fn the_button_is_a_chip_of_the_small_size_with_no_class_of_its_own() {
         let html = en(Some(State::empty()), "sānuvajjo", "sānuvajja");
         let classes = palicanon_ui_lib::button::classes(
-            palicanon_ui_lib::Variant::Ghost,
+            palicanon_ui_lib::Variant::Chip,
             palicanon_ui_lib::Size::Sm,
             "",
         );

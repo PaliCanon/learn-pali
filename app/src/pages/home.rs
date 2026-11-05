@@ -11,7 +11,7 @@
 //! centred (with no list, where the list would be). The CTA is one button, Practice: '▶ Practice
 //! · N' while cards are due (the review: stages move), else '▶ Practice'
 //! with the batch slider and the next review's date beside (a practice
-//! ahead of the nearest terms, of the strip's selected stage when one is:
+//! ahead of randomly drawn started terms, of the strip's selected stage when one is:
 //! nothing in the progress changes).
 //! With no term started there is no Practice: the '+' is the way in.
 //! On `sm` and up the column sits in the middle of the page's height when
@@ -131,9 +131,8 @@ pub(crate) enum HomeAction {
     /// Add a word by search (062): the search screen, in place, like a
     /// session; nothing in the progress changes until a word is added.
     AddWord,
-    /// Practise ahead (nothing due): the `n` started terms with the nearest
-    /// next review, of stage `only` when given; nothing in the progress
-    /// changes.
+    /// Practise ahead (nothing due): `n` randomly drawn started terms,
+    /// of stage `only` when given; nothing in the progress changes.
     PracticeAhead {
         /// How many terms.
         n: usize,

@@ -4,3 +4,57 @@
 /* Tailwind generates the classes it finds in the Rust sources. */
 @source "../../../ui-lib/src";
 @source "../src";
+
+/* Practice follows its content; long answers use the page's scrolling. */
+.practice-card > [tabindex="-1"] {
+    height: auto;
+}
+
+/* Reading density in practice's dictionary, without changing the shared
+   popover's placement, keyboard handling or interactive state colours. */
+.practice-card [role="dialog"] > div {
+    padding: 0.75rem;
+}
+
+.practice-card [role="dialog"] ul {
+    margin-top: 1rem;
+}
+
+.practice-card [role="dialog"] li + li {
+    margin-top: 1.25rem;
+}
+
+.practice-card [role="dialog"] li > p:first-child {
+    display: flex;
+    flex-direction: column;
+    row-gap: 0.125rem;
+    line-height: 1.4;
+}
+
+.practice-card [role="dialog"] li > p:first-child > span {
+    font-size: 0.75rem;
+}
+
+.practice-card [role="dialog"] li > p + p {
+    margin-top: 0.375rem;
+}
+
+.practice-card [role="dialog"] li > div {
+    margin-top: 0.5rem;
+}
+
+@media (min-width: 40rem) {
+    .practice-card [role="dialog"] {
+        width: 21rem;
+    }
+}
+
+.practice-card > [tabindex="-1"] > div:first-child {
+    overflow: visible;
+    flex: none;
+}
+
+.practice-details [lang="pi"] {
+    font-size: 1rem;
+    line-height: inherit;
+}

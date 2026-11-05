@@ -145,7 +145,9 @@ fn banner(settings_open: Option<RwSignal<bool>>, done: RwSignal<bool>) -> impl I
             data-sync-hint=""
             class="flex w-full flex-col gap-3 rounded-lg border border-line p-4 sm:flex-row sm:items-center sm:justify-between"
         >
-            <p class="text-sm text-heading">{move || td_string!(t.locale(), sync_hint_text)}</p>
+            <p class="whitespace-pre-line text-sm text-heading">
+                {move || td_string!(t.locale(), sync_hint_text)}
+            </p>
             <div class="flex flex-wrap gap-3">
                 <Button
                     variant=Variant::Accent
@@ -322,7 +324,7 @@ mod tests {
         TAB_ANSWERED.with(|flag| flag.set(false));
     }
 
-    const TEXT: &str = "Use Learn on several devices? Sync with Google Drive.";
+    const TEXT: &str = "Use Learn on several devices?\nSync with Google Drive.";
 
     /// 'shown after the first finished session': finished and signed out
     /// shows the text and both buttons.

@@ -32,7 +32,7 @@ use learn_core::date::Date;
 use learn_core::deck::{Blank, Deck, Example, Term, TermId};
 use learn_core::facet::Facet;
 use learn_core::progress::State;
-use learn_core::session::{Answer, Session, nearest};
+use learn_core::session::{Answer, Session, sample_started};
 use learn_core::stage::Stage;
 use learn_core::words::word_key;
 use leptos::ev::KeyboardEvent;
@@ -61,10 +61,8 @@ use crate::seed::browser_seed;
 use crate::store::Load;
 use crate::today::{browser_today, session_today};
 
-/// The card's box: a definite height (the `RevealCard` contract, so its
-/// body scrolls under the pinned grades), capped from `sm` up.
-pub(crate) const CARD_BOX: &str =
-    "h-[calc(100dvh-14rem)] min-h-72 w-full rounded-xl border border-line bg-card sm:h-[34rem]";
+/// Content-sized practice card; long answers scroll with the page.
+pub(crate) const CARD_BOX: &str = "practice-card w-full rounded-xl border border-line bg-card";
 /// The small caption above a front (the facet's name).
 const CAPTION: &str = "text-xs font-medium uppercase tracking-wide text-muted";
 /// The answer of a revealed Context blank: the gold mark.
@@ -147,8 +145,8 @@ pub(crate) fn practice_phase(
     }
 }
 
-/// A practice ahead on `state` of `deck` (the selected one): the `n` started terms with the nearest
-/// next review ([`nearest`]), of stage `only` when given, every facet of
+/// A practice ahead on `state` of `deck` (the selected one): up to `n` randomly drawn started terms
+/// ([`sample_started`]), of stage `only` when given, every facet of
 /// each asked as practice ([`Session::practice`]) in the order `seed` draws;
 /// `None` when no term is picked.
 pub(crate) fn practice_run(
@@ -159,7 +157,7 @@ pub(crate) fn practice_run(
     only: Option<Stage>,
     seed: u64,
 ) -> Option<ReviewRun> {
-    let terms = nearest(&state, deck, only, n);
+    let terms = sample_started(&state, deck, only, n, seed);
     if terms.is_empty() {
         return None;
     }
@@ -266,7 +264,7 @@ pub fn ReviewView(
         }
     };
     view! {
-        <div data-review="" class="flex flex-1 flex-col gap-4" on:keydown=on_key>
+        <div data-review="" class="flex flex-1 flex-col justify-center gap-4" on:keydown=on_key>
             {move || paused.get().then(|| view! { <PauseBanner on_reload=on_reload /> })}
             {move || {
                 if over.get() {
@@ -777,7 +775,7 @@ fn choice_button(term: &'static Term, row: &ChoiceRow) -> impl IntoView {
     }
 }
 
-/// The two grade buttons, greyed until the reveal and while paused.
+/// The grade buttons appear after reveal and stay disabled while paused.
 fn grade_buttons(
     run: RwSignal<ReviewRun>,
     backend: Backend,
@@ -787,7 +785,7 @@ fn grade_buttons(
 ) -> AnyView {
     let disabled = Signal::derive(move || !revealed.get() || paused.get());
     view! {
-        <div class="flex gap-3 p-4">
+        <div data-grade-actions="" hidden=move || !revealed.get() class="flex gap-3 p-4">
             <Button
                 variant=Variant::Chip
                 size=Size::Lg
@@ -855,11 +853,17 @@ fn front_view(card: Card, language: Language, revealed: Signal<bool>) -> impl In
 
 /// What each facet asks.
 fn front_body(card: Card, language: Language, revealed: Signal<bool>) -> AnyView {
-    match card.facet {
+    let facet = card.facet;
+    let body = match facet {
         Facet::Meaning => meaning_front(card, language).into_any(),
         Facet::Recall => recall_front(card, language).into_any(),
         Facet::Forms => forms_front(card, language).into_any(),
         Facet::Context => context_front(card, language, revealed).into_any(),
+    };
+    if facet == Facet::Context {
+        body
+    } else {
+        view! { <div class="flex flex-col gap-2 rounded-lg bg-field p-4">{body}</div> }.into_any()
     }
 }
 
@@ -933,9 +937,13 @@ fn context_front(card: Card, language: Language, revealed: Signal<bool>) -> impl
         }
     });
     view! {
-        {line}
-        {translation}
-        {origin}
+        <div class="flex flex-col gap-3">
+            {line.map(|line| view! { <div class="rounded-lg bg-field p-4">{line}</div> })}
+            {translation
+                .map(|translation| {
+                    view! { <div class="rounded-lg border border-line p-4">{translation}</div> }
+                })} <div class="pt-1">{origin}</div>
+        </div>
     }
 }
 
@@ -947,7 +955,7 @@ fn translation_view(example: &Example, language: Language) -> Option<impl IntoVi
     translation_for(example, language).map(|translation| {
         let credit = format!(" · {}", translator_name(&translation.translator));
         view! {
-            <p class="mt-2 text-sm italic text-muted">
+            <p class="text-sm italic leading-relaxed text-muted">
                 {translation.text.clone()} <span class="not-italic">{credit}</span>
             </p>
         }
@@ -1034,8 +1042,17 @@ fn reveal_view(card: Card, language: Language) -> impl IntoView {
         context_answer(card, language).into_any()
     } else {
         view! {
-            {answer_view(card)}
-            <p>{card.term.meaning.en.clone()}</p>
+            <div class="flex flex-col gap-2 rounded-lg border-l-2 border-gold bg-field p-4">
+                {answer_view(card)}
+                {(card.facet != Facet::Recall)
+                    .then(|| {
+                        view! {
+                            <p class="text-lg leading-relaxed text-heading">
+                                {card.term.meaning.en.clone()}
+                            </p>
+                        }
+                    })}
+            </div>
         }
         .into_any()
     };
@@ -1102,6 +1119,16 @@ fn captioned(caption: &'static str, body: impl IntoView + 'static) -> impl IntoV
     }
 }
 
+/// A compact labelled row inside the word's linguistic details.
+fn detail_row(label: &'static str, body: impl IntoView + 'static) -> impl IntoView {
+    view! {
+        <div class="grid grid-cols-[7rem_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1">
+            <p class="text-sm text-muted">{label}</p>
+            <div class="min-w-0 break-words">{body}</div>
+        </div>
+    }
+}
+
 /// The literal meaning, the construction, the root, the example (and its
 /// translation, [`translation_view`]): each only when the term has it.
 /// Context shows neither the literal (its answer block has it) nor the
@@ -1114,16 +1141,16 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
         .meaning
         .literal
         .as_ref()
-        .filter(|_| !context)
+        .filter(|_| !context && card.facet != Facet::Recall)
         .map(|literal| {
-            captioned(
+            detail_row(
                 td_string!(locale, reveal_literal),
                 view! { <p>{literal.clone()}</p> },
             )
         });
     let construction = term.construction.as_ref().map(|construction| {
         let body = view! { <Pali>{construction.clone()}</Pali> };
-        captioned(td_string!(locale, reveal_construction), body)
+        detail_row(td_string!(locale, reveal_construction), body)
     });
     let root = term.root.as_ref().map(|root| {
         let body = view! {
@@ -1132,23 +1159,45 @@ fn details_view(card: Card, language: Language) -> impl IntoView {
                 {format!(" ({})", root.meaning)}
             </p>
         };
-        captioned(td_string!(locale, reveal_root), body)
+        detail_row(td_string!(locale, reveal_root), body)
     });
-    let example = term.example.as_ref().filter(|_| !context).map(|example| {
-        let action = entry_action(example.clone(), locale);
-        let body = view! {
-            <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale, action)}</p>
-            {translation_view(example, language)}
-            {passage_badge(example, language).map(|badge| view! { <p class="mt-2">{badge}</p> })}
-        };
-        captioned(td_string!(locale, reveal_example), body)
-    });
+    let example = term
+        .example
+        .as_ref()
+        .filter(|_| !context)
+        .map(|example| example_detail(example, language));
+    let has_details = literal.is_some() || construction.is_some() || root.is_some();
     view! {
-        {literal}
-        {construction}
-        {root}
+        {has_details
+            .then(|| {
+                view! {
+                    <div class="practice-details grid gap-2 rounded-lg bg-field p-4 text-sm">
+                        {literal} {construction} {root}
+                    </div>
+                }
+            })}
         {example}
     }
+}
+
+/// The example's passage, translation and reference in separate blocks.
+fn example_detail(example: &Example, language: Language) -> impl IntoView + use<> {
+    let locale = Locale::from(language);
+    let action = entry_action(example.clone(), locale);
+    let body = view! {
+        <div class="flex flex-col gap-3">
+            <div class="rounded-lg bg-field p-4">
+                <p>{example_words(EXAMPLE_WORDS, example.text.clone(), locale, action)}</p>
+            </div>
+            {translation_view(example, language)
+                .map(|translation| {
+                    view! { <div class="rounded-lg border border-line p-4">{translation}</div> }
+                })}
+            {passage_badge(example, language)
+                .map(|badge| view! { <div class="pt-1">{badge}</div> })}
+        </div>
+    };
+    captioned(td_string!(locale, reveal_example), body)
 }
 
 /// An example passage whose words open their meaning: a [`PaliText`]
@@ -1997,7 +2046,7 @@ pub(crate) mod tests {
             let (_, reveal) = split(&html);
             let tag = tag_before(reveal, line);
             assert!(
-                tag.starts_with(r#"<p class="mt-2 text-sm italic text-muted">"#),
+                tag.starts_with(r#"<p class="text-sm italic leading-relaxed text-muted">"#),
                 "{language:?}: {tag}"
             );
             let credit = format!(r#"<span class="not-italic"> · {name}</span>"#);
@@ -2107,8 +2156,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn the_grade_buttons_are_disabled_before_the_reveal_didnt_first() {
+    fn the_grade_buttons_are_hidden_and_disabled_before_the_reveal() {
         let html = render(kho(Facet::Meaning));
+        let actions = div_with(&html, "data-grade-actions");
+        assert!(actions.contains("hidden"), "{actions}");
         let didnt = button_tag(&html, "Didn't know");
         let knew = button_tag(&html, "Knew it");
         assert!(didnt.contains("disabled"), "{didnt}");
@@ -2583,7 +2634,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn practice_ahead_asks_the_nearest_terms_of_the_stage_all_as_practice() {
+    fn practice_ahead_asks_only_the_selected_stage_all_as_practice() {
         let state = ahead_state();
         for answer in [Answer::Pass, Answer::Fail] {
             let mut run = practice_run(deck(), state.clone(), today(), 5, Some(Stage::Week), 0)
@@ -2602,7 +2653,23 @@ pub(crate) mod tests {
     fn practice_ahead_takes_the_batch_and_every_stage_when_none_is_selected() {
         let mut run = practice_run(deck(), ahead_state(), today(), 2, None, 0).expect("a run");
         let (asked, _) = drain(&mut run, Answer::Pass);
-        assert_eq!(terms_of(&asked), ["hoti 1", "kho"]);
+        assert_eq!(terms_of(&asked).len(), 2);
+    }
+
+    #[test]
+    fn another_extra_practice_can_draw_different_words() {
+        let ask = |seed| {
+            let mut run =
+                practice_run(deck(), ahead_state(), today(), 1, None, seed).expect("a run");
+            let (asked, saved) = drain(&mut run, Answer::Pass);
+            assert!(saved.iter().all(|state| *state == ahead_state()));
+            terms_of(&asked)
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ask(42), ask(42));
+        assert!((1..32).any(|seed| ask(seed) != ask(0)));
     }
 
     /// The seed sets the order, and only the order: every seed asks the
@@ -2636,7 +2703,9 @@ pub(crate) mod tests {
     /// Recall, Context).
     #[test]
     fn the_practice_header_counts_every_question() {
-        let run = practice_run(deck(), ahead_state(), today(), 1, None, 0).expect("kho");
+        let mut state = ahead_state();
+        state.progress.retain(|entry| entry.term.0 == "kho");
+        let run = practice_run(deck(), state, today(), 1, None, 0).expect("kho");
         assert!(run.is_practice());
         let text = text_of(&render(run));
         assert!(text.contains("0 / 3 cards"), "{text}");
