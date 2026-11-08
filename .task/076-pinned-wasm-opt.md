@@ -1,4 +1,4 @@
-# 076 Preinstall the pinned WebAssembly optimizer
+# 076 Preinstall the pinned frontend build tools
 
 status: publishing · rank: 2 · level: simple · type: fix · request: production publication of 075, user 2026-11-08 · light path · after: [075]
 
@@ -56,3 +56,14 @@ flowchart LR
 
 A release build should cache and verify its large pinned build tools before
 compiling application sources, rather than download them after compilation.
+
+## Tailwind follow-up
+
+The next build (`42469442927`) verified and ran Binaryen successfully,
+then hit the same release-page download failure for Tailwind v4.2.1.
+Preinstall that existing tool via official asset API id 360733128 as well,
+using the release metadata's published digest
+`39e8d4e24b3c83b0a6e69e100a972fbc75d5fef8dce47b3ddac3cf92dea81fe3`.
+The cached tools layer checks that digest, marks the standalone executable
+executable and runs its help before compiling sources. cargo-leptos uses
+the same PATH-first lookup for Tailwind. Application source is unchanged.
