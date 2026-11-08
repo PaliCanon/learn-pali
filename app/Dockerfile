@@ -30,10 +30,23 @@
 FROM rust:1.98-bookworm AS tools
 RUN rustup target add wasm32-unknown-unknown
 # cargo-leptos builds the server and the WASM, hashes the file names, and
-# runs Tailwind. It downloads Tailwind's standalone binary and binaryen
-# (wasm-opt) itself, at versions it pins, on first use.
+# runs Tailwind. It downloads Tailwind's standalone binary on first use.
+# Binaryen is preinstalled below at cargo-leptos 0.3.11's default version.
 ARG CARGO_LEPTOS=0.3.11
 RUN cargo install cargo-leptos --version "$CARGO_LEPTOS" --locked
+# The release-page URL can return 504 while the official asset API works.
+# Keep the same Binaryen version and verify its published SHA-256 before use.
+# cargo-leptos checks PATH before downloading, so release optimization stays on.
+RUN curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
+        --connect-timeout 15 --max-time 180 \
+        --header 'Accept: application/octet-stream' \
+        --output /tmp/binaryen.tar.gz \
+        https://api.github.com/repos/WebAssembly/binaryen/releases/assets/240710285 \
+    && echo "e959f2170af4c20c552e9de3a0253704d6a9d2766e8fdb88e4d6ac4bae9388fe  /tmp/binaryen.tar.gz" | sha256sum --check - \
+    && tar --extract --gzip --file /tmp/binaryen.tar.gz --strip-components=2 \
+        --directory /usr/local/bin binaryen-version_123/bin/wasm-opt \
+    && wasm-opt --version | grep --fixed-strings 'wasm-opt version 123' \
+    && rm /tmp/binaryen.tar.gz
 # wasm-bindgen-cli must match the `wasm-bindgen` crate of Cargo.lock to the
 # patch version, or the glue fails at build time: it is read from the lock,
 # never typed twice.
