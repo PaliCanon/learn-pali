@@ -1,6 +1,6 @@
 # 075 Choose the size of a due review session
 
-status: ready for user check · rank: 3 · level: standard · type: feat · request: user, 2026-11-08 · light path
+status: publishing · rank: 3 · level: standard · type: feat · request: user, 2026-11-08 · light path
 
 ## Summary
 
@@ -69,7 +69,9 @@ flowchart TD
 | Verify | 792 app unit tests plus native integration tests and docs passed; 257 core tests passed; fmt, Leptos formatting, SSR/all-targets Clippy, hydrate/CSR wasm32 Clippy and rustdoc passed. Full SSR/hydrate site build passed. `cargo sweep --time 7` completed without old artefacts to remove. |
 | Browser | Real Chromium, 1280×900 and 390×844: due picker default 10/max 72; Escape leaves progress identical; 10 passes leave 62 due; state survives reload; choosing 3 leaves 59; All starts all 59; no page errors or horizontal overflow. Captures and scripts live in `/private/tmp/learn-pali-075/`. |
 | Review | One focused headless Opus review, following token-economy. Bare mode lacked authentication; the lean non-bare run succeeded. Two findings fixed and regression-tested: reloading an exhausted budget cannot grant another answer; a review that finishes all due work retains the existing add-new section, and an explicit add-new action clears the old budget. The current agent performed the implementation and checked those fixes; no viewer session on the light path. |
-| Check | Local preview: http://127.0.0.1:3276/. Awaiting the user's visible-result check before merge or publication. No push or deployment performed. |
+| Check | Local preview: http://127.0.0.1:3276/. The user requested production publication on 2026-11-08 after checking the preview (“commence par push prod ce que tu as fais”). |
+
+| Publish | User explicitly authorized push, merge and production release; publish the reviewed session-size change before starting the next guided vocabulary pack. |
 
 ## Review notes
 
