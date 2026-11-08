@@ -34,6 +34,15 @@ RUN rustup target add wasm32-unknown-unknown
 # Binaryen is preinstalled below at cargo-leptos 0.3.11's default version.
 ARG CARGO_LEPTOS=0.3.11
 RUN cargo install cargo-leptos --version "$CARGO_LEPTOS" --locked
+# wasm-bindgen-cli must match the `wasm-bindgen` crate of Cargo.lock to the
+# patch version, or the glue fails at build time: it is read from the lock,
+# never typed twice.
+COPY learn-pali/Cargo.lock /lock/Cargo.lock
+RUN WB=$(awk '/^name = "wasm-bindgen"$/ {getline; gsub(/[^0-9.]/, ""); print; exit}' /lock/Cargo.lock) \
+    && test -n "$WB" \
+    && echo "wasm-bindgen-cli $WB (from Cargo.lock)" \
+    && cargo install wasm-bindgen-cli --version "$WB" --locked
+
 # The release-page URL can return 504 while the official asset API works.
 # Keep the same Binaryen version and verify its published SHA-256 before use.
 # cargo-leptos checks PATH before downloading, so release optimization stays on.
@@ -47,14 +56,6 @@ RUN curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
         --directory /usr/local/bin binaryen-version_123/bin/wasm-opt \
     && wasm-opt --version | grep --fixed-strings 'wasm-opt version 123' \
     && rm /tmp/binaryen.tar.gz
-# wasm-bindgen-cli must match the `wasm-bindgen` crate of Cargo.lock to the
-# patch version, or the glue fails at build time: it is read from the lock,
-# never typed twice.
-COPY learn-pali/Cargo.lock /lock/Cargo.lock
-RUN WB=$(awk '/^name = "wasm-bindgen"$/ {getline; gsub(/[^0-9.]/, ""); print; exit}' /lock/Cargo.lock) \
-    && test -n "$WB" \
-    && echo "wasm-bindgen-cli $WB (from Cargo.lock)" \
-    && cargo install wasm-bindgen-cli --version "$WB" --locked
 
 # ---------------------------------------------------------------- builder
 FROM tools AS builder
