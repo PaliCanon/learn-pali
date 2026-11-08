@@ -30,8 +30,8 @@
 FROM rust:1.98-bookworm AS tools
 RUN rustup target add wasm32-unknown-unknown
 # cargo-leptos builds the server and the WASM, hashes the file names, and
-# runs Tailwind. It downloads Tailwind's standalone binary on first use.
-# Binaryen is preinstalled below at cargo-leptos 0.3.11's default version.
+# runs Tailwind. Both frontend tools are preinstalled and verified below
+# so a release build does not need GitHub's release-page download routes.
 ARG CARGO_LEPTOS=0.3.11
 RUN cargo install cargo-leptos --version "$CARGO_LEPTOS" --locked
 # wasm-bindgen-cli must match the `wasm-bindgen` crate of Cargo.lock to the
@@ -56,6 +56,17 @@ RUN curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
         --directory /usr/local/bin binaryen-version_123/bin/wasm-opt \
     && wasm-opt --version | grep --fixed-strings 'wasm-opt version 123' \
     && rm /tmp/binaryen.tar.gz
+
+# Tailwind uses the same release-asset transport and is pinned to the
+# version requested by the failed build. Verify GitHub's published digest.
+RUN curl --fail --location --retry 5 --retry-all-errors --retry-delay 2 \
+        --connect-timeout 15 --max-time 180 \
+        --header 'Accept: application/octet-stream' \
+        --output /usr/local/bin/tailwindcss \
+        https://api.github.com/repos/tailwindlabs/tailwindcss/releases/assets/360733128 \
+    && echo "39e8d4e24b3c83b0a6e69e100a972fbc75d5fef8dce47b3ddac3cf92dea81fe3  /usr/local/bin/tailwindcss" | sha256sum --check - \
+    && chmod 755 /usr/local/bin/tailwindcss \
+    && tailwindcss --help
 
 # ---------------------------------------------------------------- builder
 FROM tools AS builder
