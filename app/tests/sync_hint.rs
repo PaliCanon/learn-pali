@@ -151,6 +151,8 @@ fn mount(root: &'static str, account: Account) {
 async fn finish_the_session(root: &str) {
     button(root, "Practice").expect("Practice").click();
     settle().await;
+    button(root, "All").expect("all due cards").click();
+    settle().await;
     for _ in 0..30 {
         let Some(card) = button(root, "Show the answer") else {
             break;

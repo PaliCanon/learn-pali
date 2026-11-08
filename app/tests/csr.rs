@@ -146,6 +146,22 @@ async fn settle() {
     }
 }
 
+/// Opens the size popup, then starts all due cards (or extra practice).
+async fn begin_practice(root: &str, label: &str) {
+    button(root, label).expect("Practice").click();
+    settle().await;
+    let (all, start) = match label {
+        "S’entraîner" => ("Tout", "Commencer"),
+        "Luyện tập" => ("Tất cả", "Bắt đầu"),
+        _ => ("All", "Start"),
+    };
+    button(root, all)
+        .or_else(|| button(root, start))
+        .expect("the size popup's start action")
+        .click();
+    settle().await;
+}
+
 /// The page is moved to `url`, as the app's router would have it.
 fn go_to(url: &str) {
     window()
@@ -274,10 +290,7 @@ async fn the_home_runs_a_review_under_learn_and_saves_each_answer() {
     );
     assert_eq!(store.saved.borrow().len(), 0, "mounting saves nothing");
 
-    button("csr-learn", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn", "Practice").await;
     assert!(
         button("csr-learn", "Show the answer").is_some(),
         "a card is asked"
@@ -339,10 +352,7 @@ async fn the_home_has_the_deck_chooser_with_two_decks() {
 async fn the_stored_text_after_an_answer_is_the_flat_format() {
     let (store, _page) = mount_at("csr-learn-flat", "/learn");
     settle().await;
-    button("csr-learn-flat", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn-flat", "Practice").await;
     button("csr-learn-flat", "Show the answer")
         .expect("the card")
         .click();
@@ -384,10 +394,7 @@ async fn a_normal_session_never_writes_the_deck_selection() {
     storage_call("removeItem");
     let (store, _page) = mount_at("csr-learn-noselect", "/learn");
     settle().await;
-    button("csr-learn-noselect", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn-noselect", "Practice").await;
     button("csr-learn-noselect", "Show the answer")
         .expect("the card")
         .click();
@@ -451,10 +458,7 @@ fn word_pressed(state: &State) -> (TermId, usize) {
 async fn a_word_of_the_example_is_added_to_the_practice_from_its_panel() {
     let (store, _page) = mount_at("csr-learn-add", "/learn");
     settle().await;
-    button("csr-learn-add", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn-add", "Practice").await;
     button("csr-learn-add", "Show the answer")
         .expect("the card")
         .click();
@@ -678,10 +682,7 @@ async fn the_sync_ui_readies_google_only_where_a_tap_may_follow() {
 async fn a_profile_with_progress_is_offered_the_add_and_starts_the_word() {
     let (store, _page) = mount_on("csr-learn-ten", "/learn", store_on(seeded_with(10)));
     settle().await;
-    button("csr-learn-ten", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn-ten", "Practice").await;
     button("csr-learn-ten", "Show the answer")
         .expect("the card")
         .click();
@@ -766,10 +767,7 @@ async fn stop_after_adding(root: &'static str, state: State) {
     let (store, _page) = mount_on(root, "/learn", store_on(state));
     settle().await;
     assert_eq!(tile(root, "Daily"), "Daily10");
-    button(root, "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice(root, "Practice").await;
     button(root, "Show the answer").expect("the card").click();
     settle().await;
     let added = add_words(root, 3).await;
@@ -807,10 +805,7 @@ async fn stop_after_adding(root: &'static str, state: State) {
 async fn a_double_click_on_the_add_saves_the_word_once() {
     let (store, _page) = mount_on("csr-learn-twice", "/learn", store_on(seeded_with(10)));
     settle().await;
-    button("csr-learn-twice", "Practice")
-        .expect("the Practice button")
-        .click();
-    settle().await;
+    begin_practice("csr-learn-twice", "Practice").await;
     button("csr-learn-twice", "Show the answer")
         .expect("the card")
         .click();
@@ -870,8 +865,7 @@ async fn the_add_is_offered_and_said_in_french_and_in_vietnamese() {
         let (store, _page, chosen) =
             mount_in(root, "/learn", store_on(seeded_with(10)), Some(language));
         settle().await;
-        button(root, practice).expect("the Practice button").click();
-        settle().await;
+        begin_practice(root, practice).await;
         button(root, show).expect("the card").click();
         settle().await;
         let found = open_a_word_offering(root, add)
@@ -896,8 +890,7 @@ async fn a_rebuilt_review_still_offers_the_add_and_takes_the_word() {
     let root = "csr-learn-rebuilt";
     let (store, _page) = mount_on(root, "/learn", store_on(seeded_with(10)));
     settle().await;
-    button(root, "Practice").expect("Practice").click();
-    settle().await;
+    begin_practice(root, "Practice").await;
     button(root, "Show the answer").expect("the card").click();
     settle().await;
     let before = open_a_word_offering_the_add(root)

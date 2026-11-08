@@ -172,5 +172,10 @@
   "quiz_wrong_read": "Pas celui-là. Il se lit",
   "quiz_wrong": "Pas celui-là. Le signe est",
   "quiz_next": "Suivant",
-  "quiz_choices": "Quatre signes : choisissez celui qui s'écrit"
+  "quiz_choices": "Quatre signes : choisissez celui qui s'écrit",
+  "review_size_title": "Combien de cartes ?",
+  "review_size_label": "Cartes pour cette session",
+  "review_all": "Tout",
+  "summary_remaining_n": "{{ count }} cartes restent à réviser aujourd’hui",
+  "summary_remaining_1": "{{ count }} carte reste à réviser aujourd’hui"
 }
