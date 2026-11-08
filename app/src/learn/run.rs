@@ -58,6 +58,8 @@ pub(crate) struct ReviewRun {
     /// A practice ahead ([`Session::practice`]): every question is
     /// practice, nothing in the progress changes.
     practice: bool,
+    /// Maximum answers in a short due review, retries included.
+    limit: Option<usize>,
 }
 
 impl ReviewRun {
@@ -78,7 +80,33 @@ impl ReviewRun {
             done: 0,
             practice_pending: 0,
             practice: false,
+            limit: None,
         }
+    }
+
+    /// Limits a due review to `limit` answers, clamped to the work loaded
+    /// at start. `None` reviews the whole queue, including retries.
+    pub(crate) fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit.map(|n| n.min(self.session.remaining()));
+        if self.limit == Some(0) {
+            self.current = None;
+        }
+        self
+    }
+
+    /// The answer budget still available if progress must be reloaded.
+    pub(crate) fn remaining_limit(&self) -> Option<usize> {
+        self.limit.map(|limit| limit.saturating_sub(self.done))
+    }
+
+    /// Whether the learner chose a short review rather than All.
+    pub(crate) fn is_limited(&self) -> bool {
+        self.limit.is_some()
+    }
+
+    /// Unanswered due cards in the saved progress, available next session.
+    pub(crate) fn due_left(&self) -> usize {
+        due_cards(self.deck, &self.session.snapshot(), self.session.today())
     }
 
     /// A run over a practice ahead (`session` from [`Session::practice`]):
@@ -137,7 +165,11 @@ impl ReviewRun {
         }
         self.done += 1;
         self.counter += 1;
-        self.current = self.session.next().cloned();
+        self.current = if self.limit.is_some_and(|limit| self.done >= limit) {
+            None
+        } else {
+            self.session.next().cloned()
+        };
     }
 
     /// The four terms a script deck's card offers (071, 072): the answer
@@ -191,6 +223,8 @@ impl ReviewRun {
             return 0;
         }
         save(&self.session.snapshot());
+        // Explicitly adding more terms starts another stretch of review.
+        self.limit = None;
         if self.current.is_none() {
             self.current = self.session.next().cloned();
         }
@@ -243,6 +277,9 @@ impl ReviewRun {
     /// the term's other queued cards, so the queue at start would
     /// overcount). A practice ahead counts done + what is left to ask.
     pub(crate) fn total(&self) -> usize {
+        if let Some(limit) = self.limit {
+            return (self.done + self.session.remaining()).min(limit);
+        }
         if self.practice {
             return self.done + self.session.remaining();
         }
@@ -365,6 +402,91 @@ mod tests {
     #[allow(clippy::unnecessary_wraps, reason = "compared with `asked`, an Option")]
     fn pair(term: &str, facet: Facet, practice: bool) -> Option<Asked> {
         Some((term.to_string(), facet, practice))
+    }
+
+    #[test]
+    fn ten_answers_out_of_seventy_two_leave_sixty_two_due_and_saved() {
+        let deck = crate::deck::devanagari();
+        let mut state = State::empty();
+        state.progress = deck
+            .terms
+            .iter()
+            .take(36)
+            .map(|term| Progress::new(term.id.clone(), today()))
+            .collect();
+        let session = Session::start(deck, state.clone(), today(), 42).unwrap();
+        let mut run = ReviewRun::new(session, deck, state).with_limit(Some(10));
+        let mut saved = Vec::new();
+        assert_eq!(run.total(), 10);
+        while run.current().is_some() {
+            run.grade(Answer::Pass, |state| saved.push(state.clone()));
+            assert_eq!(run.total(), 10);
+        }
+        assert_eq!(run.done(), 10);
+        assert_eq!(run.remaining_limit(), Some(0));
+        assert_eq!(saved.len(), 10);
+        assert_eq!(run.due_left(), 62);
+        let state = saved.last().unwrap().clone();
+        let session = Session::start(deck, state.clone(), today(), 7).unwrap();
+        let resumed = ReviewRun::new(session, deck, state);
+        assert_eq!(resumed.total(), 62);
+        run.grade(Answer::Fail, |_| {
+            panic!("nothing to answer after the limit")
+        });
+        assert_eq!(run.done(), 10);
+    }
+
+    #[test]
+    fn a_short_review_counts_retries_and_never_grades_unasked_cards() {
+        let mut run = started(2).with_limit(Some(2));
+        let untouched = run.session.snapshot().progress[1].clone();
+        grade(&mut run, Answer::Fail);
+        grade(&mut run, Answer::Pass);
+        assert!(run.current().is_none());
+        assert_eq!(run.done(), 2);
+        let state = run.session.snapshot();
+        assert_eq!(state.progress[0].lapses, 1);
+        assert_eq!(state.progress[1].stage, untouched.stage);
+        assert_eq!(state.progress[1].passed.len(), 1);
+        assert_eq!(run.due_left(), 2);
+        let mut retry = started(1).with_limit(Some(2));
+        grade(&mut retry, Answer::Fail);
+        assert!(retry.current().unwrap().practice);
+        grade(&mut retry, Answer::Pass);
+        assert_eq!(retry.done(), 2);
+        assert!(retry.current().is_none());
+    }
+
+    #[test]
+    fn review_limit_clamps_to_current_work_and_all_keeps_the_queue() {
+        let mut short = started(1).with_limit(Some(99));
+        assert_eq!(short.total(), 3);
+        grade(&mut short, Answer::Fail);
+        assert_eq!(short.total(), 2, "the queue can end before the limit");
+        grade(&mut short, Answer::Pass);
+        assert!(short.current().is_none());
+        let mut zero = started(1).with_limit(Some(0));
+        grade(&mut zero, Answer::Pass);
+        assert_eq!(zero.done(), 0);
+        assert!(zero.current().is_none());
+        assert_eq!(started(2).with_limit(None).total(), 6);
+    }
+
+    #[test]
+    fn adding_terms_after_a_completed_short_review_starts_a_fresh_budget() {
+        let mut run = started(1).with_limit(Some(3));
+        for _ in 0..3 {
+            grade(&mut run, Answer::Pass);
+        }
+        assert_eq!(run.due_left(), 0);
+        assert_eq!(run.add_new(1, |_| {}), 1);
+        assert!(!run.is_limited());
+        assert!(run.current().is_some());
+        let before = run.done();
+        while run.current().is_some() {
+            grade(&mut run, Answer::Pass);
+        }
+        assert!(run.done() > before);
     }
 
     #[test]

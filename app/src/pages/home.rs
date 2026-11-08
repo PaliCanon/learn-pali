@@ -128,6 +128,8 @@ pub(crate) enum HomeAction {
     /// Review what is due ('▶ Practice · N'): a session on the stored
     /// progress, in place; stages move.
     Review,
+    /// Review at most this many due questions, saving normal progress.
+    ReviewBatch(usize),
     /// Add a word by search (062): the search screen, in place, like a
     /// session; nothing in the progress changes until a word is added.
     AddWord,
@@ -181,11 +183,7 @@ pub(crate) fn Home(
     view! {
         <div
             data-page="home"
-            class=move || {
-                // The search screen (062) stays at the top: a list that
-                // empties must not jump to the middle of the page.
-                if matches!(page.mode.get(), Mode::AddWord) { PAGE_TOP } else { PAGE }
-            }
+            class=move || { if matches!(page.mode.get(), Mode::AddWord) { PAGE_TOP } else { PAGE } }
         >
             <SaveStrip />
             {move || {
@@ -309,7 +307,7 @@ impl Page {
                 action,
                 backend,
                 refresh,
-                || start.run(()),
+                |limit| start.run(limit),
                 |n, only| ahead.run((n, only)),
             );
         });
@@ -317,7 +315,7 @@ impl Page {
             model,
             mode,
             paused,
-            start,
+            start: reload_review(mode, start, home),
             home,
             on_action,
             stage: RwSignal::new(None),
@@ -365,6 +363,28 @@ fn back_home(
     })
 }
 
+/// A normal review starts with an optional answer budget.
+type ReviewStarter = Callback<Option<usize>>;
+/// An extra practice starts with a term count and optional stage.
+type AheadStarter = Callback<(usize, Option<Stage>)>;
+
+/// Reloading progress keeps the remaining budget of a short session.
+fn reload_review(mode: RwSignal<Mode>, start: ReviewStarter, home: Callback<()>) -> Callback<()> {
+    Callback::new(move |()| {
+        let limit = match mode.get_untracked() {
+            Mode::Session(Phase::Running(run)) => {
+                run.with_untracked(crate::learn::run::ReviewRun::remaining_limit)
+            }
+            _ => None,
+        };
+        if limit == Some(0) {
+            home.run(());
+        } else {
+            start.run(limit);
+        }
+    })
+}
+
 /// The two ways into a session in place: `start`, the review on the stored
 /// state; `ahead`, a practice ahead of `(n, only)`, or a fresh read of the
 /// store when there is nothing to practise.
@@ -373,7 +393,7 @@ fn starters(
     backend: Backend,
     (mode, paused, sync): (RwSignal<Mode>, RwSignal<bool>, Option<SyncCycle>),
     refresh: impl Fn() + Send + Sync + 'static,
-) -> (Callback<()>, Callback<(usize, Option<Stage>)>) {
+) -> (ReviewStarter, AheadStarter) {
     // A session holds the sync: a cycle asked during it waits for its end,
     // so nothing is merged under the learner.
     let open = move |phase| {
@@ -384,7 +404,7 @@ fn starters(
         mode.set(Mode::Session(phase));
     };
     let review_owner = owner.clone();
-    let start = Callback::new(move |()| open(start_phase(&review_owner, backend)));
+    let start = Callback::new(move |limit| open(start_phase(&review_owner, backend, limit)));
     let ahead = Callback::new(
         move |(n, only)| match practice_phase(&owner, backend, n, only) {
             Some(phase) => open(phase),
@@ -522,11 +542,12 @@ fn perform(
     action: HomeAction,
     backend: Backend,
     refresh: impl Fn(),
-    go: impl Fn(),
+    go: impl Fn(Option<usize>),
     ahead: impl Fn(usize, Option<Stage>),
 ) {
     match action {
-        HomeAction::Review => go(),
+        HomeAction::Review => go(None),
+        HomeAction::ReviewBatch(n) => go(Some(n)),
         HomeAction::PracticeAhead { n, only } => ahead(n, only),
         // Handled before `perform`: a mode of the home, nothing to do here.
         HomeAction::AddWord => {}
@@ -552,7 +573,7 @@ fn perform(
             match grown(count, state, backend.deck(), today) {
                 Some(next) => {
                     backend.save(&next);
-                    go();
+                    go(None);
                 }
                 None => refresh(),
             }
@@ -709,7 +730,7 @@ fn EmptyBlock(new_terms: NewTerms, act: Callback<HomeAction>) -> impl IntoView {
     }
 }
 
-/// Cards due: the CTA row ('▶ Practice · N'), the 'New terms' dialog, then
+/// Cards due: the CTA row opens the size picker; the new-terms dialog, then
 /// `children` (the progress, whose list holds the '+').
 #[component]
 fn DueBlock(
@@ -718,9 +739,13 @@ fn DueBlock(
     act: Callback<HomeAction>,
     children: Children,
 ) -> impl IntoView {
+    let open = RwSignal::new(false);
+    let batch = RwSignal::new(10.min(u32::try_from(due).unwrap_or(u32::MAX)));
+    let choose = Callback::new(move |_| open.set(true));
     view! {
         <div data-home-state="due" class=FRAME>
-            <CtaBox cta=Some(CtaSlot::Practice(due)) act=act />
+            <CtaBox cta=Some(CtaSlot::Practice(due)) act=choose />
+            <ReviewSizeDialog due=due batch=batch open=open act=act />
             <NewTermsDialog new_terms=new_terms />
             {children()}
         </div>
@@ -802,7 +827,7 @@ fn cta_action(cta: CtaSlot) -> Option<HomeAction> {
     }
 }
 
-/// A tap on Practice: the review at once while cards are due; nothing due,
+/// The due block handles Review by opening its picker; nothing due,
 /// the popup opens (Start asks the practice); the date asks nothing.
 fn press(cta: CtaSlot, act: Callback<HomeAction>) {
     match cta {
@@ -964,6 +989,57 @@ fn PracticeDialog(
                 max=u32::try_from(ahead.started).unwrap_or(u32::MAX)
                 label=Signal::derive(move || {
                     td_string!(Locale::from(language.get()), practice_batch_label).to_owned()
+                })
+            />
+        </Dialog>
+    }
+}
+
+/// Due reviews use the same compact popup as extra practice. Start
+/// caps the number of answers; All reviews the complete queue.
+#[component]
+fn ReviewSizeDialog(
+    due: usize,
+    batch: RwSignal<u32>,
+    open: RwSignal<bool>,
+    act: Callback<HomeAction>,
+) -> impl IntoView {
+    let language = language_signal();
+    let start = move |_| {
+        open.set(false);
+        act.run(HomeAction::ReviewBatch(batch_of(
+            due,
+            batch.get_untracked(),
+        )));
+    };
+    let all = move |_| {
+        open.set(false);
+        act.run(HomeAction::Review);
+    };
+    view! {
+        <Dialog
+            controls=Disclosed::new("pc-review-size", open)
+            title=Signal::derive(move || {
+                td_string!(Locale::from(language.get()), review_size_title).to_owned()
+            })
+            size=DialogSize::Popup
+            footer=move || {
+                view! {
+                    <Button on_click=all>
+                        {move || td_string!(Locale::from(language.get()), review_all)}
+                    </Button>
+                    <Button variant=Variant::Primary on_click=start>
+                        {move || td_string!(Locale::from(language.get()), practice_start)}
+                    </Button>
+                }
+            }
+        >
+            <Slider
+                value=batch
+                min=1
+                max=u32::try_from(due).unwrap_or(u32::MAX)
+                label=Signal::derive(move || {
+                    td_string!(Locale::from(language.get()), review_size_label).to_owned()
                 })
             />
         </Dialog>
@@ -1140,7 +1216,8 @@ impl NewTerms {
         ViewFn::from(move || {
             view! {
                 <span data-add-with-search="" class="inline-flex items-center gap-4">
-                    {(new_left > 0).then(|| view! { <AddTermsButton new_left=new_left open=open /> })}
+                    {(new_left > 0)
+                        .then(|| view! { <AddTermsButton new_left=new_left open=open /> })}
                     <SearchButton act=act />
                 </span>
             }
@@ -1911,7 +1988,8 @@ mod tests {
     fn cards_due_offer_practice_with_the_count_and_no_slider() {
         for n in [1, 12] {
             let html = view_of(Language::En, HomeState::Due(n), 40, STARTED);
-            assert!(!html.contains(r#"type="range""#), "{html}");
+            let row = element_at(&html, at(&html, "data-cta-row"));
+            assert!(!row.contains(r#"type="range""#), "{row}");
             let resume = button_with(&html, ">Practice<");
             let tag = &resume[..=resume.find('>').expect(resume)];
             assert!(!has_attr(tag, "disabled"), "{tag}");
@@ -2069,13 +2147,22 @@ mod tests {
         assert!(panel.contains("Practice ahead"), "its title: {panel}");
     }
 
-    /// Cards due: Practice starts the review at once, no popup.
+    /// Cards due: the quantity picker is closed until Practice is pressed.
     #[test]
-    fn cards_due_have_no_practice_popup() {
-        let html = view_of(Language::En, HomeState::Due(3), 10, STARTED);
+    fn cards_due_offer_a_closed_quantity_popup_with_start_and_all() {
+        let html = view_of(Language::En, HomeState::Due(72), 10, STARTED);
         assert!(!html.contains("pc-practice-ahead"), "{html}");
-        assert!(!html.contains(r#"type="range""#), "{html}");
-        assert!(html.contains(">Practice<"), "{html}");
+        let id = at(&html, r#"id="pc-review-size""#);
+        let panel = element_at(&html, id);
+        assert!(panel.contains("How many cards?"), "{panel}");
+        let slider = tag_before(panel, "input", r#"type="range""#);
+        for attr in [r#"min="1""#, r#"max="72""#, r#"value="10""#] {
+            assert!(slider.contains(attr), "{attr}: {slider}");
+        }
+        assert!(panel.contains(">Start<"), "{panel}");
+        assert!(panel.contains(">All<"), "{panel}");
+        let row = element_at(&html, at(&html, "data-cta-row"));
+        assert!(!row.contains(r#"type="range""#), "{row}");
     }
 
     /// The popup's slider holds the remembered batch and the started
@@ -2259,16 +2346,20 @@ mod tests {
                 action,
                 backend,
                 || calls.borrow_mut().push("refresh".to_owned()),
-                || calls.borrow_mut().push("review".to_owned()),
+                |limit| calls.borrow_mut().push(format!("review {limit:?}")),
                 |n, only| calls.borrow_mut().push(format!("ahead {n} {only:?}")),
             );
         };
         run(HomeAction::Review);
+        run(HomeAction::ReviewBatch(10));
         run(HomeAction::PracticeAhead {
             n: 5,
             only: Some(Stage::Month),
         });
-        assert_eq!(calls.into_inner(), ["review", "ahead 5 Some(Month)"]);
+        assert_eq!(
+            calls.into_inner(),
+            ["review None", "review Some(10)", "ahead 5 Some(Month)"]
+        );
     }
 
     /// One Practice replaces Resume and 'Review the next stage' in every
@@ -2423,7 +2514,7 @@ mod tests {
                     || (),
                 );
                 for open in [
-                    Box::new(|| start.run(())) as Box<dyn Fn()>,
+                    Box::new(|| start.run(None)) as Box<dyn Fn()>,
                     Box::new(|| ahead.run((5, None))),
                 ] {
                     mode.set(Mode::Home);
@@ -2436,6 +2527,42 @@ mod tests {
                 assert_eq!(store.saved().len(), 0, "{kept:?}");
             });
         }
+    }
+
+    #[test]
+    fn reloading_a_short_review_keeps_only_its_unspent_answers() {
+        Owner::new().with(|| {
+            provide_fakes(Load::Ok(progress_fixture()));
+            let backend = Backend::current();
+            let page = Page::new();
+            page.on_action.run(HomeAction::ReviewBatch(3));
+            let Mode::Session(Phase::Running(run)) = page.mode.get_untracked() else {
+                panic!("a short review starts");
+            };
+            run.update(|run| {
+                for _ in 0..2 {
+                    run.grade(learn_core::session::Answer::Pass, |state| {
+                        backend.save(state);
+                    });
+                }
+            });
+            page.start.run(());
+            let Mode::Session(Phase::Running(resumed)) = page.mode.get_untracked() else {
+                panic!("the review reloaded");
+            };
+            assert_eq!(
+                resumed.with_untracked(crate::learn::run::ReviewRun::total),
+                1
+            );
+            resumed.update(|run| {
+                run.grade(learn_core::session::Answer::Pass, |state| {
+                    backend.save(state);
+                });
+            });
+            assert!(resumed.with_untracked(|run| run.current().is_none()));
+            page.start.run(());
+            assert!(matches!(page.mode.get_untracked(), Mode::Home));
+        });
     }
 
     /// The timers a sync cycle armed, waiting to be fired by the test.
@@ -2462,7 +2589,7 @@ mod tests {
             let mode = RwSignal::new(Mode::Home);
             let paused = RwSignal::new(false);
             let (start, _) = starters(owner, Backend::current(), (mode, paused, Some(sync)), || ());
-            start.run(());
+            start.run(None);
             assert!(matches!(mode.get_untracked(), Mode::Session(_)));
             sync.run();
             assert_eq!(transport.pull_calls(), 0, "held during the session");
@@ -2486,7 +2613,7 @@ mod tests {
             let (_store, _files) = provide_fakes(Load::Ok(progress_fixture()));
             let owner = Owner::current().expect("an owner");
             assert!(!session_over(Mode::Home));
-            let running = Mode::Session(start_phase(&owner, Backend::current()));
+            let running = Mode::Session(start_phase(&owner, Backend::current(), None));
             assert!(!session_over(running), "the fixture has cards due");
             let Mode::Session(Phase::Running(run)) = running else {
                 panic!("a running session");
@@ -2500,13 +2627,13 @@ mod tests {
             }
             assert!(session_over(running), "graded to its end");
             let (_store, _files) = provide_fakes(Load::Empty);
-            let nothing_due = Mode::Session(start_phase(&owner, Backend::current()));
+            let nothing_due = Mode::Session(start_phase(&owner, Backend::current(), None));
             assert!(
                 !session_over(nothing_due),
                 "an empty store: nothing to ask, no answer given"
             );
             let (_store, _files) = provide_fakes(Load::Invalid { raw: "{".into() });
-            let broken = Mode::Session(start_phase(&owner, Backend::current()));
+            let broken = Mode::Session(start_phase(&owner, Backend::current(), None));
             assert!(!session_over(broken), "a progress that cannot be used");
         });
     }
@@ -2995,6 +3122,7 @@ mod tests {
     fn no_action_saves_over_an_unreadable_or_newer_progress() {
         let actions = [
             HomeAction::Review,
+            HomeAction::ReviewBatch(10),
             HomeAction::PracticeAhead { n: 5, only: None },
             HomeAction::AddNew(5),
             HomeAction::StartAgain,
@@ -3008,7 +3136,7 @@ mod tests {
             for action in &actions {
                 Owner::new().with(|| {
                     let (store, _files) = provide_fakes(kept.clone());
-                    perform(action.clone(), Backend::current(), || (), || (), |_, _| ());
+                    perform(action.clone(), Backend::current(), || (), |_| (), |_, _| ());
                     assert_eq!(store.saved().len(), 0, "{kept:?} {action:?}");
                     store.exit_write();
                     assert_eq!(store.written().len(), 0, "{kept:?} {action:?}");
@@ -3027,7 +3155,7 @@ mod tests {
                 HomeAction::StartAgain,
                 Backend::current(),
                 || (),
-                || (),
+                |_| (),
                 |_, _| (),
             );
             assert_eq!(store.saved(), [State::empty()]);
@@ -3309,7 +3437,7 @@ mod tests {
     fn a_session_starts_on_the_selected_deck() {
         Owner::new().with(|| {
             let (_store, backend) = two_deck_backend(two_deck_book(), Some("zz"));
-            let Phase::Running(run) = start_phase(&Owner::current().unwrap(), backend) else {
+            let Phase::Running(run) = start_phase(&Owner::current().unwrap(), backend, None) else {
                 panic!("a running session");
             };
             let mut seen = Vec::new();
@@ -3344,7 +3472,7 @@ mod tests {
             assert_eq!(read_model(backend).new_left, deck().terms.len() - 3);
             backend.select(&zz());
             assert_eq!(read_model(backend).new_left, 3, "zz has 3 terms");
-            perform(HomeAction::AddNew(10), backend, || (), || (), |_, _| ());
+            perform(HomeAction::AddNew(10), backend, || (), |_| (), |_, _| ());
             let book = match store.book_now() {
                 Load::Ok(book) => book,
                 other => panic!("{other:?}"),

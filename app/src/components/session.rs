@@ -97,10 +97,10 @@ pub(crate) enum Phase {
 /// Reads the store and starts a session on what it holds: the signal of a
 /// run is owned by the page (`owner`), so it outlives the callback that
 /// made it. An empty store is a session with nothing due.
-pub(crate) fn start_phase(owner: &Owner, backend: Backend) -> Phase {
+pub(crate) fn start_phase(owner: &Owner, backend: Backend, limit: Option<usize>) -> Phase {
     match backend.load() {
-        Load::Ok(state) => begin(owner, backend, state),
-        Load::Empty => begin(owner, backend, State::empty()),
+        Load::Ok(state) => begin(owner, backend, state, limit),
+        Load::Empty => begin(owner, backend, State::empty(), limit),
         Load::Invalid { .. } => Phase::Broken(BrokenKind::Invalid),
         Load::NewerVersion { .. } => Phase::Broken(BrokenKind::NewerVersion),
         Load::Unreadable(_) => Phase::Broken(BrokenKind::Unreadable),
@@ -109,7 +109,7 @@ pub(crate) fn start_phase(owner: &Owner, backend: Backend) -> Phase {
 
 /// A session on `state` for today (never before the state's last day),
 /// saving first the promotions the start itself made.
-fn begin(owner: &Owner, backend: Backend, state: State) -> Phase {
+fn begin(owner: &Owner, backend: Backend, state: State, limit: Option<usize>) -> Phase {
     let today = session_today(browser_today(), &state);
     let deck = backend.deck();
     match Session::start(deck, state.clone(), today, browser_seed()) {
@@ -117,7 +117,10 @@ fn begin(owner: &Owner, backend: Backend, state: State) -> Phase {
             if session.changed_at_start() {
                 backend.save(&session.snapshot());
             }
-            Phase::Running(owner.with(|| RwSignal::new(ReviewRun::new(session, deck, state))))
+            Phase::Running(
+                owner
+                    .with(|| RwSignal::new(ReviewRun::new(session, deck, state).with_limit(limit))),
+            )
         }
         Err(_) => Phase::Broken(BrokenKind::Invalid),
     }
@@ -1407,6 +1410,10 @@ fn Finished(
         } else {
             summary_view(summary, language).into_any()
         };
+        let remaining = run.with_untracked(ReviewRun::due_left);
+        if run.with_untracked(ReviewRun::is_limited) && remaining > 0 {
+            return done_card(locale, on_home, heading, remaining_note(locale, remaining));
+        }
         let more = view! {
             <section class="flex w-full flex-col items-center gap-3 border-t border-line pt-5">
                 <p class="text-sm text-muted">{td_string!(locale, new_more_today)}</p>
@@ -1415,6 +1422,23 @@ fn Finished(
         };
         done_card(locale, on_home, heading, Some(more.into_any()))
     }
+}
+
+/// Remaining due work after a short review; no claim that today is done.
+fn remaining_note(locale: Locale, count: usize) -> Option<AnyView> {
+    (count > 0).then(|| {
+        let text = if singular(locale, count) {
+            td!(locale, summary_remaining_1, count = count).into_any()
+        } else {
+            td!(locale, summary_remaining_n, count = count).into_any()
+        };
+        view! {
+            <p data-review-remaining="" class="text-sm text-muted">
+                {text}
+            </p>
+        }
+        .into_any()
+    })
 }
 
 /// The card every end of a session shares, centred under the brand, in
@@ -2369,6 +2393,21 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn a_short_session_shows_remaining_due_work_in_each_language() {
+        for (language, expected) in [
+            (Language::En, "2 cards still due today"),
+            (Language::Fr, "2 cartes restent à réviser aujourd’hui"),
+            (Language::Vi, "Còn 2 thẻ cần ôn hôm nay"),
+        ] {
+            let mut run = run_on("kho", &[], Stage::Day).with_limit(Some(1));
+            run.grade(Answer::Pass, |_| {});
+            let html = render_with(language, run, false);
+            assert!(html.replace("<!>", "").contains(expected), "{html}");
+            assert!(!html.contains("data-new-terms"), "{html}");
+        }
+    }
+
     /// The opening tag of the first `<div` before `marker` that holds it.
     fn div_with<'a>(html: &'a str, marker: &str) -> &'a str {
         let at = html.find(marker).expect(html);
@@ -2513,7 +2552,7 @@ pub(crate) mod tests {
             let backend = Backend::current();
             let owner = Owner::current().expect("an owner");
             assert!(matches!(
-                start_phase(&owner, backend),
+                start_phase(&owner, backend, None),
                 Phase::Broken(BrokenKind::Unreadable)
             ));
             assert!(matches!(

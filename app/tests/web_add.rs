@@ -199,6 +199,8 @@ async fn run_then(app: &'static str, again: &'static str, stop: bool) {
     assert_eq!(tile(app, "Daily"), "Daily10");
     button(app, "Practice").expect("Practice").click();
     settle().await;
+    button(app, "All").expect("all due cards").click();
+    settle().await;
     button(app, "Show the answer").expect("card").click();
     settle().await;
     let added = add_words(app, 3).await;

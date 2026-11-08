@@ -172,5 +172,10 @@
   "quiz_wrong_read": "Không phải. Nó đọc là",
   "quiz_wrong": "Không phải. Ký tự là",
   "quiz_next": "Tiếp",
-  "quiz_choices": "Bốn ký tự: chọn ký tự được viết"
+  "quiz_choices": "Bốn ký tự: chọn ký tự được viết",
+  "review_size_title": "Bao nhiêu thẻ?",
+  "review_size_label": "Số thẻ trong buổi này",
+  "review_all": "Tất cả",
+  "summary_remaining_n": "Còn {{ count }} thẻ cần ôn hôm nay",
+  "summary_remaining_1": "Còn {{ count }} thẻ cần ôn hôm nay"
 }
