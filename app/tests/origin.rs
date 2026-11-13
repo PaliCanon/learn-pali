@@ -1,6 +1,6 @@
 //! The origin guard on the real router (task 031, slice G): every request
-//! row of the case table, driven through `tower::ServiceExt::oneshot`, and
-//! the "writes nothing" row, pinned by reading the sources.
+//! row of the case table, driven through `tower::ServiceExt::oneshot`.
+//! Bounded, redacted refusal logs are exercised in `telemetry.rs`.
 #![cfg(feature = "ssr")]
 
 use axum::Router;
@@ -129,58 +129,4 @@ async fn the_right_header_gets_the_routes_usual_answer() {
 async fn an_open_origin_checks_nothing() {
     let (response, _) = send(app(Origin::Open), request("GET", "/", &[])).await;
     assert_eq!(response.status(), StatusCode::OK);
-}
-
-/// The source of `path` (relative to the app crate).
-fn source(path: &str) -> String {
-    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(path);
-    std::fs::read_to_string(&file).unwrap_or_else(|e| panic!("{}: {e}", file.display()))
-}
-
-/// Lines that write to stdout, stderr or a log.
-fn writers(text: &str) -> Vec<&str> {
-    text.lines()
-        .filter(|line| {
-            [
-                "tracing::",
-                "println!",
-                "eprintln!",
-                "print!(",
-                "dbg!",
-                "log::",
-            ]
-            .iter()
-            .any(|needle| line.contains(needle))
-                || line.contains("TraceLayer")
-                || line.contains("tower_http")
-        })
-        .collect()
-}
-
-/// A rejected request writes nothing: the guard (all of `origin.rs` but its
-/// tests) has no write call and no trace layer, and `main.rs` writes only
-/// the boot lines (the origin, the passages asset, the release), the
-/// start-up refusals and the listening line, before any request is served.
-#[test]
-fn a_rejected_request_writes_nothing() {
-    let origin = source("src/origin.rs");
-    let code = origin.split("#[cfg(test)]").next().unwrap();
-    assert_eq!(writers(code), Vec::<&str>::new(), "origin.rs writes");
-
-    let main = source("src/main.rs");
-    let found = writers(&main);
-    let wanted = [
-        r#"eprintln!("learn-pali: {err}");"#,
-        r#"Ok(Some(path)) => println!("learn-pali: passages: {path}"),"#,
-        r#"Ok(None) => println!("learn-pali: passages: none, the live method"),"#,
-        r#"eprintln!("learn-pali: passages: {err}");"#,
-        r#"println!("{}", origin.log_line());"#,
-        r#"println!("{}", learn_pali::release::ReleaseInfo::server().log_line());"#,
-        r#"println!("learn-pali on http://{addr}");"#,
-    ];
-    assert_eq!(found.len(), wanted.len(), "main.rs writes: {found:?}");
-    for (line, want) in found.iter().zip(wanted) {
-        assert_eq!(line.trim(), want);
-    }
-    assert!(!source("Cargo.toml").contains("tower-http"));
 }

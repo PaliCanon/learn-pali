@@ -225,6 +225,7 @@ pub mod server {
     use learn_passage::translate::{Why, translate_example};
 
     use super::{Entry, LookupAnswer, Miss, PassageAnswer, SearchAnswer, Sense};
+    use crate::telemetry::event;
 
     /// The variable holding the API's base URL.
     pub const URL_VAR: &str = "LEARN_PALI_API_URL";
@@ -269,15 +270,11 @@ pub mod server {
                 }),
                 (None, None) => None,
                 (Some(_), None) => {
-                    eprintln!(
-                        "learn-pali: dictionary: {URL_VAR} is set but {TOKEN_VAR} is not: off"
-                    );
+                    event!(WARN, "api.config.invalid", missing = TOKEN_VAR);
                     None
                 }
                 (None, Some(_)) => {
-                    eprintln!(
-                        "learn-pali: dictionary: {TOKEN_VAR} is set but {URL_VAR} is not: off"
-                    );
+                    event!(WARN, "api.config.invalid", missing = URL_VAR);
                     None
                 }
             }
@@ -290,7 +287,7 @@ pub mod server {
             .get_or_init(|| {
                 let config = ApiConfig::read(|name| std::env::var(name).ok());
                 if config.is_none() {
-                    eprintln!("learn-pali: dictionary: off ({URL_VAR} and {TOKEN_VAR} unset)");
+                    event!(INFO, "api.disabled");
                 }
                 config
             })
@@ -320,9 +317,10 @@ pub mod server {
 
     impl Fetch for UreqFetch {
         fn get(&mut self, path: &str) -> Result<Option<String>, FetchError> {
+            let start = std::time::Instant::now();
             let url = format!("{}{path}", self.config.base);
             let bearer = format!("Bearer {}", self.config.token);
-            match self.agent.get(&url).header("Authorization", &bearer).call() {
+            let result = match self.agent.get(&url).header("Authorization", &bearer).call() {
                 Ok(mut response) => response.body_mut().read_to_string().map(Some).map_err(|e| {
                     FetchError::Body(path.to_string(), scrub(&e.to_string(), &self.config.token))
                 }),
@@ -334,7 +332,20 @@ pub mod server {
                     path.to_string(),
                     scrub(&e.to_string(), &self.config.token),
                 )),
-            }
+            };
+            let outcome = match &result {
+                Ok(Some(_)) => "found",
+                Ok(None) => "not_found",
+                Err(error) => kind(error),
+            };
+            event!(
+                DEBUG,
+                "api.request.completed",
+                operation = operation(path),
+                outcome,
+                duration_ms = start.elapsed().as_secs_f64() * 1000.0
+            );
+            result
         }
     }
 
@@ -349,7 +360,8 @@ pub mod server {
             return SearchAnswer::Unreachable;
         };
         let config = config.clone();
-        tokio::task::spawn_blocking(move || search_in(&config, &q))
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || span.in_scope(|| search_in(&config, &q)))
             .await
             .unwrap_or(SearchAnswer::Unreachable)
     }
@@ -361,22 +373,26 @@ pub mod server {
         let path = format!("/v1/dictionary?q={}&n={N}", percent(q));
         let first = fetch.get(&path);
         let result = match &first {
-            Err(FetchError::Status(_, 503) | FetchError::Transport(..)) => fetch.get(&path),
+            Err(FetchError::Status(_, 503) | FetchError::Transport(..)) => {
+                event!(DEBUG, "api.retry", operation = "dictionary", attempt = 2);
+                fetch.get(&path)
+            }
             _ => first,
         };
         match result {
             Ok(Some(body)) => parse_entries(&body),
             Ok(None) => {
-                eprintln!("learn-pali: dictionary: no_dictionary (404)");
+                event!(WARN, "api.failed", operation = "dictionary", error.type = "not_found");
                 SearchAnswer::Unreachable
             }
             Err(FetchError::Status(_, 400)) => SearchAnswer::Entries(Vec::new()),
             Err(FetchError::Status(_, code @ (401 | 403))) => {
-                eprintln!("learn-pali: dictionary: ERROR the API refused the token (HTTP {code})");
+                event!(ERROR, "api.failed", operation = "dictionary", error.type = "authentication",
+                    http.response.status_code = code);
                 SearchAnswer::Unreachable
             }
             Err(error) => {
-                eprintln!("learn-pali: dictionary: unreachable: {}", kind(&error));
+                failed("dictionary", &error);
                 SearchAnswer::Unreachable
             }
         }
@@ -390,17 +406,36 @@ pub mod server {
         if let Ok(response) = serde_json::from_str::<Response>(body) {
             SearchAnswer::Entries(response.items)
         } else {
-            eprintln!("learn-pali: dictionary: unreachable: body");
+            event!(WARN, "api.failed", operation = "dictionary", error.type = "invalid_body");
             SearchAnswer::Unreachable
         }
     }
 
     /// The error's kind for a log line: never its text (a text can echo a URL).
-    fn kind(error: &FetchError) -> String {
+    fn kind(error: &FetchError) -> &'static str {
         match error {
-            FetchError::Status(_, code) => format!("HTTP {code}"),
-            FetchError::Transport(..) => "transport".to_string(),
-            FetchError::Body(..) => "body".to_string(),
+            FetchError::Status(..) => "http_status",
+            FetchError::Transport(..) => "transport",
+            FetchError::Body(..) => "body",
+        }
+    }
+
+    fn failed(operation: &'static str, error: &FetchError) {
+        let status = match error {
+            FetchError::Status(_, code) => Some(*code),
+            _ => None,
+        };
+        event!(WARN, "api.failed", operation, error.type = kind(error),
+            http.response.status_code = status);
+    }
+
+    fn operation(path: &str) -> &'static str {
+        if path.starts_with("/v1/dictionary") {
+            "dictionary"
+        } else if path.starts_with("/v1/dpd/") {
+            "lookup"
+        } else {
+            "passage"
         }
     }
 
@@ -427,7 +462,8 @@ pub mod server {
             return LookupAnswer::Unreachable;
         };
         let config = config.clone();
-        tokio::task::spawn_blocking(move || lookup_in(&config, &form))
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || span.in_scope(|| lookup_in(&config, &form)))
             .await
             .unwrap_or(LookupAnswer::Unreachable)
     }
@@ -439,18 +475,22 @@ pub mod server {
         let path = format!("/v1/dpd/{}", percent(form.trim()));
         let first = fetch.get(&path);
         let result = match &first {
-            Err(FetchError::Status(_, 503) | FetchError::Transport(..)) => fetch.get(&path),
+            Err(FetchError::Status(_, 503) | FetchError::Transport(..)) => {
+                event!(DEBUG, "api.retry", operation = "lookup", attempt = 2);
+                fetch.get(&path)
+            }
             _ => first,
         };
         match result {
             Ok(Some(body)) => parse_senses(&body),
             Ok(None) => LookupAnswer::Senses(Vec::new()),
             Err(FetchError::Status(_, code @ (401 | 403))) => {
-                eprintln!("learn-pali: lookup: ERROR the API refused the token (HTTP {code})");
+                event!(ERROR, "api.failed", operation = "lookup", error.type = "authentication",
+                    http.response.status_code = code);
                 LookupAnswer::Unreachable
             }
             Err(error) => {
-                eprintln!("learn-pali: lookup: unreachable: {}", kind(&error));
+                failed("lookup", &error);
                 LookupAnswer::Unreachable
             }
         }
@@ -464,7 +504,7 @@ pub mod server {
         if let Ok(response) = serde_json::from_str::<Response>(body) {
             LookupAnswer::Senses(response.senses)
         } else {
-            eprintln!("learn-pali: lookup: unreachable: body");
+            event!(WARN, "api.failed", operation = "lookup", error.type = "invalid_body");
             LookupAnswer::Unreachable
         }
     }
@@ -485,27 +525,35 @@ pub mod server {
         let started = std::time::Instant::now();
         if let Some(asset) = asset {
             let lemma = entry.lemma.clone();
-            let read = tokio::task::spawn_blocking(move || passage_from_asset(asset, &lemma));
+            let span = tracing::Span::current();
+            let read = tokio::task::spawn_blocking(move || {
+                span.in_scope(|| passage_from_asset(asset, &lemma))
+            });
             match tokio::time::timeout(PASSAGE_BUDGET, read).await {
                 Ok(Ok(Some(answer))) => return answer,
                 Ok(Ok(None)) => {}
-                Ok(Err(join)) => {
-                    eprintln!("learn-pali: passage: the asset read failed ({join}), live");
+                Ok(Err(_)) => {
+                    event!(WARN, "passage.asset.failed", error.type = "task_failed");
                 }
-                Err(_) => eprintln!("learn-pali: passage: the asset read passed the budget, live"),
+                Err(_) => event!(WARN, "passage.asset.failed", error.type = "timeout"),
             }
         }
         let Some(config) = config else {
             return PassageAnswer::Transient;
         };
         let config = config.clone();
-        let work = tokio::task::spawn_blocking(move || passage_in(&config, &entry));
+        let span = tracing::Span::current();
+        let work =
+            tokio::task::spawn_blocking(move || span.in_scope(|| passage_in(&config, &entry)));
         let remaining = PASSAGE_BUDGET.saturating_sub(started.elapsed());
         match tokio::time::timeout(remaining, work).await {
             Ok(Ok(answer)) => answer,
-            Ok(Err(_)) => PassageAnswer::Transient,
+            Ok(Err(_)) => {
+                event!(WARN, "passage.failed", error.type = "task_failed");
+                PassageAnswer::Transient
+            }
             Err(_) => {
-                eprintln!("learn-pali: passage: transient (budget)");
+                event!(WARN, "passage.failed", error.type = "timeout");
                 PassageAnswer::Transient
             }
         }
@@ -558,27 +606,20 @@ pub mod server {
                 MissName::TextNotServed | MissName::NoPali => Miss::TextNotServed,
                 MissName::NotMatched => Miss::NotMatched,
             }),
-            Ok(Some(Row::Retry(name))) => {
-                eprintln!(
-                    "learn-pali: passage: the asset asks a retry for {lemma:?} ({name}), live"
-                );
+            Ok(Some(Row::Retry(_))) => {
+                event!(DEBUG, "passage.asset.fallback", reason = "retry");
                 return None;
             }
             Ok(None) => {
-                eprintln!("learn-pali: passage: no row in the asset for {lemma:?}, live");
+                event!(DEBUG, "passage.asset.fallback", reason = "missing_row");
                 return None;
             }
-            Err(why) => {
-                eprintln!("learn-pali: passage: ERROR the asset could not be read ({why}), live");
+            Err(_) => {
+                event!(ERROR, "passage.asset.failed", error.type = "read");
                 return None;
             }
         };
-        let outcome = match &answer {
-            PassageAnswer::Found(_) => "found".to_string(),
-            PassageAnswer::Miss(miss) => format!("miss {miss:?}"),
-            PassageAnswer::Transient => "transient".to_string(),
-        };
-        eprintln!("learn-pali: passage: {outcome} (asset)");
+        passage_outcome(&answer, "asset");
         Some(answer)
     }
 
@@ -608,21 +649,29 @@ pub mod server {
             Err(Why::NotServed(_) | Why::NoPali(_)) => PassageAnswer::Miss(Miss::TextNotServed),
             Err(Why::NotMatched(_)) => PassageAnswer::Miss(Miss::NotMatched),
             Err(Why::Fetch(FetchError::Status(_, code @ (401 | 403)))) => {
-                eprintln!("learn-pali: passage: ERROR the API refused the token (HTTP {code})");
+                event!(ERROR, "api.failed", operation = "passage", error.type = "authentication",
+                    http.response.status_code = code);
                 PassageAnswer::Transient
             }
             Err(Why::Fetch(error)) => {
-                eprintln!("learn-pali: passage: transient: {}", kind(&error));
+                failed("passage", &error);
                 PassageAnswer::Transient
             }
         };
-        let outcome = match &answer {
-            PassageAnswer::Found(_) => "found".to_string(),
-            PassageAnswer::Miss(miss) => format!("miss {miss:?}"),
-            PassageAnswer::Transient => "transient".to_string(),
-        };
-        eprintln!("learn-pali: passage: {outcome} (live)");
+        passage_outcome(&answer, "live");
         answer
+    }
+
+    fn passage_outcome(answer: &PassageAnswer, source: &'static str) {
+        let outcome = match answer {
+            PassageAnswer::Found(_) => "found",
+            PassageAnswer::Miss(Miss::NoExample) => "no_example",
+            PassageAnswer::Miss(Miss::UnmappedSource) => "unmapped_source",
+            PassageAnswer::Miss(Miss::TextNotServed) => "text_not_served",
+            PassageAnswer::Miss(Miss::NotMatched) => "not_matched",
+            PassageAnswer::Transient => "transient",
+        };
+        event!(DEBUG, "passage.completed", source, outcome);
     }
 
     #[cfg(test)]
@@ -708,6 +757,27 @@ pub mod server {
         use super::*;
 
         const TOKEN: &str = "secret-token-xyz";
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn authentication_logs_never_contain_the_query_token_or_api_url() {
+            let mut api = fake();
+            api.refuse = true;
+            let config = serve(api).await;
+            let logs = crate::telemetry::tests::capture(|| {
+                assert_eq!(
+                    search_in(&config, "canary-private-query"),
+                    SearchAnswer::Unreachable
+                );
+            });
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0]["severity"], "ERROR");
+            assert_eq!(logs[0]["error.type"], "authentication");
+            assert_eq!(logs[0]["http.response.status_code"], 401);
+            let text = serde_json::to_string(&logs).unwrap();
+            for secret in [TOKEN, "canary-private-query", &config.base] {
+                assert!(!text.contains(secret), "{text}");
+            }
+        }
 
         #[derive(Clone)]
         struct Fake {

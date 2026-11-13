@@ -33,6 +33,39 @@ use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
 wasm_bindgen_test_configure!(run_in_browser);
 
+#[wasm_bindgen_test]
+fn console_json_carries_the_servers_tag_without_a_backend() {
+    js(r#"
+        for (const [name, content] of [
+            ['learn-release-env', 'v9.8.7'],
+            ['learn-release-sha', 'abcdef0'],
+            ['learn-deployment-environment', 'test']
+        ]) {
+            const meta = document.createElement('meta');
+            meta.name = name; meta.content = content; document.head.appendChild(meta);
+        }
+        window.__learnLogs = [];
+        window.__learnConsole = console.log;
+        console.log = line => window.__learnLogs.push(line);
+    "#);
+    learn_pali::telemetry::init_browser();
+    learn_pali::telemetry::init_browser();
+    let text =
+        js_string("console.log = window.__learnConsole; return JSON.stringify(window.__learnLogs)")
+            .unwrap();
+    let lines: Vec<String> = serde_json::from_str(&text).unwrap();
+    assert_eq!(lines.len(), 1);
+    let log: serde_json::Value = serde_json::from_str(&lines[0]).unwrap();
+    assert_eq!(log["event.name"], "browser.started");
+    assert_eq!(log["service.namespace"], "palicanon");
+    assert_eq!(log["service.name"], "learn");
+    assert_eq!(log["service.version"], "v9.8.7");
+    assert_eq!(log["service.commit"], "abcdef0");
+    assert_eq!(log["deployment.environment.name"], "test");
+    assert_eq!(log["runtime"], "browser");
+    assert!(log["timestamp"].as_str().unwrap().ends_with('Z'));
+}
+
 /// The fake Drive and userinfo behind `window.fetch`; `window.__drive`
 /// holds the files, every call, and the switches the test turns.
 const FAKE_FETCH: &str = r#"

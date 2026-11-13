@@ -170,6 +170,13 @@ impl Inner {
 
     /// The token is gone or refused: forgotten; the account, remembered.
     fn lost_token(&self) {
+        if self.token.borrow().is_some() {
+            crate::telemetry::event!(
+                WARN,
+                "sync.authorization.lost",
+                reason = "expired_or_refused"
+            );
+        }
         *self.token.borrow_mut() = None;
         let email = email_of(&self.account.get_untracked());
         if !matches!(self.account.get_untracked(), SyncAccount::SignedOut) {
@@ -281,10 +288,10 @@ impl Inner {
         let id = first_file_id(&body)?;
         self.file_id.borrow_mut().clone_from(&id);
         let Some(id) = id else {
-            log("no Drive file yet");
+            crate::telemetry::event!(DEBUG, "sync.drive.resolved", outcome = "absent");
             return Ok(None);
         };
-        log(&format!("Drive file id {id}"));
+        crate::telemetry::event!(DEBUG, "sync.drive.resolved", outcome = "found");
         let (status, body) = fetch("GET", &read_url(&id), bearer, None).await?;
         checked(status, &body)?;
         Ok(Some(body))
@@ -303,7 +310,7 @@ impl Inner {
             fetch("POST", CREATE_URL, bearer, Some((&content_type, &body))).await?;
         checked(status, &answer)?;
         let id = created_id(&answer)?;
-        log(&format!("Drive file id {id} (created)"));
+        crate::telemetry::event!(DEBUG, "sync.drive.resolved", outcome = "created");
         *self.file_id.borrow_mut() = Some(id);
         Ok(())
     }
@@ -400,11 +407,6 @@ fn set(object: &Object, name: &str, value: &JsValue) {
 /// The string `object[name]`, if it is one.
 fn text(object: &JsValue, name: &str) -> Option<String> {
     Reflect::get(object, &name.into()).ok()?.as_string()
-}
-
-/// Logs a line to the console, prefixed.
-fn log(line: &str) {
-    web_sys::console::log_1(&format!("learn-pali sync: {line}").into());
 }
 
 /// `localStorage`, if the browser gives it.

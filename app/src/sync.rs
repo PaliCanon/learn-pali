@@ -130,6 +130,9 @@ struct Cycle {
     backend: Backend,
     /// Where the sync stands.
     status: RwSignal<SyncStatus>,
+    /// Monotonic start and phase, for payload-free cycle diagnostics.
+    started: Cell<f64>,
+    phase: Cell<&'static str>,
     /// The pacing of the automatic cycles: the spacing, the backoff, the
     /// one trailing timer and the cycle in flight.
     pacer: RefCell<Pacer>,
@@ -198,6 +201,8 @@ impl SyncCycle {
             pacer: RefCell::new(Pacer::new()),
             terminal: Cell::new(false),
             monotonic: RefCell::new(Box::new(monotonic_now_ms)),
+            started: Cell::new(0.0),
+            phase: Cell::new("idle"),
             wall: RefCell::new(Box::new(wall_now_ms)),
             online: RefCell::new(Box::new(browser_online)),
             step: Cell::new(0),
@@ -362,8 +367,13 @@ impl SyncCycle {
             .transport
             .sign_in(Box::new(move |signed| match signed {
                 Ok(()) => after.run(),
-                Err(SyncError::Cancelled) => {}
-                Err(error) => after.status.set(SyncStatus::Failed(error)),
+                Err(SyncError::Cancelled) => {
+                    crate::telemetry::event!(DEBUG, "sync.sign_in.cancelled");
+                }
+                Err(error) => {
+                    crate::telemetry::event!(WARN, "sync.sign_in.failed", error.type = crate::telemetry::sync_error(&error));
+                    after.status.set(SyncStatus::Failed(error));
+                }
             }));
     }
 
@@ -399,10 +409,13 @@ impl SyncCycle {
 impl Cycle {
     /// Starts a cycle: the pull. The pacer has said so (`Act::Start`).
     fn start(self: &Rc<Self>) {
+        self.started.set(self.now());
+        self.phase.set("local");
         if let Err(refusal) = self.local() {
             return self.finish(SyncStatus::Refused(refusal));
         }
         self.status.set(SyncStatus::Syncing);
+        self.phase.set("pull");
         let step = self.begin();
         let cycle = Rc::clone(self);
         self.transport.pull(Box::new(move |pulled| {
@@ -550,6 +563,7 @@ impl Cycle {
 
     /// Pushes the merge; the push's answer ends the cycle.
     fn push(self: &Rc<Self>, merged: &Book) {
+        self.phase.set("push");
         let step = self.begin();
         let cycle = Rc::clone(self);
         self.transport.push(
@@ -1284,6 +1298,29 @@ mod tests {
             transport.settle();
             assert_eq!(transport.drive(), Some(progress_fixture().to_json()));
             assert_eq!(sync.status().get_untracked(), synced());
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "ssr")]
+    fn sync_failure_logs_keep_the_phase_but_drop_drive_error_payloads() {
+        Owner::new().with(|| {
+            let store = FakeStore::new(Load::Ok(progress_fixture()));
+            let transport = FakeTransport::signed_in();
+            let (sync, _) = cycle(&store, &transport);
+            let logs = crate::telemetry::tests::capture(|| {
+                sync.run();
+                assert!(transport.answer_pull());
+                transport.fail_next(SyncError::Drive("canary-token learner@example.com".into()));
+                transport.settle();
+            });
+            assert_eq!(logs.len(), 1);
+            assert_eq!(logs[0]["event.name"], "sync.failed");
+            assert_eq!(logs[0]["reason"], "drive");
+            assert_eq!(logs[0]["phase"], "push");
+            let text = serde_json::to_string(&logs).unwrap();
+            assert!(!text.contains("canary-token"));
+            assert!(!text.contains("learner@example.com"));
         });
     }
 

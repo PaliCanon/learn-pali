@@ -223,6 +223,8 @@ struct WebStore<K, D = BrowserStorage> {
     unsaved: RefCell<Option<Book>>,
     /// `Saved`, or `Failed(Transient)` while `unsaved` is set.
     status: RwSignal<SaveStatus>,
+    /// Last read classification, so a broken store does not flood the console.
+    read_state: Cell<&'static str>,
 }
 
 #[cfg(test)]
@@ -243,15 +245,63 @@ impl<K: KeyValue, D: Storage> WebStore<K, D> {
             device,
             unsaved: RefCell::new(None),
             status: RwSignal::new(SaveStatus::Saved),
+            read_state: Cell::new("unknown"),
         }
     }
 
     /// What the storage holds, whatever the memory says.
     fn stored(&self) -> Load<Book> {
-        match self.kv.get() {
+        let load = match self.kv.get() {
             Ok(raw) => classify(raw.as_deref()),
             Err(Unavailable) => Load::Unreadable("localStorage is not available".to_owned()),
+        };
+        let state = match &load {
+            Load::Ok(_) | Load::Empty => "readable",
+            Load::Invalid { .. } => "invalid",
+            Load::NewerVersion { .. } => "newer_version",
+            Load::Unreadable(_) => "unreadable",
+        };
+        let previous = self.read_state.replace(state);
+        if state != previous {
+            match state {
+                "unreadable" => {
+                    crate::telemetry::event!(ERROR, "progress.load.failed", reason = state);
+                }
+                "invalid" | "newer_version" => {
+                    crate::telemetry::event!(WARN, "progress.load.refused", reason = state);
+                }
+                _ if previous != "unknown" => {
+                    crate::telemetry::event!(INFO, "progress.load.recovered");
+                }
+                _ => crate::telemetry::event!(DEBUG, "progress.loaded"),
+            }
         }
+        load
+    }
+
+    /// Log write failures and recovery once per state transition, never the Book.
+    fn saved_status(&self, status: SaveStatus) {
+        fn kind(status: &SaveStatus) -> &'static str {
+            match status {
+                SaveStatus::Saved => "saved",
+                SaveStatus::Pending => "pending",
+                SaveStatus::Failed(SaveError::Transient) => "storage",
+                SaveStatus::Failed(SaveError::NewerVersion { .. }) => "newer_version",
+            }
+        }
+        let previous = self.status.with_untracked(kind);
+        let next = kind(&status);
+        if previous != next {
+            match next {
+                "storage" => crate::telemetry::event!(ERROR, "progress.save.failed", reason = next),
+                "newer_version" => {
+                    crate::telemetry::event!(WARN, "progress.save.refused", reason = next);
+                }
+                "saved" => crate::telemetry::event!(INFO, "progress.save.recovered"),
+                _ => {}
+            }
+        }
+        self.status.set(status);
     }
 }
 
@@ -281,7 +331,7 @@ impl<K: KeyValue, D: Storage> ProgressStore for WebStore<K, D> {
             Load::Unreadable(_) => return,
             Load::NewerVersion { .. } => {
                 // The file wins; the answer just given is offered for Export.
-                self.status.set(SaveStatus::Failed(SaveError::NewerVersion {
+                self.saved_status(SaveStatus::Failed(SaveError::NewerVersion {
                     unsaved: book.clone(),
                 }));
                 return;
@@ -290,10 +340,10 @@ impl<K: KeyValue, D: Storage> ProgressStore for WebStore<K, D> {
         }
         if self.kv.set(&book.to_json()).is_ok() {
             *self.unsaved.borrow_mut() = None;
-            self.status.set(SaveStatus::Saved);
+            self.saved_status(SaveStatus::Saved);
         } else {
             *self.unsaved.borrow_mut() = Some(book.clone());
-            self.status.set(SaveStatus::Failed(SaveError::Transient));
+            self.saved_status(SaveStatus::Failed(SaveError::Transient));
         }
     }
 
@@ -609,6 +659,31 @@ mod tests {
                 ..FakeKv::default()
             }
         }
+    }
+
+    #[test]
+    #[cfg(feature = "ssr")]
+    fn save_logs_report_failure_and_recovery_once_without_progress() {
+        Owner::new().with(|| {
+            let kv = FakeKv::working();
+            let store = WebStore::new(&kv);
+            let logs = crate::telemetry::tests::capture(|| {
+                store.save(&book());
+                kv.writable.set(false);
+                store.save(&book());
+                store.save(&book());
+                kv.writable.set(true);
+                store.save(&book());
+                store.save(&book());
+            });
+            assert_eq!(logs.len(), 2);
+            assert_eq!(logs[0]["event.name"], "progress.save.failed");
+            assert_eq!(logs[0]["severity"], "ERROR");
+            assert_eq!(logs[1]["event.name"], "progress.save.recovered");
+            let text = serde_json::to_string(&logs).unwrap();
+            assert!(!text.contains("progress\":"));
+            assert!(!text.contains("dhamma"));
+        });
     }
 
     impl KeyValue for &FakeKv {

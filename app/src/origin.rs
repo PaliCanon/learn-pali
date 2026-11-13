@@ -7,8 +7,8 @@
 //! it with a 403 and an empty body, the page, the server functions, `/pkg`
 //! and the fallback alike. The secret is compared in constant time, lives in
 //! [`OriginSecret`] (whose `Debug` is redacted) and is in no log line, no
-//! response and no error message. The layer writes nothing: a rejected
-//! request leaves no trace on stdout or stderr (`tests/origin.rs` pins it).
+//! response and no error message. Refusals emit a bounded event at most once
+//! per minute per process, without any request data (`tests/telemetry.rs`).
 
 use std::fmt;
 use std::sync::Arc;
@@ -157,6 +157,7 @@ pub async fn guard(State(origin): State<Arc<Origin>>, request: Request, next: Ne
     if origin.admits(request.headers()) {
         next.run(request).await
     } else {
+        crate::telemetry::server::origin_refused();
         forbidden()
     }
 }
@@ -190,6 +191,7 @@ pub fn router(options: LeptosOptions, origin: Origin) -> axum::Router {
         })
         .fallback(leptos_axum::file_and_error_handler(shell))
         .with_state(options)
+        .layer(axum::middleware::from_fn(crate::telemetry::server::request))
         .layer(axum::middleware::from_fn_with_state(
             Arc::new(origin),
             guard,

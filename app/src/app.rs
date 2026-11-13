@@ -55,6 +55,10 @@ fn document(options: LeptosOptions, release: ReleaseInfo) -> impl IntoView {
                 <meta name="viewport" content="width=device-width, initial-scale=1" />
                 <meta name=ENV_META content=release.env />
                 <meta name=SHA_META content=release.sha />
+                <meta
+                    name=crate::telemetry::ENV_META
+                    content=crate::telemetry::server::environment()
+                />
                 <link rel="icon" href="/favicon.ico" />
                 <AutoReload options=options.clone() />
                 <HashedStylesheet id="leptos" options=options.clone() />

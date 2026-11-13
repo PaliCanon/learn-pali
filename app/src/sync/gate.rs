@@ -24,8 +24,7 @@ impl Cycle {
 
     /// An automatic ask: the gates, then the pacer.
     pub(super) fn ask(self: &Rc<Self>, reason: Reason) {
-        #[cfg(feature = "browser")]
-        leptos::logging::log!("learn sync: ask {reason:?}");
+        crate::telemetry::event!(DEBUG, "sync.requested", reason = ?reason);
         self.transport.refresh();
         if self.blocked() {
             return;
@@ -129,9 +128,48 @@ impl Cycle {
     /// what it says (the one asked meanwhile) is done.
     pub(super) fn finish(self: &Rc<Self>, status: SyncStatus) {
         let (status, outcome) = self.outcome_of(status);
+        self.log_finish(&status);
         self.status.set(status);
         let act = self.pacer.borrow_mut().finished(outcome, self.now());
         self.apply(act);
+    }
+
+    /// All statuses carrying user data are mapped to constant categories.
+    fn log_finish(&self, status: &SyncStatus) {
+        use super::Refusal;
+        let reason = match status {
+            SyncStatus::Synced { .. } => "synced",
+            SyncStatus::Failed(error) => crate::telemetry::sync_error(error),
+            SyncStatus::Refused(Refusal::Unreadable) => "local_unreadable",
+            SyncStatus::Refused(Refusal::Newer) => "local_newer_version",
+            SyncStatus::Refused(Refusal::Invalid) => "local_invalid",
+            SyncStatus::Refused(Refusal::NotSaved) => "local_not_saved",
+            SyncStatus::DriveNewer => "drive_newer_version",
+            SyncStatus::DriveUnreadable { .. } => "drive_invalid",
+            SyncStatus::Offline => "offline",
+            SyncStatus::Idle | SyncStatus::Syncing => return,
+        };
+        let duration = (self.now() - self.started.get()).max(0.0);
+        let phase = self.phase.get();
+        match status {
+            SyncStatus::Synced { .. } => crate::telemetry::event!(
+                INFO,
+                "sync.completed",
+                outcome = reason,
+                phase,
+                duration_ms = duration
+            ),
+            SyncStatus::Offline => crate::telemetry::event!(DEBUG, "sync.skipped", reason),
+            _ => {
+                crate::telemetry::event!(
+                    WARN,
+                    "sync.failed",
+                    reason,
+                    phase,
+                    duration_ms = duration
+                );
+            }
+        }
     }
 
     /// The status a cycle's end shows and its outcome for the backoff. A

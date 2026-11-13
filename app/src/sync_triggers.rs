@@ -194,12 +194,11 @@ fn install_with(ask: Rc<dyn Fn(Reason)>, tick: Duration) {
 /// listeners stay, only the beat is missing.
 #[cfg(feature = "browser")]
 fn keep_tick(started: Result<IntervalHandle, wasm_bindgen::JsValue>) {
-    match tick_started(started) {
-        Ok(handle) => TICK_HANDLE.set(Some(handle)),
-        Err(message) => {
-            leptos::logging::error!("{message}");
-            TICK_HANDLE.set(None);
-        }
+    if let Ok(handle) = tick_started(started) {
+        TICK_HANDLE.set(Some(handle));
+    } else {
+        crate::telemetry::event!(WARN, "sync.timer.failed", reason = "interval_unavailable");
+        TICK_HANDLE.set(None);
     }
 }
 

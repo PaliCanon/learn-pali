@@ -34,6 +34,7 @@ mod store;
 mod sync;
 mod sync_pacing;
 mod sync_triggers;
+pub mod telemetry;
 // The browser triggers' test door (`tests/sync_triggers.rs` drives the real
 // glue through it); hidden, not part of the API.
 #[cfg(feature = "browser")]
@@ -74,7 +75,8 @@ mod placeholders;
 pub fn hydrate() {
     use leptos::prelude::*;
 
-    console_error_panic_hook::set_once();
+    #[cfg(target_arch = "wasm32")]
+    telemetry::init_browser();
     // The release the server wrote in `<head>`, read before the app
     // mounts: the badge is the server's, never recomputed here (task 060).
     palicanon_ui_lib::hydrate(|| {

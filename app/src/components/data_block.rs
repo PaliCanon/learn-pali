@@ -240,6 +240,7 @@ fn ExportButton(
 fn export_stored(data: ProgressData) {
     data.stored.with_untracked(|stored| {
         if let Some((book, today)) = &stored.export {
+            crate::telemetry::event!(INFO, "progress.export.requested");
             data.backend.export(&export_name(*today), &book.to_json());
         }
     });
@@ -264,6 +265,7 @@ fn begin_import(data: ProgressData) {
             // A failure of its own: shown apart, and the refusal of an
             // earlier file is left as it was.
             pick_failed.set(true);
+            crate::telemetry::event!(WARN, "progress.import.failed", reason = "file_unreadable");
             return;
         };
         // Only a file that was read clears the last refusal: a cancelled
@@ -274,7 +276,10 @@ fn begin_import(data: ProgressData) {
                 pending.set(Some(book));
                 dialog.set_open(true);
             }
-            Err(error) => refusal.set(Some(error)),
+            Err(error) => {
+                crate::telemetry::event!(WARN, "progress.import.refused", reason = ?error);
+                refusal.set(Some(error));
+            }
         }
     });
 }
@@ -384,7 +389,10 @@ fn confirm_replace(data: ProgressData) {
     data.dialog.set_open(false);
     if let Some(book) = book {
         if replace_stored(data.backend, &book) {
+            crate::telemetry::event!(INFO, "progress.import.requested");
             data.moved();
+        } else {
+            crate::telemetry::event!(WARN, "progress.import.refused", reason = "store_protected");
         }
         data.read();
     }

@@ -6,41 +6,40 @@
 #[cfg(feature = "ssr")]
 #[tokio::main]
 async fn main() {
+    use learn_pali::telemetry::server;
+    server::init();
+    if let Err(stage) = serve().await {
+        server::failed(stage);
+        std::process::exit(1);
+    }
+    server::stopped();
+}
+
+#[cfg(feature = "ssr")]
+async fn serve() -> Result<(), &'static str> {
     use learn_pali::origin::{Origin, router};
+    use learn_pali::telemetry::server;
     use leptos::prelude::*;
 
-    // The origin guard decides first: a deployed build without its secret
-    // does not start. The message names the variable, never a value.
-    let origin = match Origin::from_env(|name| std::env::var(name).ok()) {
-        Ok(origin) => origin,
-        Err(err) => {
-            eprintln!("learn-pali: {err}");
-            std::process::exit(1);
-        }
-    };
-    match learn_pali::dictionary::server::init_passages(|name| std::env::var(name).ok()) {
-        Ok(Some(path)) => println!("learn-pali: passages: {path}"),
-        Ok(None) => println!("learn-pali: passages: none, the live method"),
-        Err(err) => {
-            eprintln!("learn-pali: passages: {err}");
-            std::process::exit(1);
-        }
-    }
-    println!("{}", origin.log_line());
-    println!("{}", learn_pali::release::ReleaseInfo::server().log_line());
-
-    let conf = get_configuration(None).expect("leptos configuration");
+    let started = std::time::Instant::now();
+    let origin = Origin::from_env(|name| std::env::var(name).ok()).map_err(|_| "origin_config")?;
+    let checked = matches!(origin, Origin::Checked(_));
+    let passages = learn_pali::dictionary::server::init_passages(|name| std::env::var(name).ok())
+        .map_err(|_| "passages_asset")?
+        .is_some();
+    let conf = get_configuration(None).map_err(|_| "leptos_config")?;
     let options = conf.leptos_options;
     let addr = options.site_addr;
     let app = router(options, origin);
 
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .expect("bind this service's address");
-    println!("learn-pali on http://{addr}");
+        .map_err(|_| "listen")?;
+    server::started(checked, passages, started.elapsed());
     axum::serve(listener, app.into_make_service())
+        .with_graceful_shutdown(server::shutdown())
         .await
-        .expect("serve this service");
+        .map_err(|_| "serve")
 }
 
 #[cfg(not(feature = "ssr"))]

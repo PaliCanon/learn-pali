@@ -228,8 +228,8 @@ export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PAT
 cargo leptos watch
 ```
 
-A local run is open: `ORIGIN_SECRET` unset means no check, and the boot line
-says `origin: open (local)`. A deployed build (Cloud Run's `K_SERVICE` set, or
+A local run is open: `ORIGIN_SECRET` unset means no check, and the startup
+event has `origin.checked: false`. A deployed build (Cloud Run's `K_SERVICE` set, or
 `LEPTOS_ENV` prod, as the image sets it) needs `ORIGIN_SECRET` and refuses to
 start without it; a blank value is an error even locally. It then answers only
 the requests that carry that value in `x-origin-auth` (the Cloudflare Worker
@@ -241,6 +241,57 @@ It depends on `palicanon-ui-lib` by git (`branch = "main"`), with a local
 symlink) — a change spanning both repositories is seen at once. `ui-lib`'s
 `style/theme.css` and `build/placeholders.rs` are read from that sibling
 checkout too.
+
+## Operational logs
+
+The site emits newline-delimited JSON through `tracing`: stdout on the
+server, the browser's console for the hydrated site. No telemetry backend,
+credentials or network connection are required. Cloud Run captures stdout
+as structured container logs. Browser diagnostics stay in that browser;
+they are not uploaded or persisted. The CSR fragment emits tracing events
+for its host's subscriber; it does not install one automatically.
+
+Every application event includes `event.name`, `severity`, a UTC timestamp,
+`service.namespace: palicanon`, `service.name: learn`, `runtime` (server or
+browser), `service.version` and `service.commit`. **The version is the
+deployed service's tag**, e.g. `v0.1.20`, from `LEARN_PALI_ENV`, the same
+release the footer shows. A branch deploy uses its branch name and separate
+short commit; a local run uses `dev`. It is not the Cargo package version.
+Hydration reads the release metas written by the server, so both halves
+report the same tag and commit.
+
+`LEARN_PALI_DEPLOYMENT_ENV` sets the deployment environment independently
+of the release (e.g. `production`, `development`, `staging`). Without it,
+`K_SERVICE` ending in `-prod` / `-dev` supplies production / development;
+an unrecognized deployed service uses `unknown`, a local server development.
+The server passes this value to hydration in `learn-deployment-environment`.
+
+The default level is INFO. Set `LEARN_PALI_LOG_LEVEL=debug` on the server
+for API attempt timings, retries and passage results. Only the exact
+application tracing target `learn` is collected; third-party libraries
+cannot print request URLs or credentials through these sinks.
+
+| Events | Level and contents |
+| --- | --- |
+| `service.started`, `service.stopped`, `service.failed` | INFO / ERROR; startup duration, origin guard state, passages asset availability, failure stage. SIGTERM / Ctrl-C drains requests before the stop event. |
+| `http.request.completed` | INFO; method, route template, status and time to response headers (streamed body time excluded). 5xx are ERROR; HEAD and successful static/fallback requests DEBUG. The span contains a server-generated request id; incoming ids are ignored. |
+| `origin.refused` | WARNING; a fixed refusal reason, at most once per minute per process. No request data. |
+| `api.config.invalid`, `api.disabled`, `api.failed` | Configuration state and bounded failure categories; authentication refusal ERROR, other failures WARNING. |
+| `api.request.completed`, `api.retry`, `passage.completed`, `passage.asset.fallback` | DEBUG; operation, outcome, attempt timing, retry or absence reason. |
+| `passage.failed`, `passage.asset.failed` | WARNING / ERROR; timeout, failed task or unreadable asset. |
+| `progress.load.*`, `progress.save.*` | Read/write failure, protected newer format, and recovery; emitted on state changes. Successful writes are silent. |
+| `progress.import.*`, `progress.export.requested` | Import refusal or file-transfer handoff. A requested transfer is not a confirmed disk write. |
+| `sync.completed`, `sync.failed`, `sync.sign_in.failed`, `sync.authorization.lost`, `sync.timer.failed` | INFO / WARNING; duration, phase and bounded outcome/error category. Offline and voluntary cancellation are DEBUG. |
+| `browser.started`, `runtime.panic` | INFO / ERROR; runtime lifecycle. Panic payloads are suppressed. |
+
+Application logs contain no headers, cookies, tokens, email, Drive file ids, query
+strings, words, progress contents or raw error messages. HTTP routes are
+normalized, including unknown paths. There are no per-answer events.
+
+These are structured logs with OpenTelemetry resource naming, ready for
+a future collection pipeline. This change installs no OTLP exporter, trace
+provider, metrics backend or Grafana dashboard. An HTTP request id is a
+local correlation id, not an OpenTelemetry trace id.
 
 ## Checks
 

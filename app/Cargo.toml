@@ -29,10 +29,9 @@ leptos_axum = { workspace = true, optional = true }
 ureq = { version = "3", default-features = false, features = ["rustls"], optional = true }
 learn_passage = { version = "0.1.0", path = "../passage", optional = true }
 axum = { version = "0.8", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"], optional = true }
 # The origin guard compares the Worker's secret in constant time (`origin.rs`).
 subtle = { version = "2", optional = true }
-console_error_panic_hook = { version = "0.1", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }
 # The learning loop (task 002): deck, state, session; the JSON is its own.
 learn_core = { version = "0.1.0", path = "../core" }
@@ -61,6 +60,8 @@ wasm-bindgen-futures = { version = "0.4", optional = true }
 # native tests cover; already in the lock through learn_core.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "json", "registry"], optional = true }
 
 [build-dependencies]
 # As in ui-lib's build.rs: the parser's diagnostics fail the build on a missing key.
@@ -93,6 +94,8 @@ browser = [
   "dep:wasm-bindgen",
   "dep:web-sys",
   "dep:js-sys",
+  "dep:tracing-subscriber",
+  "web-sys/console",
 ]
 # The localStorage progress store and the Blob / file input transfer the
 # site uses (`web_store()`, `web_files()`). The app builds with `csr` alone,
@@ -133,12 +136,12 @@ hydrate = [
   "browser",
   "web-store",
   "web-sync",
-  "dep:console_error_panic_hook",
 ]
 # The PaliCanon app: the Learn fragment mounted by a host with no server
 # (ui-lib `csr::mount`), without the web store.
 csr = ["leptos/csr", "palicanon-ui-lib/csr", "browser"]
 ssr = [
+  "dep:tracing-subscriber",
   "dep:axum",
   "dep:ureq",
   "dep:learn_passage",
