@@ -1,15 +1,16 @@
 name: deploy
 
-# Push to main → dev (learn-pali-dev); tag v* → prod (learn-pali-prod).
+# Tag v* → prod (learn-pali-prod). There is no dev environment (task 082): a
+# push to main runs ci.yml only and deploys nothing.
 # The image is content-addressed: built only when its inputs changed, rolled
 # out with no traffic first, checked through the revision's tagged URL with
 # the origin header, given the traffic, then checked again: the bare Cloud Run
 # URL must refuse a call without the header (else the traffic goes back to the
 # revision that served before), and the public host must answer through the
-# Worker (an env without Access, which is dev and prod today; an env with
+# Worker (an env without Access, which prod is today; an env with
 # Access is checked for its login redirect instead; step 6b). The model is
 # search-front's deploy.yml; this file only runs once the repository
-# variables below are set (README.md, "Deploy"): until then a push to main
+# variables below are set (README.md, "Deploy"): until then a tag push
 # fails at the first step that needs them, touching nothing.
 #
 # Repository variables (not secrets, no value here):
@@ -22,12 +23,10 @@ name: deploy
 
 on:
   push:
-    branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
 
 concurrency:
-  group: deploy-${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
+  group: deploy-prod
   cancel-in-progress: false
 
 permissions:
@@ -35,15 +34,14 @@ permissions:
   id-token: write
 
 env:
-  ENV: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 'prod' || 'dev' }}
-  HOST: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/tags/') && 'learn.palicanon.app' || 'learn.dev.palicanon.app' }}
+  ENV: prod
+  HOST: learn.palicanon.app
   REGION: europe-west1
   PROJECT: ${{ vars.GCP_PROJECT }}
   # Whether each env's host sits behind Cloudflare Access (step 6b reads the
   # one for $ENV). It mirrors infra/variables.tf `envs.<env>.access` (the
-  # defaults, both false today: dev and prod are public behind the origin
-  # guard): change both together.
-  ACCESS_dev: "false"
+  # default, false today: prod is public behind the origin guard): change
+  # both together.
   ACCESS_prod: "false"
 
 # Two checkouts side by side, as in ci.yml: the build reaches `../ui-lib`
@@ -145,8 +143,8 @@ jobs:
       #    split is never this pipeline's state, and guessing PREV is worse.
       #    "Already running" means the serving revision has this image AND this
       #    release (its LEARN_PALI_ENV and LEARN_PALI_SHA, absent == empty): the
-      #    image no longer changes with the ref, so every push to main, and a
-      #    tag on main's image, still makes a revision (same image, new env).
+      #    image no longer changes with the ref, so every tag, even one on
+      #    an image already built, still makes a revision (same image, new env).
       #    A revision whose JSON does not parse, that names no image, or whose
       #    env is not a list falls open to a deploy and the log says why (never
       #    a skip, never a dead job).
@@ -236,8 +234,7 @@ jobs:
           # The PaliCanon API for the dictionary search (062): the URL per
           # environment and the token by reference to its secret, set here
           # because tofu ignores the container's env (060).
-          API_URL=https://api-dev.palicanon.app
-          [ "$ENV" = prod ] && API_URL=https://api.palicanon.app
+          API_URL=https://api.palicanon.app
           gcloud run deploy "$SERVICE" --project "$PROJECT" --region "$REGION" --image "$IMAGE_HASH" \
             --update-env-vars "$(scripts/release-values.sh),LEARN_PALI_API_URL=$API_URL" \
             --update-secrets "LEARN_PALI_API_TOKEN=learn-pali-api-token-$ENV:latest" \
@@ -381,7 +378,7 @@ jobs:
         uses: browser-actions/setup-chrome@v2
 
       # 6b. The public host, every env, through Cloudflare. An env without
-      #     Access (ACCESS_<env> false, the workflow env above; dev and prod
+      #     Access (ACCESS_<env> false, the workflow env above; prod
       #     today, public behind the origin guard like search-front's): through
       #     the Worker, which adds the header (this script sends none and is
       #     given none): the page, the wasm, no token on the wire, then the

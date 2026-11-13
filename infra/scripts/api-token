@@ -8,10 +8,10 @@
 # `pali-api-token-<env>-learn`). The value never touches a command line, a
 # log or this repository.
 #
-#   api-token create <dev|prod>   add the keychain value as the secret's
+#   api-token create <prod>   add the keychain value as the secret's
 #                                 version (does nothing when a version exists)
-#   api-token rotate <dev|prod>   add the keychain value as a new version
-#   api-token check  <dev|prod>   print OK, or "not OK" and the failing check:
+#   api-token rotate <prod>   add the keychain value as a new version
+#   api-token check  <prod>   print OK, or "not OK" and the failing check:
 #                                   version   an enabled version exists
 #                                   keychain  the keychain holds the value
 set -euo pipefail
@@ -19,14 +19,14 @@ set -euo pipefail
 PROJECT=${PROJECT:-palicanon-app}
 
 usage() {
-  echo "usage: api-token <create|rotate|check> <dev|prod>" >&2
+  echo "usage: api-token <create|rotate|check> <prod>" >&2
   exit 2
 }
 
 cmd=${1:-}
 env_name=${2:-}
 case "$cmd" in create | rotate | check) ;; *) usage ;; esac
-case "$env_name" in dev | prod) ;; *) usage ;; esac
+case "$env_name" in prod) ;; *) usage ;; esac
 
 secret="learn-pali-api-token-$env_name"
 service="pali-api-token-$env_name-learn"

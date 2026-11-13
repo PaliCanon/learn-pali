@@ -1,5 +1,5 @@
 output "urls" {
-  description = "The Cloud Run URL of each environment (the Worker's ORIGIN)."
+  description = "The Cloud Run URL of each environment."
   value       = { for k, s in google_cloud_run_v2_service.app : k => s.uri }
 }
 
@@ -16,9 +16,4 @@ output "runtime_service_accounts" {
 output "origin_secrets" {
   description = "The Secret Manager secret of each environment (no version in tofu: scripts/origin-secret create)."
   value       = { for k, s in google_secret_manager_secret.origin : k => s.secret_id }
-}
-
-output "access_hosts" {
-  description = "The hosts behind Cloudflare Access: those of the envs that set access = true (none by default; dev is public behind the origin guard)."
-  value       = [for k, a in cloudflare_zero_trust_access_application.app : a.domain]
 }

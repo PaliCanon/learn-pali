@@ -21,10 +21,10 @@ terraform {
 }
 
 # Credentials come from the environment: gcloud auth application-default
-# login, and CLOUDFLARE_API_TOKEN (zone DNS and Workers routes, account
-# Workers scripts; the Access permission on the zone is needed only when an
-# env sets `access = true`, none by default; the same
-# token lets scripts/origin-secret write and list the Worker's secret).
+# login, and CLOUDFLARE_API_TOKEN (zone DNS and Workers, account Workers
+# scripts). The cloudflare provider is declared only so the next `tofu apply`
+# can destroy the dev Worker and Custom Domain still in the state (task 082);
+# once that apply has run, remove it with cloudflare.tf.
 # Nothing is read from a file in this repository.
 provider "google" {
   project = var.gcp_project

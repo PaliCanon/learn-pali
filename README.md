@@ -36,8 +36,7 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `tools/build-deck/` | Crate `build_deck`, bin `build-deck`, builds the deck JSON from the Digital Pāḷi Dictionary. Never part of the site's build. |
 | `tools/build-deck/src/` | Deck build: DPD parsing, word inflection, form lookup, translation via API, example segment alignment, source tracking. |
 | `tools/build-deck/fixtures/` | Test fixtures for build and translation. |
-| `infra/` | OpenTofu: Cloud Run service, Secret Manager, Cloudflare Worker and custom domain, per environment. |
-| `infra/worker/` | Cloudflare Worker: origin proxy (proxy.js) with node tests. |
+| `infra/` | OpenTofu: Cloud Run service and Secret Manager for prod. |
 | `infra/scripts/` | Origin secret generation script and its test; the test that tofu ignores the container env the deploy writes (lifecycle.test.sh). |
 | `scripts/` | Repository scripts: deploy health check and rollout (rollout-check.sh), the release values a deploy writes (release-values.sh), their tests (rollout-check.test.sh, release-values.test.sh), Cloudflare access redirect pattern. |
 | `.github/workflows/` | CI: format, lint, test, doc, MSRV, coverage, deny checks (ci.yml). Deploy: image build, Cloud Run deploy, health check (deploy.yml). |
@@ -234,7 +233,7 @@ Outside Cloud Run, `ORIGIN_SECRET` is optional, including when
 Cloud Run (`K_SERVICE` present, even empty) requires a non-blank secret and
 refuses to start without it. A configured blank secret is invalid everywhere.
 For production behind a private Cloudflare tunnel, omit both `K_SERVICE`
-and `ORIGIN_SECRET`; set `LEARN_PALI_DEPLOYMENT_ENV=production` for production log metadata. The Worker and its guard remain in use on Cloud Run.
+and `ORIGIN_SECRET`; set `LEARN_PALI_DEPLOYMENT_ENV=production` for production log metadata. The guard remains in use on Cloud Run.
 
 It depends on `palicanon-ui-lib` by git (`branch = "main"`), with a local
 `[patch]` to `../ui-lib` (a worktree reaches it through the `wt/ui-lib`
@@ -343,21 +342,20 @@ Functions stay under 50 lines (`clippy.toml`).
 Written, **not run yet** (task 021): nothing below has been applied, built in
 CI or pushed.
 
-| Where | What | Host |
-| --- | --- | --- |
-| dev | a push to `main` | `learn.dev.palicanon.app` (Cloud Run `learn-pali-dev`) |
-| prod | a tag `v*` | `learn.palicanon.app` (Cloud Run `learn-pali-prod`, once added) |
-
-A branch can be deployed to dev by hand for the user's check: `gh workflow run deploy.yml -R PaliCanon/learn-pali --ref <branch>` runs the same checks as a main deploy and serves the result at `learn.dev.palicanon.app`. A push to `main` redeploys the main branch over it, which does not take long if the image was already built.
+There is one environment, prod: a tag `v*` deploys it to `learn.palicanon.app`
+(Cloud Run `learn-pali-prod`). A push to `main` runs CI only and deploys
+nothing; there is no hosted environment to try a change before a release: run
+it locally (above) and rely on CI. Prod also runs on the user's server
+ssh.lsh.tech (repo `Lsh0x/lsh-tech`, `stacks/palicanon/prod`, images by
+digest); the Cloud Run prod remains for now and is removed later, separately.
 
 - `app/Dockerfile` builds the server and the site in one image (`cargo leptos
   build --release`, then `debian:bookworm-slim`, a non-root user, port 8080).
   Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, and
   takes no credential (ui-lib is COPYed): the command is in the file's header.
   It ends with a smoke test: the server starts and answers.
-- `infra/` is the Cloud Run service, its service account and the Cloudflare
-  Worker and route per environment, in their own tofu state; see
-  `infra/README.md`.
+- `infra/` is the Cloud Run service and its service account for prod, in their
+  own tofu state; see `infra/README.md`.
 - `.github/workflows/deploy.yml` computes the image tag `h-<hash>` (the tracked
   `app`, `core`, `Cargo.toml`, `Cargo.lock` and the ui-lib commit), builds it
   only when the registry lacks it, deploys it with no traffic under a tag,
@@ -367,17 +365,15 @@ A branch can be deployed to dev by hand for the user's check: `gh workflow run d
 - On the public host, `scripts/rollout-check.sh --via-worker` also loads `/` in
   headless Chrome and fails on a hydration panic or a missing `<html
   data-hydrated>` (task 040); by hand on a Mac (Google Chrome.app is found):
-  `scripts/rollout-check.sh --via-worker https://learn.dev.palicanon.app`.
+  `scripts/rollout-check.sh --via-worker https://learn.palicanon.app`.
 
 The footer badge is the deploy's, not the image's: it says which ref was
 rolled out, not which ref built the image, so the image is identical across
 refs (`app/tests/no_build_git.rs`: the build reads no git). `deploy.yml` writes
 `LEARN_PALI_ENV` and `LEARN_PALI_SHA` onto the Cloud Run revision with `gcloud
 run deploy --update-env-vars`, the value from `scripts/release-values.sh`. A
-prod tag `v0.1.8` shows `v0.1.8` alone; `main` shows `main · <sha7>`; a
-dispatched branch `feat/x · <sha7>`; a local run `dev`; a page whose metas are
-missing shows `unknown` in the browser. Every push to `main` makes a new
-revision (another commit, another release), even when the image is the same.
+prod tag `v0.1.8` shows `v0.1.8` alone; a local run `dev`; a page whose metas
+are missing shows `unknown` in the browser.
 The rollout gate (`rollout-check.sh revision`, which needs `ROLLOUT_EXPECT_ENV`
 and `ROLLOUT_EXPECT_SHA`) fails with exit 8 when the served metas differ from
 the intended release: `ROLLOUT_EXPECT_ENV` is non-empty, `ROLLOUT_EXPECT_SHA`
@@ -390,9 +386,8 @@ before the first deploy that writes it (`infra/README.md`).
 Before the first deploy, the user:
 
 1. Runs the first `tofu apply` from `infra/` (`infra/README.md`: gcloud
-   application-default login, `CLOUDFLARE_API_TOKEN` from the keychain). It
-   creates **dev only**: the service on a placeholder image, its Worker and
-   route. Prod comes later (step 4).
+   application-default login). It creates prod: the service on a placeholder
+   image.
 2. The repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
    `GCP_PROJECT` are set (2026-10-09, the API's values, read from
    `PaliCanon/api`); the secrets `APP_ID` and `APP_PRIVATE_KEY` (the GitHub App
@@ -400,11 +395,7 @@ Before the first deploy, the user:
    The deployer holds `roles/run.developer` and Artifact Registry writer
    (checked). The repository is allowed to use the deploy identity (the site's
    `github_repos`, applied 2026-10-09; `infra/README.md`).
-3. Decides the open points: the host names, the maximum instances. Decided
-   (034): dev is public behind the origin guard, like search-dev; Cloudflare
-   Access applies only to an env that sets `access` in `infra/`. Also known:
-   the Cloud Run origin answers only the Worker (403 without its secret
-   header, task 031); the one exception is the bootstrap hello the first
-   `tofu apply` leaves, served before the first deploy.
-4. Pushes `main` (dev), checks `https://learn.dev.palicanon.app`, then adds
-   prod (a second `tofu apply`, prod is in variables.tf's default since 036) and tags `v0.x.y`.
+3. Knows that the Cloud Run origin answers 403 without its secret header (task
+   031); the one exception is the bootstrap hello the first `tofu apply`
+   leaves, served before the first deploy.
+4. Tags `v0.x.y`.

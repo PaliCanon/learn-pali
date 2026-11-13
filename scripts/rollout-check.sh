@@ -17,7 +17,7 @@
 #       it: 403 with an EMPTY body without the header and with a wrong one (a
 #       403 with a body is Google's front end, not our guard). Sends no secret.
 #   scripts/rollout-check.sh --via-worker URL
-#       the public host (dev and prod, task 034): the Worker adds the header,
+#       the public host (task 034): the Worker adds the header,
 #       this script sends none (and refuses to be given the secret, as a
 #       HEADER_FILE or as ORIGIN_SECRET). Same checks as `revision` that need
 #       no secret: `root`, `wasm`, `token`; then `hydrate` (task 040, ui-lib

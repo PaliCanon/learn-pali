@@ -244,6 +244,24 @@ assert_file_has "the current step reads the revision as JSON" "$work/step-curren
 assert_file_has "the check step expects the env" "$work/step-check.sh" 'ROLLOUT_EXPECT_ENV="\$\(scripts/release-values\.sh env\)"'
 assert_file_has "the check step expects the sha" "$work/step-check.sh" 'ROLLOUT_EXPECT_SHA="\$\(scripts/release-values\.sh sha\)"'
 assert_file_has "the check step has its own message for exit 8" "$work/step-check.sh" '= 8|= "8"|8\)'
+# 082: no dev environment. A push to main deploys nothing (ci.yml only) and
+# nothing is dispatched by hand: deploy.yml runs on a tag only, always for prod.
+trigger_keys() { # -> the keys under `on:` of deploy.yml, one per line
+  python3 - "$workflow" <<'PY'
+import sys, yaml
+doc = yaml.safe_load(open(sys.argv[1]))
+on = doc.get(True, doc.get("on"))
+print("\n".join(on))
+PY
+}
+trigger_keys > "$work/triggers"
+assert_file_has "deploy.yml runs on a push (the tags)" "$work/triggers" '^push$'
+assert_file_lacks "deploy.yml has no workflow_dispatch (it only ever deployed dev)" "$work/triggers" 'workflow_dispatch'
+assert_file_lacks "deploy.yml does not run on a push to a branch" "$workflow" 'branches:'
+assert_file_has "deploy.yml still runs on the v* tags" "$workflow" 'tags: \["v\*"\]'
+assert_file_lacks "deploy.yml names no dev host, service, API or env" "$workflow" 'learn\.dev\.|learn-pali-dev|api-dev|ACCESS_dev|\|\| .dev.'
+assert_file_has "deploy.yml's ENV is prod" "$workflow" "^  ENV: prod$"
+assert_file_has "deploy.yml's HOST is the prod host" "$workflow" '^  HOST: learn\.palicanon\.app$'
 
 # The README says what the flag and the gate's inputs are (060 fix round 1, F3).
 # RELEASE_TEST_README points the suite at a README copy (a mutation run).

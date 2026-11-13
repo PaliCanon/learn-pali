@@ -73,7 +73,7 @@ SECRET = "origin_canary_rollout_9d41c7"
 TOKEN = "pc_dev_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v"
 assert len(TOKEN) == 7 + 43
 WASM = "/pkg/learn-pali.4f2a9c.wasm"
-ACCESS = "https://team.cloudflareaccess.com/cdn-cgi/access/login/learn.dev.palicanon.app?kid=1"
+ACCESS = "https://team.cloudflareaccess.com/cdn-cgi/access/login/learn.palicanon.app?kid=1"
 
 
 # The SSR head writes the release metas (task 060). META_ENV and META_SHA are
@@ -170,7 +170,7 @@ def respond(path, who):
     if s == "access_other_redirect": return 302, {"location": "https://evil.example/login"}, b""
     if s == "access_lookalike_suffix": return 302, {"location": "https://team.cloudflareaccess.com.evil.example/cdn-cgi/access/login"}, b""
     if s == "access_lookalike_prefix": return 302, {"location": "https://evilcloudflareaccess.com/cdn-cgi/access/login"}, b""
-    if s == "access_upper": return 302, {"location": "https://TEAM.CloudflareAccess.com/cdn-cgi/access/login/learn.dev.palicanon.app?kid=1"}, b""
+    if s == "access_upper": return 302, {"location": "https://TEAM.CloudflareAccess.com/cdn-cgi/access/login/learn.palicanon.app?kid=1"}, b""
     if s == "access_200": return 200, {}, page("PaliLearn", WASM, "")
     if s == "access_403_cf": return 403, {"cf-mitigated": "challenge"}, b"challenge"
     if s == "access_403_plain": return 403, {}, b""
@@ -897,18 +897,16 @@ order = "chrome-before-host" if "chrome" in ids and ids.index("chrome") < ids.in
 print("%s uses=%s CHROME=%s" % (order, chrome.get("uses", ""), host.get("env", {}).get("CHROME", "")))
 PY2
 )"
-# The workflow-level map and infra/variables.tf's `envs` defaults say the same
-# (change both together): dev from the default block, prod from the
-# optional() default (prod is not in the default map yet).
-assert_eq "deploy.yml: the access settings (ACCESS_dev, ACCESS_prod) mirror infra/variables.tf" "ACCESS_dev=false ACCESS_prod=false | tf: dev=false prod=false" "$(python3 - "$workflow" "$root/infra/variables.tf" <<'PY'
+# The workflow-level setting and infra/variables.tf's `envs` default say the
+# same (change both together): prod only (082: no dev).
+assert_eq "deploy.yml: ACCESS_prod mirrors infra/variables.tf, and no ACCESS_dev is left" "ACCESS_prod=false ACCESS_dev=None | tf: prod=false" "$(python3 - "$workflow" "$root/infra/variables.tf" <<'PY'
 import re, sys, yaml
 env = yaml.safe_load(open(sys.argv[1])).get("env", {})
 tf = open(sys.argv[2]).read()
 opt = re.search(r"access\s*=\s*optional\(bool,\s*(true|false)\)", tf).group(1)
-dev = re.search(r'default\s*=\s*\{\s*dev\s*=\s*\{[^}]*?access\s*=\s*(true|false)', tf, re.S)
 prod = re.search(r'^\s*prod\s*=\s*\{[^}]*?access\s*=\s*(true|false)', tf, re.M | re.S)
-print("ACCESS_dev=%s ACCESS_prod=%s | tf: dev=%s prod=%s" % (
-    env.get("ACCESS_dev"), env.get("ACCESS_prod"), dev.group(1) if dev else opt, prod.group(1) if prod else opt))
+print("ACCESS_prod=%s ACCESS_dev=%s | tf: prod=%s" % (
+    env.get("ACCESS_prod"), env.get("ACCESS_dev"), prod.group(1) if prod else opt))
 PY
 )"
 assert_file_has "deploy.yml: the origin check can fail with exit 5" "$work/step-refused.sh" 'exit 5'
@@ -933,7 +931,7 @@ case "$1 $2 $3" in
         serving=$(cat "$STUB/serving")
         if [ -f "$STUB/follow-latest" ]; then entry='{"percent":100,"latestRevision":true}'; else entry="{\"percent\":100,\"revisionName\":\"$serving\"}"; fi
         if [ -f "$STUB/follow-latest" ]; then serving=$(cat "$STUB/latest-ready"); fi
-        if [ -f "$STUB/split" ]; then entry='{"percent":60,"revisionName":"learn-pali-dev-00001-aaa"},{"percent":40,"revisionName":"learn-pali-dev-00002-bbb"}'; fi
+        if [ -f "$STUB/split" ]; then entry='{"percent":60,"revisionName":"learn-pali-prod-00001-aaa"},{"percent":40,"revisionName":"learn-pali-prod-00002-bbb"}'; fi
         created=$(cat "$STUB/latest-created")
         tagged=$(cat "$STUB/tag-revision" 2>/dev/null || cat "$STUB/latest-created")
         printf '{"status":{"url":"%s","latestReadyRevisionName":"%s","latestCreatedRevisionName":"%s","traffic":[%s,{"tag":"sha-abc1234","revisionName":"%s","url":"https://sha-abc1234---x.a.run.app"}]}}' \
@@ -1005,12 +1003,12 @@ reset_stub() { # image-of-the-serving-revision
   rm -rf "$stub/state"
   mkdir -p "$stub/state"
   export STUB="$stub/state"
-  printf 'learn-pali-dev-00001-aaa' > "$STUB/serving"
-  printf 'learn-pali-dev-00002-bbb' > "$STUB/latest-ready"
-  printf 'learn-pali-dev-00002-bbb' > "$STUB/latest-created"
-  printf 'https://learn-pali-dev-x.a.run.app' > "$STUB/service-url"
-  printf '%s' "$1" > "$STUB/image-learn-pali-dev-00001-aaa"
-  printf 'registry/learn-pali:h-new' > "$STUB/image-learn-pali-dev-00002-bbb"
+  printf 'learn-pali-prod-00001-aaa' > "$STUB/serving"
+  printf 'learn-pali-prod-00002-bbb' > "$STUB/latest-ready"
+  printf 'learn-pali-prod-00002-bbb' > "$STUB/latest-created"
+  printf 'https://learn-pali-prod-x.a.run.app' > "$STUB/service-url"
+  printf '%s' "$1" > "$STUB/image-learn-pali-prod-00001-aaa"
+  printf 'registry/learn-pali:h-new' > "$STUB/image-learn-pali-prod-00002-bbb"
   printf '%s' "$SECRET" > "$STUB/secret-value"
   : > "$STUB/calls"
   : > "$STUB/out"
@@ -1026,10 +1024,10 @@ step() {
   (
     cd "$proj" || exit 99
     env PATH="$stub/bin:$PATH" STUB="$STUB" GITHUB_OUTPUT="$STUB/out" RUNNER_TEMP="$RUNNER_TEMP" \
-      ENV=dev REGION=europe-west1 PROJECT=proj GITHUB_SHA=abc1234def5678 \
+      ENV=prod REGION=europe-west1 PROJECT=proj GITHUB_SHA=abc1234def5678 \
       GITHUB_REF_TYPE=branch GITHUB_REF_NAME=main \
-      ACCESS_dev=false ACCESS_prod=false \
-      IMAGE_HASH=registry/learn-pali:h-new HOST=learn.dev.palicanon.app "$@" \
+      ACCESS_prod=false ACCESS_prod=false \
+      IMAGE_HASH=registry/learn-pali:h-new HOST=learn.palicanon.app "$@" \
       bash -e "$work/step-$id.sh"
   ) 2>&1
 }
@@ -1041,56 +1039,56 @@ MAIN_ENV='[{"name":"RUST_LOG","value":"info"},{"name":"LEARN_PALI_ENV","value":"
 echo "== deploy.yml: step 1 (PREV, skip)"
 reset_stub "registry/learn-pali:h-old"
 out="$(step current)"
-assert_eq "current: PREV is the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current: PREV is the serving revision" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_eq "current: another image is running, so deploy" "false" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "current: the same image serves, so skip" "true" "$(output running)"
 # 060: the skip also needs the same release; the image alone is not enough.
 reset_stub "registry/learn-pali:h-new"
-printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
-assert_eq "current (same image, same release): serving is PREV" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current (same image, same release): serving is PREV" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_absent "current (same image, same release): nothing is deployed" "run deploy" "$(calls)"
 assert_match "current (same image, same release): says nothing to deploy" "nothing to deploy" "$out"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "current (same image, another push): a new revision is wanted" "false" "$(output running)"
-assert_eq "current (same image, another push): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current (same image, another push): PREV is still the serving revision" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_match "current (same image, another push): the message says another release" "serves the image but another release .*new revision with the new env" "$out"
 # 060 fix round 2 (F8): the image is the intended one AND the sha7 is the
 # intended one, but the revision was rolled out for another ref (a dispatch of
 # feat/x): the push to main is still another release, so a new revision.
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"LEARN_PALI_ENV","value":"feat/x"},{"name":"LEARN_PALI_SHA","value":"abc1234"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"feat/x"},{"name":"LEARN_PALI_SHA","value":"abc1234"}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "current (same image, another ref's env, same sha7): a new revision is wanted" "false" "$(output running)"
-assert_eq "current (same image, another ref's env, same sha7): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current (same image, another ref's env, same sha7): PREV is still the serving revision" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_match "current (same image, another ref's env, same sha7): the message says another release" "serves the image but another release .*new revision with the new env" "$out"
 assert_absent "current (same image, another ref's env, same sha7): not the skip message" "nothing to deploy" "$out"
 out="$(step deploy)"
-assert_match "current (same image, another ref's env, same sha7): the deploy writes LEARN_PALI_ENV=main" "run deploy learn-pali-dev .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
+assert_match "current (same image, another ref's env, same sha7): the deploy writes LEARN_PALI_ENV=main" "run deploy learn-pali-prod .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
 reset_stub "registry/learn-pali:h-new"
 out="$(step current)"
 assert_eq "current (same image, no env on the revision): a new revision is wanted" "false" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"RUST_LOG","value":"info"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"RUST_LOG","value":"info"}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "current (same image, an env array with RUST_LOG only): a new revision is wanted" "false" "$(output running)"
 # a tag: absent sha == empty sha, so v0.1.8 already served is a skip; a tag
 # v0.1.9 on the main-built image of the same hash still deploys.
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
 assert_eq "current (tag, env equal, sha absent): absent == empty, so skip" "true" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"},{"name":"LEARN_PALI_SHA","value":""}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"v0.1.8"},{"name":"LEARN_PALI_SHA","value":""}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
 assert_eq "current (tag, env equal, sha empty): skip" "true" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.9)"
 assert_eq "current (v0.1.9 tag, the revision serves main's inputs): a new revision" "false" "$(output running)"
 reset_stub "registry/learn-pali:h-new"
@@ -1104,22 +1102,22 @@ assert_eq "current: inputs release-values.sh refuses fail the step" "1" "$rc"
 # that names no image, never kills the step and never skips: it falls open to
 # a deploy and the log says why.
 reset_stub "registry/learn-pali:h-new"
-printf 'not json' > "$STUB/raw-learn-pali-dev-00001-aaa"
+printf 'not json' > "$STUB/raw-learn-pali-prod-00001-aaa"
 out="$(step current)"
 rc=$?
 assert_eq "current (revision JSON malformed): the step still exits 0" "0" "$rc"
 assert_eq "current (revision JSON malformed): a new revision is wanted" "false" "$(output running)"
-assert_eq "current (revision JSON malformed): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current (revision JSON malformed): PREV is still the serving revision" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_match "current (revision JSON malformed): the log names the reason" "could not read the serving revision's image/release \\(.*\\): deploying a new revision" "$out"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '{"spec":{"containers":[{}]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+printf '%s' '{"spec":{"containers":[{}]}}' > "$STUB/raw-learn-pali-prod-00001-aaa"
 out="$(step current)"
 rc=$?
 assert_eq "current (revision names no image): the step still exits 0" "0" "$rc"
 assert_eq "current (revision names no image): a new revision is wanted" "false" "$(output running)"
 assert_match "current (revision names no image): the log names the reason" "could not read the serving revision's image/release \\(.*image.*\\): deploying a new revision" "$out"
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '{"spec":{"containers":[]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+printf '%s' '{"spec":{"containers":[]}}' > "$STUB/raw-learn-pali-prod-00001-aaa"
 out="$(step current)"
 rc=$?
 assert_eq "current (revision with no container): the step still exits 0" "0" "$rc"
@@ -1129,25 +1127,25 @@ assert_eq "current (revision with no container): a new revision is wanted" "fals
 # (exit 2). The step deploys (fail open), says the read failed in its own line,
 # and never claims "another release" (that is the exit 1 case, tested above).
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '{"spec":{"containers":[{"image":"registry/learn-pali:h-new","env":"oops"}]}}' > "$STUB/raw-learn-pali-dev-00001-aaa"
+printf '%s' '{"spec":{"containers":[{"image":"registry/learn-pali:h-new","env":"oops"}]}}' > "$STUB/raw-learn-pali-prod-00001-aaa"
 out="$(step current)"
 rc=$?
 assert_eq "current (good image, env of the wrong type): the step still exits 0" "0" "$rc"
 assert_eq "current (good image, env of the wrong type): a new revision is wanted" "false" "$(output running)"
-assert_eq "current (good image, env of the wrong type): PREV is still the serving revision" "learn-pali-dev-00001-aaa" "$(output serving)"
+assert_eq "current (good image, env of the wrong type): PREV is still the serving revision" "learn-pali-prod-00001-aaa" "$(output serving)"
 assert_match "current (good image, env of the wrong type): its own line says the release could not be read" "could not read the serving revision's release.*: deploying a new revision" "$out"
 assert_absent "current (good image, env of the wrong type): never 'another release'" "another release" "$out"
 # The happy skip stays a skip (the pair of the two above).
 reset_stub "registry/learn-pali:h-new"
-printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' "$MAIN_ENV" > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "current (readable, same image and release): still a skip" "true" "$(output running)"
 assert_absent "current (readable, same image and release): no could-not-read message" "could not read" "$out"
 reset_stub "registry/learn-pali:h-old"
 touch "$STUB/follow-latest"
-printf 'registry/learn-pali:h-old' > "$STUB/image-learn-pali-dev-00002-bbb"
+printf 'registry/learn-pali:h-old' > "$STUB/image-learn-pali-prod-00002-bbb"
 out="$(step current)"
-assert_eq "current: a service that follows the latest revision names its ready one" "learn-pali-dev-00002-bbb" "$(output serving)"
+assert_eq "current: a service that follows the latest revision names its ready one" "learn-pali-prod-00002-bbb" "$(output serving)"
 reset_stub "registry/learn-pali:h-old"
 printf '{"status":{"traffic":[]}}' > "$work/empty.json"
 cat > "$stub/bin/gcloud-empty" <<'SH'
@@ -1157,7 +1155,7 @@ SH
 chmod +x "$stub/bin/gcloud-empty"
 mkdir -p "$stub/bin-empty"
 cp "$stub/bin/gcloud-empty" "$stub/bin-empty/gcloud"
-out="$(cd "$proj" && env PATH="$stub/bin-empty:$PATH" EMPTY_JSON="$work/empty.json" GITHUB_OUTPUT="$STUB/out" ENV=dev REGION=r PROJECT=p IMAGE_HASH=x bash -e "$work/step-current.sh" 2>&1)"
+out="$(cd "$proj" && env PATH="$stub/bin-empty:$PATH" EMPTY_JSON="$work/empty.json" GITHUB_OUTPUT="$STUB/out" ENV=prod REGION=r PROJECT=p IMAGE_HASH=x bash -e "$work/step-current.sh" 2>&1)"
 rc=$?
 assert_eq "current: no serving revision fails the job" "1" "$rc"
 assert_match "current: and says why" "no revision serves" "$out"
@@ -1167,7 +1165,7 @@ touch "$STUB/split"
 out="$(step current)"
 rc=$?
 assert_eq "current: traffic split between two revisions fails the job" "1" "$rc"
-assert_match "current: and names the split" "traffic is split: .*learn-pali-dev-00001-aaa=60%.*learn-pali-dev-00002-bbb=40%" "$out"
+assert_match "current: and names the split" "traffic is split: .*learn-pali-prod-00001-aaa=60%.*learn-pali-prod-00002-bbb=40%" "$out"
 assert_absent "current: a split is not reported as 'no revision serves'" "no revision serves" "$out"
 
 echo "== deploy.yml: step 2 (no-traffic deploy)"
@@ -1175,12 +1173,12 @@ reset_stub "registry/learn-pali:h-old"
 out="$(step deploy)"
 rc=$?
 assert_eq "deploy: succeeds" "0" "$rc"
-assert_match "deploy: --no-traffic with the tag" "run deploy learn-pali-dev .*--no-traffic --tag sha-abc1234" "$(calls)"
-assert_match "deploy: writes the release of a push to main onto the revision" "run deploy learn-pali-dev .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234(,| |$)" "$(calls)"
+assert_match "deploy: --no-traffic with the tag" "run deploy learn-pali-prod .*--no-traffic --tag sha-abc1234" "$(calls)"
+assert_match "deploy: writes the release of a push to main onto the revision" "run deploy learn-pali-prod .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234(,| |$)" "$(calls)"
 assert_absent "deploy: never the set variant of the flag" "--set-env-vars" "$(calls)"
 assert_eq "deploy: one deploy call" "1" "$(grep -c '^gcloud run deploy' "$STUB/calls")"
 assert_eq "deploy: the tagged revision URL is an output" "https://sha-abc1234---x.a.run.app" "$(output url)"
-assert_eq "deploy: the new revision's name is an output" "learn-pali-dev-00002-bbb" "$(output revision)"
+assert_eq "deploy: the new revision's name is an output" "learn-pali-prod-00002-bbb" "$(output revision)"
 # 060: a tag writes the tag and no sha; a dispatch of a branch writes both.
 reset_stub "registry/learn-pali:h-old"
 out="$(step deploy GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.8)"
@@ -1192,45 +1190,45 @@ assert_match "deploy (dispatch of feat/x): the release is the branch and the sha
 # The same image already serving with another release: current says
 # running=false, and the deploy that follows writes the new env.
 reset_stub "registry/learn-pali:h-new"
-printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-dev-00001-aaa"
+printf '%s' '[{"name":"LEARN_PALI_ENV","value":"main"},{"name":"LEARN_PALI_SHA","value":"1111111"}]' > "$STUB/env-learn-pali-prod-00001-aaa"
 out="$(step current)"
 assert_eq "same image, another push: current wants a deploy" "false" "$(output running)"
 out="$(step deploy)"
-assert_match "same image, another push: the deploy writes the new sha, the image is the same" "run deploy learn-pali-dev .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
+assert_match "same image, another push: the deploy writes the new sha, the image is the same" "run deploy learn-pali-prod .*--image registry/learn-pali:h-new .*--update-env-vars LEARN_PALI_ENV=main,LEARN_PALI_SHA=abc1234" "$(calls)"
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00003-ccc' > "$STUB/latest-created"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/tag-revision"
+printf 'learn-pali-prod-00003-ccc' > "$STUB/latest-created"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/tag-revision"
 out="$(step deploy)"
 rc=$?
 assert_eq "deploy: the latest created revision does not carry the tag, so fail" "1" "$rc"
-assert_match "deploy: and names both revisions" "learn-pali-dev-00003-ccc.*learn-pali-dev-00002-bbb|learn-pali-dev-00002-bbb.*learn-pali-dev-00003-ccc" "$out"
+assert_match "deploy: and names both revisions" "learn-pali-prod-00003-ccc.*learn-pali-prod-00002-bbb|learn-pali-prod-00002-bbb.*learn-pali-prod-00003-ccc" "$out"
 assert_eq "deploy: and no revision is an output" "" "$(output revision)"
 # DT3: a re-run at the same SHA. The tag sha-abc1234 already sits on the older
 # revision (the failed first run's); the deploy creates the new one.
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00001-aaa' > "$STUB/latest-created"
-printf 'learn-pali-dev-00001-aaa' > "$STUB/tag-revision"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/created-after-deploy"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/tag-after-deploy"
+printf 'learn-pali-prod-00001-aaa' > "$STUB/latest-created"
+printf 'learn-pali-prod-00001-aaa' > "$STUB/tag-revision"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/created-after-deploy"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/tag-after-deploy"
 out="$(step deploy)"
 rc=$?
 assert_eq "deploy (re-run, tag on an older revision): succeeds" "0" "$rc"
-assert_eq "deploy (re-run): outputs the NEW revision, not the one the tag sat on" "learn-pali-dev-00002-bbb" "$(output revision)"
+assert_eq "deploy (re-run): outputs the NEW revision, not the one the tag sat on" "learn-pali-prod-00002-bbb" "$(output revision)"
 out="$(step traffic REVISION="$(output revision)")"
 rc=$?
 assert_eq "traffic (re-run): succeeds" "0" "$rc"
-assert_match "traffic (re-run): targets the new revision" "update-traffic learn-pali-dev .*--to-revisions=learn-pali-dev-00002-bbb=100" "$(calls)"
+assert_match "traffic (re-run): targets the new revision" "update-traffic learn-pali-prod .*--to-revisions=learn-pali-prod-00002-bbb=100" "$(calls)"
 assert_absent "traffic (re-run): never the revision the tag sat on" "00001-aaa=100" "$(calls)"
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00001-aaa' > "$STUB/latest-created"
-printf 'learn-pali-dev-00001-aaa' > "$STUB/tag-revision"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/created-after-deploy"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/tag-after-deploy"
+printf 'learn-pali-prod-00001-aaa' > "$STUB/latest-created"
+printf 'learn-pali-prod-00001-aaa' > "$STUB/tag-revision"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/created-after-deploy"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/tag-after-deploy"
 touch "$STUB/deploy-keeps-tag"
 out="$(step deploy)"
 rc=$?
 assert_eq "deploy (re-run, the tag did not move): fails" "1" "$rc"
-assert_match "deploy (re-run, the tag did not move): names both revisions" "learn-pali-dev-00002-bbb.*learn-pali-dev-00001-aaa" "$out"
+assert_match "deploy (re-run, the tag did not move): names both revisions" "learn-pali-prod-00002-bbb.*learn-pali-prod-00001-aaa" "$out"
 assert_eq "deploy (re-run, the tag did not move): no revision output" "" "$(output revision)"
 reset_stub "registry/learn-pali:h-old"
 touch "$STUB/deploy-fails"
@@ -1250,13 +1248,13 @@ assert_eq "secret: the header file is 0600" "-rw-------" "$(ls -l "$RUNNER_TEMP/
 assert_match "secret: the value is masked" "^::add-mask::$SECRET\$" "$out"
 assert_eq "secret: the value appears only in the mask line" "0" "$(printf '%s\n' "$out" | grep -F "$SECRET" | grep -vc '^::add-mask::')"
 assert_absent "secret: the value is in no gcloud call" "$SECRET" "$(calls)"
-assert_match "secret: read from the right secret" "secrets versions access latest --secret learn-pali-origin-secret-dev" "$(calls)"
+assert_match "secret: read from the right secret" "secrets versions access latest --secret learn-pali-origin-secret-prod" "$(calls)"
 reset_stub "registry/learn-pali:h-old"
 touch "$STUB/secret-denied"
 out="$(step secret)"
 rc=$?
 assert_eq "secret: PERMISSION_DENIED fails" "1" "$rc"
-assert_match "secret: and names the missing role" "deployer lacks secretAccessor on learn-pali-origin-secret-dev" "$out"
+assert_match "secret: and names the missing role" "deployer lacks secretAccessor on learn-pali-origin-secret-prod" "$out"
 reset_stub "registry/learn-pali:h-old"
 touch "$STUB/secret-empty"
 out="$(step secret)"
@@ -1316,56 +1314,56 @@ rc=$?
 assert_eq "check: a refused release stops the step before the gate runs" "1" "$rc"
 assert_absent "check: and rollout-check is not called" "rollout-check revision" "$(calls)"
 rm -f "$STUB/rc-revision"
-printf 'learn-pali-dev-00003-zzz' > "$STUB/latest-ready"
-out="$(step traffic REVISION=learn-pali-dev-00002-bbb)"
+printf 'learn-pali-prod-00003-zzz' > "$STUB/latest-ready"
+out="$(step traffic REVISION=learn-pali-prod-00002-bbb)"
 rc=$?
 assert_eq "traffic: moves to the checked revision" "0" "$rc"
-assert_match "traffic: --to-revisions the revision step 2 created, by name, at 100" "update-traffic learn-pali-dev .*--to-revisions=learn-pali-dev-00002-bbb=100" "$(calls)"
-assert_eq "traffic: a newer revision created meanwhile gets nothing" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_match "traffic: --to-revisions the revision step 2 created, by name, at 100" "update-traffic learn-pali-prod .*--to-revisions=learn-pali-prod-00002-bbb=100" "$(calls)"
+assert_eq "traffic: a newer revision created meanwhile gets nothing" "learn-pali-prod-00002-bbb" "$(cat "$STUB/serving")"
 out="$(step traffic REVISION=)"
 rc=$?
 assert_eq "traffic: no revision name fails the step" "1" "$rc"
 
 echo "== deploy.yml: step 6a (the bare origin refuses; else back to PREV)"
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
-out="$(step refused PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
+out="$(step refused PREVIOUS=learn-pali-prod-00001-aaa MOVED=true)"
 rc=$?
 assert_eq "refused: passes when the origin refuses" "0" "$rc"
-assert_match "refused: --refused on the service URL" "rollout-check --refused https://learn-pali-dev-x.a.run.app" "$(calls)"
+assert_match "refused: --refused on the service URL" "rollout-check --refused https://learn-pali-prod-x.a.run.app" "$(calls)"
 printf '1' > "$STUB/rc-refused"
-out="$(step refused PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
+out="$(step refused PREVIOUS=learn-pali-prod-00001-aaa MOVED=true)"
 rc=$?
 assert_eq "refused: a bare origin that answers fails the job" "1" "$rc"
-assert_match "refused: traffic goes back to PREV" "update-traffic learn-pali-dev .*--to-revisions=learn-pali-dev-00001-aaa=100" "$(calls)"
-assert_eq "refused: PREV serves again" "learn-pali-dev-00001-aaa" "$(cat "$STUB/serving")"
-assert_match "refused: and says so" "moved back to learn-pali-dev-00001-aaa" "$out"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+assert_match "refused: traffic goes back to PREV" "update-traffic learn-pali-prod .*--to-revisions=learn-pali-prod-00001-aaa=100" "$(calls)"
+assert_eq "refused: PREV serves again" "learn-pali-prod-00001-aaa" "$(cat "$STUB/serving")"
+assert_match "refused: and says so" "moved back to learn-pali-prod-00001-aaa" "$out"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 touch "$STUB/rollback-fails"
-out="$(step refused PREVIOUS=learn-pali-dev-00001-aaa MOVED=true)"
+out="$(step refused PREVIOUS=learn-pali-prod-00001-aaa MOVED=true)"
 rc=$?
 assert_eq "refused: a rollback that does not restore PREV exits 5" "5" "$rc"
 assert_match "refused: and says so" "rollback did not restore" "$out"
 reset_stub "registry/learn-pali:h-old"
 printf '1' > "$STUB/rc-refused"
-out="$(step refused PREVIOUS=learn-pali-dev-00001-aaa MOVED=false)"
+out="$(step refused PREVIOUS=learn-pali-prod-00001-aaa MOVED=false)"
 rc=$?
 assert_eq "refused: nothing moved, nothing to put back, still fails" "1" "$rc"
 assert_absent "refused: no traffic call" "update-traffic" "$(calls)"
 
 echo "== deploy.yml: step 6b (the public host through the Worker; retries; 4 never rolls back; 1 does)"
-host_step() { step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=true "$@"; }
+host_step() { step host PREVIOUS=learn-pali-prod-00001-aaa MOVED=true "$@"; }
 count() { grep -c -- "$1" "$STUB/calls"; }
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 out="$(host_step)"
 rc=$?
 assert_eq "host: a healthy host passes" "0" "$rc"
-assert_match "host: --via-worker on the dev host" "rollout-check --via-worker https://learn.dev.palicanon.app" "$(calls)"
+assert_match "host: --via-worker on the prod host" "rollout-check --via-worker https://learn.palicanon.app" "$(calls)"
 assert_eq "host: one try when it passes" "1" "$(count 'rollout-check --via-worker')"
 assert_absent "host: no --access call" "rollout-check --access" "$(calls)"
 assert_absent "host: no traffic call when it passes" "update-traffic" "$(calls)"
-assert_eq "host: the traffic stays on the new revision" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_eq "host: the traffic stays on the new revision" "learn-pali-prod-00002-bbb" "$(cat "$STUB/serving")"
 
 reset_stub "registry/learn-pali:h-old"
 out="$(host_step ENV=prod HOST=learn.palicanon.app)"
@@ -1383,18 +1381,18 @@ assert_eq "host: waits between the tries" "2" "$(count '^sleep 3')"
 assert_absent "host: a late pass moves no traffic" "update-traffic" "$(calls)"
 
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 printf '1' > "$STUB/rc-via-worker"
 out="$(host_step)"
 rc=$?
 assert_eq "host: exit 1 five times fails the job with 1" "1" "$rc"
 assert_eq "host: five tries" "5" "$(count 'rollout-check --via-worker')"
-assert_match "host: the traffic goes back to PREV" "update-traffic learn-pali-dev .*--to-revisions=learn-pali-dev-00001-aaa=100" "$(calls)"
-assert_eq "host: PREV serves again" "learn-pali-dev-00001-aaa" "$(cat "$STUB/serving")"
-assert_match "host: and says so" "moved back to learn-pali-dev-00001-aaa" "$out"
+assert_match "host: the traffic goes back to PREV" "update-traffic learn-pali-prod .*--to-revisions=learn-pali-prod-00001-aaa=100" "$(calls)"
+assert_eq "host: PREV serves again" "learn-pali-prod-00001-aaa" "$(cat "$STUB/serving")"
+assert_match "host: and says so" "moved back to learn-pali-prod-00001-aaa" "$out"
 
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 printf '1' > "$STUB/rc-via-worker"
 touch "$STUB/rollback-fails"
 out="$(host_step)"
@@ -1404,7 +1402,7 @@ assert_match "host: and says so" "rollback did not restore" "$out"
 
 reset_stub "registry/learn-pali:h-old"
 printf '1' > "$STUB/rc-via-worker"
-out="$(step host PREVIOUS=learn-pali-dev-00001-aaa MOVED=false)"
+out="$(step host PREVIOUS=learn-pali-prod-00001-aaa MOVED=false)"
 rc=$?
 assert_eq "host: nothing moved, nothing to put back, still fails" "1" "$rc"
 assert_absent "host: no traffic call when this run moved none" "update-traffic" "$(calls)"
@@ -1424,7 +1422,7 @@ assert_eq "host: exit 4 (the Worker's own 500) fails the job with 4" "4" "$rc"
 assert_eq "host: exit 4 is not retried" "1" "$(count 'rollout-check --via-worker')"
 assert_absent "host: exit 4 does not touch the traffic" "update-traffic" "$(calls)"
 assert_match "host: exit 4 is an error annotation" "::error::" "$out"
-assert_match "host: exit 4 names the Worker's 500 and the remedy for this env" "Worker answered 500.*origin-secret push dev" "$out"
+assert_match "host: exit 4 names the Worker's 500 and the remedy for this env" "Worker answered 500.*origin-secret push prod" "$out"
 out="$(host_step ENV=prod HOST=learn.palicanon.app)"
 assert_match "host: the remedy names prod on prod" "origin-secret push prod" "$out"
 
@@ -1450,32 +1448,32 @@ assert_absent "host: another code does not touch the traffic" "update-traffic" "
 # 52x, a 403 through the Worker): the revision is not at fault, so no
 # rollback, no retry, the job fails naming the edge.
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 printf '6' > "$STUB/rc-via-worker"
 out="$(host_step)"
 rc=$?
 assert_eq "host: exit 6 (the edge or the Worker failed) fails the job with 6" "6" "$rc"
 assert_eq "host: exit 6 is not retried" "1" "$(count 'rollout-check --via-worker')"
 assert_absent "host: exit 6 does not touch the traffic (no rollback)" "update-traffic" "$(calls)"
-assert_eq "host: exit 6 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_eq "host: exit 6 leaves the new revision serving" "learn-pali-prod-00002-bbb" "$(cat "$STUB/serving")"
 assert_match "host: exit 6 is an error annotation" "::error::" "$out"
 assert_match "host: exit 6 names the edge and the Worker, not the revision" "::error::.*edge.*Worker" "$out"
-assert_match "host: exit 6 names the remedy for this env" "origin-secret push dev" "$out"
+assert_match "host: exit 6 names the remedy for this env" "origin-secret push prod" "$out"
 assert_absent "host: exit 6 does not say the traffic moved back" "moved back" "$out"
 
 # E1 (034 round 2): exit 7 is the host sitting behind Access while the
 # workflow's ACCESS_<env> says false: the job fails naming the setting, with
 # no rollback and no retry.
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 printf '7' > "$STUB/rc-via-worker"
 out="$(host_step)"
 rc=$?
-assert_eq "host: exit 7 (Access in front, ACCESS_dev false) fails the job with 7" "7" "$rc"
+assert_eq "host: exit 7 (Access in front, ACCESS_prod false) fails the job with 7" "7" "$rc"
 assert_eq "host: exit 7 is not retried" "1" "$(count 'rollout-check --via-worker')"
 assert_absent "host: exit 7 does not touch the traffic (no rollback)" "update-traffic" "$(calls)"
-assert_eq "host: exit 7 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
-assert_match "host: exit 7 is an error annotation naming ACCESS_dev" "::error::.*ACCESS_dev" "$out"
+assert_eq "host: exit 7 leaves the new revision serving" "learn-pali-prod-00002-bbb" "$(cat "$STUB/serving")"
+assert_match "host: exit 7 is an error annotation naming ACCESS_prod" "::error::.*ACCESS_prod" "$out"
 assert_match "host: exit 7 says to match infra" "::error::.*infra" "$out"
 assert_absent "host: exit 7 does not say the traffic moved back" "moved back" "$out"
 
@@ -1494,11 +1492,11 @@ assert_absent "host: and does not roll back" "update-traffic" "$(calls)"
 # --access (never --via-worker): a 302 passes, 2 and 4 fail named, 3 warns,
 # and none of them rolls the traffic back (the revision did not fail).
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
-out="$(host_step ACCESS_dev=true)"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
+out="$(host_step ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): a 302 to cloudflareaccess.com (--access exit 0) passes" "0" "$rc"
-assert_match "host (access): --access on the dev host" "rollout-check --access https://learn.dev.palicanon.app" "$(calls)"
+assert_match "host (access): --access on the prod host" "rollout-check --access https://learn.palicanon.app" "$(calls)"
 assert_absent "host (access): --via-worker is not called" "rollout-check --via-worker" "$(calls)"
 assert_eq "host (access): one try" "1" "$(count 'rollout-check --access')"
 assert_absent "host (access): no traffic call, no rollback" "update-traffic" "$(calls)"
@@ -1508,25 +1506,21 @@ out="$(host_step ENV=prod HOST=learn.palicanon.app ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): prod follows ACCESS_prod" "0" "$rc"
 assert_match "host (access): --access on the prod host" "rollout-check --access https://learn.palicanon.app" "$(calls)"
-reset_stub "registry/learn-pali:h-old"
-out="$(host_step ENV=prod HOST=learn.palicanon.app ACCESS_prod=false ACCESS_dev=true)"
-assert_match "host (access): prod with ACCESS_prod=false is --via-worker even when dev has Access" "rollout-check --via-worker https://learn.palicanon.app" "$(calls)"
-assert_absent "host (access): and not --access" "rollout-check --access" "$(calls)"
 
 reset_stub "registry/learn-pali:h-old"
-printf 'learn-pali-dev-00002-bbb' > "$STUB/serving"
+printf 'learn-pali-prod-00002-bbb' > "$STUB/serving"
 printf '2' > "$STUB/rc-access"
-out="$(host_step ACCESS_dev=true)"
+out="$(host_step ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): exit 2 (Access missing) fails the job with 2" "2" "$rc"
 assert_match "host (access): exit 2 is an error naming Access" "::error::.*Access" "$out"
 assert_absent "host (access): exit 2 never rolls back" "update-traffic" "$(calls)"
 assert_eq "host (access): exit 2 is not retried" "1" "$(count 'rollout-check --access')"
-assert_eq "host (access): exit 2 leaves the new revision serving" "learn-pali-dev-00002-bbb" "$(cat "$STUB/serving")"
+assert_eq "host (access): exit 2 leaves the new revision serving" "learn-pali-prod-00002-bbb" "$(cat "$STUB/serving")"
 
 reset_stub "registry/learn-pali:h-old"
 printf '4' > "$STUB/rc-access"
-out="$(host_step ACCESS_dev=true)"
+out="$(host_step ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): exit 4 (anything else) fails the job with 4" "4" "$rc"
 assert_match "host (access): exit 4 is an error annotation" "::error::" "$out"
@@ -1534,7 +1528,7 @@ assert_absent "host (access): exit 4 never rolls back" "update-traffic" "$(calls
 
 reset_stub "registry/learn-pali:h-old"
 printf '3' > "$STUB/rc-access"
-out="$(host_step ACCESS_dev=true)"
+out="$(host_step ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): exit 3 (a Cloudflare challenge) only warns" "0" "$rc"
 assert_match "host (access): exit 3 as a warning" "::warning::" "$out"
@@ -1542,16 +1536,16 @@ assert_absent "host (access): exit 3 never rolls back" "update-traffic" "$(calls
 
 reset_stub "registry/learn-pali:h-old"
 printf '64' > "$STUB/rc-access"
-out="$(host_step ACCESS_dev=true)"
+out="$(host_step ACCESS_prod=true)"
 rc=$?
 assert_eq "host (access): another code (usage) fails the job with it" "64" "$rc"
 assert_absent "host (access): another code never rolls back" "update-traffic" "$(calls)"
 
 reset_stub "registry/learn-pali:h-old"
-out="$(host_step ACCESS_dev=maybe)"
+out="$(host_step ACCESS_prod=maybe)"
 rc=$?
 assert_eq "host: an access setting that is not true or false fails the job" "1" "$rc"
-assert_match "host: and names the setting" "::error::.*ACCESS_dev" "$out"
+assert_match "host: and names the setting" "::error::.*ACCESS_prod" "$out"
 assert_eq "host: and runs no check" "0" "$(count 'rollout-check')"
 
 # ------------------------------------------------------------ ci.yml: job infra
@@ -1587,7 +1581,6 @@ t("ci.yml: infra's node is 22 or later, got '%s'" % nv, nv.split(".")[0].isdigit
 for cmd in ("tofu fmt -check -recursive infra",
             "tofu -chdir=infra init -backend=false",
             "tofu -chdir=infra validate",
-            "node --test infra/worker/proxy.test.mjs",
             "bash scripts/rollout-check.test.sh",
             "bash infra/scripts/origin-secret.test.sh"):
     t("ci.yml: infra runs `%s`" % cmd, any(cmd in r.split("\n") or r.strip() == cmd for r in runs))
@@ -1711,12 +1704,12 @@ if [ "${1:-}" = "--config" ] && [ "${2:-}" = "-" ]; then
   cat > /dev/null
   printf '{"result":[{"name":"ORIGIN_AUTH","type":"secret_text"}],"success":true}\n200'
 else
-  printf '302 https://team.cloudflareaccess.com/cdn-cgi/access/login/learn.dev.palicanon.app?kid=1'
+  printf '302 https://team.cloudflareaccess.com/cdn-cgi/access/login/learn.palicanon.app?kid=1'
 fi
 SH
 chmod +x "$one/bin/gcloud" "$one/bin/curl"
-origin_check() { # -> $out, $code (origin-secret check dev, ACCESS=1: the Access branch, from the one tree)
-  out="$(env PATH="$one/bin:$PATH" CLOUDFLARE_API_TOKEN=cf-token-for-tests ACCESS=1 "$one/infra/scripts/origin-secret" check dev 2>&1)"
+origin_check() { # -> $out, $code (origin-secret check prod, ACCESS=1: the Access branch, from the one tree)
+  out="$(env PATH="$one/bin:$PATH" CLOUDFLARE_API_TOKEN=cf-token-for-tests ACCESS=1 "$one/infra/scripts/origin-secret" check prod 2>&1)"
   rc=$?
 }
 real_script="$script"

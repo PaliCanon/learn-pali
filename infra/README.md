@@ -3,19 +3,19 @@
 learn-pali's own resources, in its own tofu state
 (`gs://palicanon-app-tofu-state`, prefix `learn-pali`), inside the GCP
 project it shares with the site and the API (`palicanon-app`,
-`europe-west1`). Per environment (the map `envs` in
-`variables.tf`: `dev` first, `prod` added later, see "Order"):
+`europe-west1`). There is one environment, `prod` (the map `envs` in
+`variables.tf`, one entry: Cloud Run `learn-pali-prod`, host
+`learn.palicanon.app`, max 3). Prod also runs on the user's server
+ssh.lsh.tech (repo `Lsh0x/lsh-tech`, `stacks/palicanon/prod`, images by
+digest); the Cloud Run prod remains for now and is removed later, separately:
 
 | What | File | Notes |
 | --- | --- | --- |
-| Runtime service account `learn-pali-<env>` | `gcp.tf` | **One role**: `secretAccessor` on the origin secret, on that secret only. The site reads nothing else from GCP (the deck is embedded, the progress lives in the browser). |
-| Secret `learn-pali-origin-secret-<env>` | `gcp.tf` | The value the Worker sends as `x-origin-auth` and the service requires. Tofu creates the secret and **never a version** (the value would sit in its state); `scripts/origin-secret` makes it. |
+| Runtime service account `learn-pali-prod` | `gcp.tf` | **One role**: `secretAccessor` on the origin secret, on that secret only. The site reads nothing else from GCP (the deck is embedded, the progress lives in the browser). |
+| Secret `learn-pali-origin-secret-prod` | `gcp.tf` | The value the service requires as `x-origin-auth`. Tofu creates the secret and **never a version** (the value would sit in its state); `scripts/origin-secret` makes it. |
 | The deployer's rights | `gcp.tf` | `github-deployer` is read as a data source (the site's infra owns it), never managed here. It may **act as** the runtime account and **read the origin secret** (see "The deployer reads the origin secret"). |
-| Cloud Run service `learn-pali-<env>` | `gcp.tf` | min 0, max 2 (dev) / 3 (prod), 1 CPU, 256Mi, CPU only while a request is served. `ORIGIN_SECRET` comes from the secret (`latest`, read when an instance starts). Startup probe: **TCP 8080** (see "The TCP probe"). Public at the Cloud Run layer. |
-| A Worker relaying to Cloud Run | `cloudflare.tf`, `worker/proxy.js` | The API's pattern: the Worker's `ORIGIN` is the Cloud Run URL; it adds `x-origin-auth` from its secret `ORIGIN_AUTH` (overwriting a client's) and answers 500 without it. Tested with `node --test infra/worker/proxy.test.mjs`. |
-| Access, for an env that sets `access = true` | `cloudflare.tf` | An Access application on the env's host and one allow policy on `var.admin_emails`. **No env sets it today**: dev is public behind the origin guard, like search-front's dev (`search-dev.palicanon.app`), and prod is public. The resources stay behind the flag; an env with `access = true` and no `admin_emails` is refused (a validation of `admin_emails`). |
-| A Workers Custom Domain per host | `cloudflare.tf` | `learn.palicanon.app` (prod), `learn.dev.palicanon.app` (dev). Cloudflare creates the DNS record and issues the certificate for the exact host, whatever its depth: `learn.dev.palicanon.app` is outside Universal SSL (`*.palicanon.app`), a route on a plain record would not serve it over TLS. For an env with Access it `depends_on` the application and its policy: there is no moment when that host is public. |
-| `scripts/origin-secret` | `scripts/` | `create`, `push`, `check` the origin secret; tested with stub `gcloud`/`curl` (`bash infra/scripts/origin-secret.test.sh`). |
+| Cloud Run service `learn-pali-prod` | `gcp.tf` | min 0, max 3, 1 CPU, 256Mi, CPU only while a request is served. `ORIGIN_SECRET` comes from the secret (`latest`, read when an instance starts). Startup probe: **TCP 8080** (see "The TCP probe"). Public at the Cloud Run layer. |
+| `scripts/origin-secret` | `scripts/` | `create` the origin secret (prod only); tested with stub `gcloud`/`curl` (`bash infra/scripts/origin-secret.test.sh`). |
 
 CI owns the image: tofu ignores `image`, the container `env`, `scaling`,
 `client` and `client_version` of the service (`lifecycle.ignore_changes`, the
@@ -24,20 +24,23 @@ secrets. The deploy writes `LEARN_PALI_ENV` and `LEARN_PALI_SHA` into the env
 (`gcloud run deploy --update-env-vars`, the version badge reads them), never
 tofu. The `env` ignore must be applied (`tofu apply`) before the first deploy
 that writes the env, or the next apply strips both variables and the badge
-reads "dev" with no diff shown. The consequence of ignoring `env`: a changed
+falls back to its local-run value with no diff shown. The consequence of ignoring `env`: a changed
 `RUST_LOG` or `ORIGIN_SECRET` reference is not applied to an existing service;
 change it with `gcloud run services update` or `tofu apply -replace`. A
 `tofu apply -replace` of the service also drops `LEARN_PALI_ENV` and
-`LEARN_PALI_SHA`: the badge reads `dev` until the next deploy. A tag release
-is restored by re-running the tag's deploy
-(`gh workflow run deploy.yml --ref v0.1.8`); a dispatch of a branch writes
-`<branch> · <sha7>` instead, and the next push to main writes
-`main · <sha7>`. The deploy uses `--update-env-vars` and
+`LEARN_PALI_SHA`: the badge falls back to its local-run value until the next deploy. A tag release
+is restored by re-running the tag's deploy (the deploy runs on a tag only:
+re-run the tag's workflow run). The deploy uses `--update-env-vars` and
 never `--set-env-vars`: the set variant replaces the whole env and wipes
 `RUST_LOG` and the `ORIGIN_SECRET` reference, so every request would be
 refused. The consequence of ignoring `scaling`: a changed `max_instances`
 is not applied to an existing service; change it with
 `gcloud run services update --max-instances` and keep `variables.tf` in step.
+
+There is no Cloudflare resource in this directory any more (no Worker, no
+Custom Domain, no Access): the `cloudflare` provider stays declared in
+`versions.tf` only so the next `tofu apply` can destroy the Worker and
+domain of the removed environment still in the state; a later task removes the provider.
 
 The Artifact Registry repository `palicanon`, the GitHub deploy identity
 (workload identity federation), the Secret Manager API and the DNS zone
@@ -47,91 +50,46 @@ belong to the site's infra, the API's infra and `platform`: only used here.
 
 The service answers **403 to any request without `x-origin-auth`** equal to
 its `ORIGIN_SECRET` (constant-time comparison; `conventions/deploy.md`), so
-the `*.run.app` URL is no way round Cloudflare (its WAF, its per-IP limit):
-only the Worker holds the value. This guard is dev's protection, as on
-search-front's dev: the public host answers everyone through the Worker. The same value lives in two
-places, set by `scripts/origin-secret`: Secret Manager (the service reads it)
-and the Worker's secret store (the Worker sends it). Neither is in tofu state.
-
-**After any `tofu apply` that re-uploads the Worker, run
-`infra/scripts/origin-secret push <env>`.** The Cloudflare provider has no
-`keep_bindings`: an apply that changes `worker/proxy.js`, the compatibility
-date or `ORIGIN` re-uploads the script, and Cloudflare replaces bindings on
-upload unless they are kept. This was **not probed** (it needs a Cloudflare
-write). The Worker answers 500 when its secret is missing, so a drop is loud
-(`origin-secret check` names `worker-secret`). Declaring the secret in tofu
-(`cloudflare_workers_secret`) would put the value in the state: ruled out.
-
-### First deploy: the Worker holds the secret first
+the `*.run.app` URL is no way round Cloudflare (its WAF, its per-IP limit).
+The value lives in Secret Manager (the service reads it), set by
+`scripts/origin-secret create prod`; it is not in tofu state.
 
 The service refuses any request without the value as soon as a revision that
-requires it serves, so the Worker must already hold it: in the order of
-"Only the user, in order" below, `origin-secret push dev` comes before (or
-with) the first `deploy.yml` run. Steps 4 and 5 may swap: CI never needs the
-Worker (it checks the revision through its tagged URL with the secret it
-reads itself). The bootstrap image does not check the header, so `check`
-saying OK before the first real deploy proves nothing about the guard (the
-rollout does).
+requires it serves. The bootstrap image does not check the header, so the
+first real deploy is what proves the guard (the rollout does).
 
 ### Rotation (v1)
 
-The value is read when an instance starts (the service) and when
-`origin-secret push` runs (the Worker); there is no overlap, so there is a
-short window (a few seconds of 403 on dev) in which the two disagree.
+The value is read when an instance starts; a new version is not seen by a
+running instance.
 
-1. Add the new version: `openssl rand -hex 32 | gcloud secrets versions add learn-pali-origin-secret-dev --project palicanon-app --data-file=-`
+1. Add the new version: `openssl rand -hex 32 | gcloud secrets versions add learn-pali-origin-secret-prod --project palicanon-app --data-file=-`
    (the value goes through the pipe, never typed or printed).
-2. `infra/scripts/origin-secret push dev` (the Worker now sends the new value).
-3. Start a new revision that reads it. `deploy.yml` skips an image that
+2. Start a new revision that reads it. `deploy.yml` skips an image that
    already serves, so a rotation is not a CI run: force the revision with
-   `gcloud run services update learn-pali-dev --region europe-west1 --revision-suffix rot-<date>`
-   (not yet exercised: confirm on the first rotation). Until that revision
-   serves, the service answers the Worker with 403.
+   `gcloud run services update learn-pali-prod --region europe-west1 --revision-suffix rot-<date>`
+   (not yet exercised: confirm on the first rotation).
 
-Prod is not rotated this way: a refusal window on a public site is not
-accepted. Prod waits for a two-value rotation (the service accepts the old and
-the new value for a while), a follow-up task.
+A refusal window on a public site is not accepted: prod waits for a two-value
+rotation (the service accepts the old and the new value for a while), a
+follow-up task. Until then, whoever sends the value must change it at the same
+time as step 2.
 
-## Order: dev first, prod later
+## Only the user, in order (prod)
 
-`var.envs` holds **dev and prod** by default (task 036). The first apply
-stands up `learn-pali-dev` and `learn.dev.palicanon.app` only (the dev
-object is first in the map, but the infrastructure code stands up all envs).
-To stand up prod as well, run `tofu apply` a second time after dev has
-deployed and been checked.
+The first apply of prod, once. Applied in part on 2026-10-13 (the secret, the
+service account, Cloud Run).
 
-1. **Apply dev** ("Only the user, in order"). The service serves the
-   placeholder image; the host answers through the Worker (a 500 until the
-   Worker holds its secret, then the placeholder page).
-2. **Deploy dev from CI** (push `main`), and check
-   `https://learn.dev.palicanon.app`.
-3. **Then apply prod**: run `tofu apply` again. This creates `learn-pali-prod`
-   and `learn.palicanon.app` on the placeholder; repeat the secret steps with
-   `prod` (`origin-secret create prod`, `push prod`), then the first `v*` tag
-   deploys the real image. Prod has its own secret; it is public too (no Access).
-   (Prod is in the default; `prod.tfvars.example` shows the shape of an override.)
-
-## Only the user, in order (dev)
-
-Applied in part on 2026-10-13 (the secret, the service account, Cloud Run, the
-Worker); the Custom Domain and the secret push are still to do (task 034).
-
-1. **The Cloudflare token in the keychain** (`lsh` /
-   `cloudflare-api-token-palicanon`, never typed on a command line or printed). One
-   token reads and writes the Worker's secret; scopes: zone DNS, account
-   Workers scripts (Custom Domains included). Access applications and
-   policies on the zone are needed only if an env sets `access = true`.
-2. **The ui-lib read credential on learn-pali** — done 2026-10-13: the
+1. **The ui-lib read credential on learn-pali**: done 2026-10-13, the
    GitHub App `palicanon-ci` (the organisation disables deploy keys),
    repository secrets `APP_ID` and `APP_PRIVATE_KEY`
    (`.github/actions/ui-lib`). Not part of `infra/`.
-3. **Log in, then the targeted apply, the secret, the full apply.** The
+2. **Log in, then the targeted apply, the secret, the full apply.** The
    Cloud Run service cannot start before the secret has a version, so the
    secret and the accounts come first:
 
    ```sh
    gcloud auth application-default login
-   export CLOUDFLARE_API_TOKEN=$(security find-generic-password -a lsh -s cloudflare-api-token-palicanon -w)
    cd infra
    tofu init
    tofu apply \
@@ -140,34 +98,16 @@ Worker); the Custom Domain and the secret push are still to do (task 034).
      -target=google_secret_manager_secret_iam_member.app_reads_origin \
      -target=google_secret_manager_secret_iam_member.deployer_reads_origin \
      -target=google_service_account_iam_member.deployer_acts_as
-   scripts/origin-secret create dev
+   scripts/origin-secret create prod
    tofu apply
    ```
 
-   The full apply creates Cloud Run on the placeholder image, the Worker, then
-   the Custom Domain. It asks for no `TF_VAR_admin_emails`: only an env that
-   sets `access = true` needs it (`export TF_VAR_admin_emails='["<your address>"]'`
-   first, or a git-ignored tfvars file), and without it the apply is refused.
-   It may take a few minutes after the Custom Domain is created: Cloudflare
-   issues the host's certificate then.
-4. **Give the Worker its secret and check it** (re-run after any apply that
-   re-uploads the Worker):
-
-   ```sh
-   scripts/origin-secret push dev
-   scripts/origin-secret check dev   # prints OK
-   ```
-
-   `check` is OK only when a secret version exists, the Worker lists
-   `ORIGIN_AUTH` (names only) and `https://learn.dev.palicanon.app/` answers
-   200 through the Worker. Otherwise it prints `not OK` and the name of the
-   failing check (`version`, `worker-secret`, `host`). For an env with Access,
-   run it as `ACCESS=1 scripts/origin-secret check <env>`: the host check
-   then expects a 302 to `*.cloudflareaccess.com` (`access-redirect`).
-5. **Push learn-pali `main`**: `deploy.yml` rolls dev; its step 6b checks the
-   public host through the Worker (`rollout-check.sh --via-worker`, below).
-   Open https://learn.dev.palicanon.app: the page loads, so the Worker relays
-   with the right header.
+   The full apply creates Cloud Run on the placeholder image. It also
+   destroys what the state still holds of the removed environment's Worker and Custom Domain
+   (read the plan first: the Cloudflare provider needs `CLOUDFLARE_API_TOKEN`
+   from the keychain, `lsh` / `cloudflare-api-token-palicanon`, never typed on
+   a command line or printed).
+3. **Tag `v0.x.y`**: `deploy.yml` rolls prod.
 
 The services start with the **bootstrap image**
 (`us-docker.pkg.dev/cloudrun/container/hello`, `var.bootstrap_image`), which
@@ -181,9 +121,9 @@ hold, **on the project** `palicanon-app`:
 
 - `roles/run.developer` (deploy a revision, move traffic, tag),
 - Artifact Registry writer on the repository `palicanon` (push the image),
-- `roles/iam.serviceAccountUser` on `learn-pali-<env>`: this one **is**
+- `roles/iam.serviceAccountUser` on `learn-pali-prod`: this one **is**
   granted here (`deployer_acts_as`),
-- `roles/secretmanager.secretAccessor` on `learn-pali-origin-secret-<env>`,
+- `roles/secretmanager.secretAccessor` on `learn-pali-origin-secret-prod`,
   that secret only: granted here (`deployer_reads_origin`).
 
 Checked on 2026-10-09 (read-only, `gcloud projects get-iam-policy palicanon-app`):
@@ -208,32 +148,18 @@ project never depends on the runner's default.
   from Secret Manager.
 - **The deployer reads the origin secret.** The pre-traffic check needs the
   header, so `github-deployer` has `secretAccessor` on
-  `learn-pali-origin-secret-<env>`, that secret only. Consequence: any
+  `learn-pali-origin-secret-prod`, that secret only. Consequence: any
   repository listed in `github_repos` of the site's infra (workload identity)
   can read that one secret. learn-pali holds no other secret: a bypass would
   spend compute and nothing else.
-- **Dev is public behind the origin guard (task 034, user 2026-10-13: "fais
-  le même pour learn" as search-front).** No Access on dev: the first apply
-  failed on the Access application (the Cloudflare token has no Access
-  permission) and search-dev has none either. CI's step 6b checks the public
-  host through the Worker: `rollout-check.sh --via-worker https://$HOST`
-  sends no header, wants `/` 200 and the page's `.wasm`, and no token shape
-  in the answers. Exit 1 (a failed check, after up to 5 tries) puts the
-  traffic back to the previous revision; exit 3 (Cloudflare challenged the
-  runner) only warns; exit 4 (the Worker itself answered 500 `... is not
-  configured.`, it lost its secret) fails the job naming
-  `infra/scripts/origin-secret push <env>`, with no rollback (the revision is
-  not at fault); exit 6 (the edge or the Worker failed: no answer, a
-  Cloudflare 52x, or a 403 because the Worker's secret is wrong) fails the job
-  naming the edge, with no rollback and no retry; exit 7 (the host answers
-  the Access login redirect, a 301, 302, 303, 307 or 308, while `ACCESS_<env>` is false) fails the job
-  naming `ACCESS_<env>`, with no rollback and no retry. `rollout-check.sh --access`
-  (a 302 to `*.cloudflareaccess.com`) is what step 6b runs for an env whose
-  `ACCESS_<env>` in `deploy.yml`'s `env` is true (it mirrors `access` in
-  `variables.tf`: change both together; both false today): 2 and 4 fail
-  named, 3 warns, never a rollback. Such an env would need no CI service token
-  either: that would put its secret in the tofu state and be a second way
-  through Access.
+- **Prod is public behind the origin guard.** No Access: the Cloudflare token
+  has no Access permission. CI's step 6b checks the public host
+  (`rollout-check.sh --via-worker https://$HOST`): it sends no header, wants
+  `/` 200 and the page's `.wasm`, and no token shape in the answers. Exit 1
+  (a failed check, after up to 5 tries) puts the traffic back to the previous
+  revision; exit 3 (Cloudflare challenged the runner) only warns; exits 4, 6
+  and 7 fail the job with no rollback and no retry (the revision is not at
+  fault). `ACCESS_prod` in `deploy.yml`'s `env` is false.
 - **The `Location` rewrite stays as it was** (the incoming origin; the app
   emits no redirect today). search-front's `PUBLIC_ORIGIN` hardening is not
   ported.

@@ -266,7 +266,6 @@ jobs:
       - run: tofu fmt -check -recursive infra
       - run: tofu -chdir=infra init -backend=false
       - run: tofu -chdir=infra validate
-      - run: node --test infra/worker/proxy.test.mjs
       - run: python3 -c 'import yaml' || sudo apt-get install -y python3-yaml
       - run: bash scripts/rollout-check.test.sh
       - run: bash scripts/release-values.test.sh

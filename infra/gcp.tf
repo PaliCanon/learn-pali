@@ -142,7 +142,7 @@ resource "google_cloud_run_v2_service" "app" {
       # environment, the token by reference to its secret.
       env {
         name  = "LEARN_PALI_API_URL"
-        value = each.key == "prod" ? "https://api.palicanon.app" : "https://api-dev.palicanon.app"
+        value = "https://api.palicanon.app"
       }
       env {
         name = "LEARN_PALI_API_TOKEN"
@@ -207,7 +207,7 @@ resource "google_cloud_run_v2_service" "app" {
 
 # Invokable by anyone at the Cloud Run layer: the Worker has no Google
 # identity to present. What keeps the `*.run.app` URL from being a way round
-# Cloudflare (its WAF, its limits; Access only for an env that sets `access`) is the service itself: it
+# Cloudflare (its WAF, its limits) is the service itself: it
 # refuses (403) any request without the origin secret (deploy.md).
 # One exception, accepted: before the first deploy (and after a rollback of
 # the first deploy, which puts the traffic back on it) `*.run.app` serves

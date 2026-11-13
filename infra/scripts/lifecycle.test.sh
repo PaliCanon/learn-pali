@@ -74,18 +74,16 @@ check "README: it says how to change RUST_LOG or ORIGIN_SECRET afterwards" \
 # says what restores it (060 fix round 1, F3).
 check "README: a replace of the service loses the release env until the next deploy" \
   bash -c '[[ "$1" == *"until the next deploy"* && "$1" == *LEARN_PALI_ENV* ]]' _ "$para"
-# 060 fix round 2 (F9): a TAG release is restored by re-running the tag's
-# deploy; a branch dispatch writes '<branch> · <sha7>' and the next push to
-# main writes 'main · <sha7>'. It must not claim that a dispatch restores a tag.
+# 060 fix round 2 (F9), 082: a TAG release is restored by re-running the tag's
+# deploy. There is no other: no dispatch of a branch, no push to main writes a
+# release any more (no dev environment). It must not claim either.
 has() { bash -c '[[ "$1" == *"$2"* ]]' _ "$1" "$2"; }
 check "README: a tag release is restored by re-running the tag's deploy" \
-  has "$para" '`gh workflow run deploy.yml --ref v0.1.8`'
-check "README: a branch dispatch writes the branch and the sha7" \
-  has "$para" '<branch> · <sha7>'
-check "README: the next push to main writes main and the sha7" \
-  has "$para" '`main · <sha7>`'
-check "README: the old claim (a dispatch of the branch restores the release) is gone" \
-  bash -c '[[ "$1" != *"--ref <branch>"* && "$1" != *"a dispatch of the branch"* ]]' _ "$para"
+  has "$para" "re-running the tag's deploy"
+check "README: no branch dispatch writes a release (082)" \
+  bash -c '[[ "$1" != *"<branch>"* && "$1" != *"--ref <branch>"* && "$1" != *"a dispatch of the branch"* ]]' _ "$para"
+check "README: no push to main writes a release (082)" \
+  bash -c '[[ "$1" != *"main · <sha7>"* ]]' _ "$para"
 
 echo
 echo "lifecycle.test.sh: $pass passed, $fail failed"
