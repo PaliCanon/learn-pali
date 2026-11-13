@@ -13,22 +13,12 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 6.0"
     }
-    cloudflare = {
-      source  = "cloudflare/cloudflare"
-      version = "~> 4.52"
-    }
   }
 }
 
 # Credentials come from the environment: gcloud auth application-default
-# login, and CLOUDFLARE_API_TOKEN (zone DNS and Workers, account Workers
-# scripts). The cloudflare provider is declared only so the next `tofu apply`
-# can destroy the dev Worker and Custom Domain still in the state (task 082);
-# once that apply has run, remove it with cloudflare.tf.
-# Nothing is read from a file in this repository.
+# login. Nothing is read from a file in this repository.
 provider "google" {
   project = var.gcp_project
   region  = var.region
 }
-
-provider "cloudflare" {}

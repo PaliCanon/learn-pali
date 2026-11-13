@@ -3,7 +3,6 @@
 # of an override if the env's settings need to change later.
 # envs = {
 #   prod = {
-#     host          = "learn.palicanon.app"
-#     max_instances = 3
+#     host = "learn.palicanon.app"
 #   }
 # }

@@ -36,10 +36,10 @@ stores (`../engine`), the API gateway (`../api`), secrets.
 | `tools/build-deck/` | Crate `build_deck`, bin `build-deck`, builds the deck JSON from the Digital Pāḷi Dictionary. Never part of the site's build. |
 | `tools/build-deck/src/` | Deck build: DPD parsing, word inflection, form lookup, translation via API, example segment alignment, source tracking. |
 | `tools/build-deck/fixtures/` | Test fixtures for build and translation. |
-| `infra/` | OpenTofu: Cloud Run service and Secret Manager for prod. |
-| `infra/scripts/` | Origin secret generation script and its test; the test that tofu ignores the container env the deploy writes (lifecycle.test.sh). |
-| `scripts/` | Repository scripts: deploy health check and rollout (rollout-check.sh), the release values a deploy writes (release-values.sh), their tests (rollout-check.test.sh, release-values.test.sh), Cloudflare access redirect pattern. |
-| `.github/workflows/` | CI: format, lint, test, doc, MSRV, coverage, deny checks (ci.yml). Deploy: image build, Cloud Run deploy, health check (deploy.yml). |
+| `infra/` | OpenTofu: the API token secret in Secret Manager (read by the server) and the Drive API switch. Cloud Run is gone. |
+| `infra/scripts/` | The API token script and its test (api-token.test.sh). |
+| `scripts/` | Repository scripts: the release values the deploy summary prints (release-values.sh), the passages fetch (fetch-passages.sh), and their tests, plus the tests of the image (image.test.sh) and of deploy.yml (deploy-workflow.test.sh). |
+| `.github/workflows/` | CI: format, lint, test, doc, MSRV, coverage, deny checks (ci.yml). Deploy: a tag builds the image and pushes it to GHCR (deploy.yml). |
 | `.github/actions/ui-lib/` | Composite GitHub Action: checks out ui-lib at the pinned Cargo.toml tag with the palicanon-ci app token. |
 | `.task/` | Task definitions and records: one markdown file per task, its design, log and retro. |
 
@@ -227,13 +227,14 @@ export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PAT
 cargo leptos watch
 ```
 
-Outside Cloud Run, `ORIGIN_SECRET` is optional, including when
-`LEPTOS_ENV=PROD`: absent means no origin check and startup logs
-`origin.checked: false`; a value enables the same guard as on Cloud Run.
-Cloud Run (`K_SERVICE` present, even empty) requires a non-blank secret and
-refuses to start without it. A configured blank secret is invalid everywhere.
-For production behind a private Cloudflare tunnel, omit both `K_SERVICE`
-and `ORIGIN_SECRET`; set `LEARN_PALI_DEPLOYMENT_ENV=production` for production log metadata. The guard remains in use on Cloud Run.
+`ORIGIN_SECRET` is optional, including when `LEPTOS_ENV=PROD`: absent means no
+origin check and startup logs `origin.checked: false`; a value enables the
+guard. Prod runs on the user's server behind a private Cloudflare tunnel: it
+sets neither `K_SERVICE` nor `ORIGIN_SECRET`, and sets
+`LEARN_PALI_DEPLOYMENT_ENV=production` for production log metadata. Dead since
+Cloud Run left (task 083), kept: the branch that requires a non-blank secret
+when `K_SERVICE` is present (even empty), and the `-prod` / `-dev` suffix
+reading below. A configured blank secret is invalid everywhere.
 
 It depends on `palicanon-ui-lib` by git (`branch = "main"`), with a local
 `[patch]` to `../ui-lib` (a worktree reaches it through the `wt/ui-lib`
@@ -245,8 +246,8 @@ checkout too.
 
 The site emits newline-delimited JSON through `tracing`: stdout on the
 server, the browser's console for the hydrated site. No telemetry backend,
-credentials or network connection are required. Cloud Run captures stdout
-as structured container logs. Browser diagnostics stay in that browser;
+credentials or network connection are required. The container runtime captures stdout
+as structured logs. Browser diagnostics stay in that browser;
 they are not uploaded or persisted. The CSR fragment emits tracing events
 for its host's subscriber; it does not install one automatically.
 
@@ -324,8 +325,8 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER
 CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner CHROMEDRIVER=<chromedriver> \
   cargo test -p learn_pali --features csr --target wasm32-unknown-unknown --test sync_hint
 bash scripts/csr-without-web-store.sh   # the csr build holds nothing of the web store
-bash scripts/rollout-check.test.sh && bash scripts/release-values.test.sh
-bash infra/scripts/origin-secret.test.sh && bash infra/scripts/lifecycle.test.sh
+bash scripts/release-values.test.sh && bash scripts/deploy-workflow.test.sh && bash scripts/image.test.sh
+bash scripts/fetch-passages.test.sh && bash infra/scripts/api-token.test.sh
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 cargo leptos build
 cargo deny check advisories bans sources licenses
@@ -339,63 +340,40 @@ Functions stay under 50 lines (`clippy.toml`).
 
 ## Deploy
 
-Written, **not run yet** (task 021): nothing below has been applied, built in
-CI or pushed.
+Prod runs on the user's server ssh.lsh.tech (repo `Lsh0x/lsh-tech`,
+`stacks/palicanon/prod`), behind a Cloudflare tunnel, at
+`learn.palicanon.app`. There is no hosted environment to try a change before a
+release: run it locally (above) and rely on CI. Cloud Run is gone (task 083).
 
-There is one environment, prod: a tag `v*` deploys it to `learn.palicanon.app`
-(Cloud Run `learn-pali-prod`). A push to `main` runs CI only and deploys
-nothing; there is no hosted environment to try a change before a release: run
-it locally (above) and rely on CI. Prod also runs on the user's server
-ssh.lsh.tech (repo `Lsh0x/lsh-tech`, `stacks/palicanon/prod`, images by
-digest); the Cloud Run prod remains for now and is removed later, separately.
+A tag `v*` builds the image and pushes it to GHCR; nothing else happens. The
+stack pulls the image **by digest**, so updating prod is a change of the digest
+in the stack, by hand.
 
 - `app/Dockerfile` builds the server and the site in one image (`cargo leptos
   build --release`, then `debian:bookworm-slim`, a non-root user, port 8080).
   Its build context is the folder holding `learn-pali/` **and** `ui-lib/`, and
   takes no credential (ui-lib is COPYed): the command is in the file's header.
   It ends with a smoke test: the server starts and answers.
-- `infra/` is the Cloud Run service and its service account for prod, in their
-  own tofu state; see `infra/README.md`.
 - `.github/workflows/deploy.yml` computes the image tag `h-<hash>` (the tracked
   `app`, `core`, `Cargo.toml`, `Cargo.lock` and the ui-lib commit), builds it
-  only when the registry lacks it, deploys it with no traffic under a tag,
-  checks it, then moves the traffic. The checks: `/` answers 200 and names
-  PaliLearn; the hashed `.wasm` that `/` references answers 200; the retired
-  review route answers 404. It also writes the release onto the revision (below).
-- On the public host, `scripts/rollout-check.sh --via-worker` also loads `/` in
-  headless Chrome and fails on a hydration panic or a missing `<html
-  data-hydrated>` (task 040); by hand on a Mac (Google Chrome.app is found):
-  `scripts/rollout-check.sh --via-worker https://learn.palicanon.app`.
+  only when GHCR lacks it (`docker buildx imagetools inspect`), pushes
+  `ghcr.io/palicanon/learn-pali:h-<hash>` and the release tag
+  (`ghcr.io/palicanon/learn-pali:v0.1.8`), labelled
+  `org.opencontainers.image.source` so the package stays linked to the
+  repository. The job summary has the digest
+  (`ghcr.io/palicanon/learn-pali@sha256:…`), the tags and the release values.
+  The login is the job's `GITHUB_TOKEN` (`packages: write`). GCP is still used
+  for one read: the passages asset in `gs://palicanon-app-assets`
+  (`scripts/fetch-passages.sh`, with the repository variables `WIF_PROVIDER`
+  and `DEPLOYER_SA`).
+- `infra/` holds the API token secret the server reads; see `infra/README.md`.
 
-The footer badge is the deploy's, not the image's: it says which ref was
-rolled out, not which ref built the image, so the image is identical across
-refs (`app/tests/no_build_git.rs`: the build reads no git). `deploy.yml` writes
-`LEARN_PALI_ENV` and `LEARN_PALI_SHA` onto the Cloud Run revision with `gcloud
-run deploy --update-env-vars`, the value from `scripts/release-values.sh`. A
-prod tag `v0.1.8` shows `v0.1.8` alone; a local run `dev`; a page whose metas
-are missing shows `unknown` in the browser.
-The rollout gate (`rollout-check.sh revision`, which needs `ROLLOUT_EXPECT_ENV`
-and `ROLLOUT_EXPECT_SHA`) fails with exit 8 when the served metas differ from
-the intended release: `ROLLOUT_EXPECT_ENV` is non-empty, `ROLLOUT_EXPECT_SHA`
-must be set but may be empty (a tag has no sha). The deploy uses
-`--update-env-vars` and never `--set-env-vars`: the set variant replaces the whole
-env, wipes `RUST_LOG` and the `ORIGIN_SECRET` reference, and every request is
-then refused. Tofu ignores the container env, so its apply must come
-before the first deploy that writes it (`infra/README.md`).
+The footer badge is the release the stack gives the container, not the image's:
+the image is identical across refs (`app/tests/no_build_git.rs`: the build
+reads no git). The server reads `LEARN_PALI_ENV` (the tag, e.g. `v0.1.8`) and
+`LEARN_PALI_SHA` (empty for a tag); the deploy summary prints both
+(`scripts/release-values.sh`). A local run shows `dev`; a page whose metas are
+missing shows `unknown` in the browser.
 
-Before the first deploy, the user:
-
-1. Runs the first `tofu apply` from `infra/` (`infra/README.md`: gcloud
-   application-default login). It creates prod: the service on a placeholder
-   image.
-2. The repository **variables** `WIF_PROVIDER`, `DEPLOYER_SA` and
-   `GCP_PROJECT` are set (2026-10-09, the API's values, read from
-   `PaliCanon/api`); the secrets `APP_ID` and `APP_PRIVATE_KEY` (the GitHub App
-   `palicanon-ci`, which checks ui-lib out) are what CI and the deploy need.
-   The deployer holds `roles/run.developer` and Artifact Registry writer
-   (checked). The repository is allowed to use the deploy identity (the site's
-   `github_repos`, applied 2026-10-09; `infra/README.md`).
-3. Knows that the Cloud Run origin answers 403 without its secret header (task
-   031); the one exception is the bootstrap hello the first `tofu apply`
-   leaves, served before the first deploy.
-4. Tags `v0.x.y`.
+Each release, the user: tags `v0.x.y`, reads the digest from the job summary and
+puts it, with the release values, in the lsh-tech stack.

@@ -245,9 +245,8 @@ jobs:
   # The infrastructure and its scripts (034 round 1): nothing else in CI runs
   # them. No ui-lib checkout and no Rust: OpenTofu formats and validates
   # `infra/` (init without the backend: no credential, the providers only),
-  # node runs the Worker's tests, bash the script suites (python3 with
-  # PyYAML, curl and jq are on the runner; the first suite also reads
-  # deploy.yml and ci.yml). OpenTofu 1.10.0: versions.tf asks 1.8 or later and
+  # bash the script suites (python3 with PyYAML and jq are on the runner; some
+  # suites read deploy.yml and ci.yml). OpenTofu 1.10.0: versions.tf asks 1.8 or later and
   # the cross-variable validation in variables.tf needs 1.9.
   infra:
     name: infra
@@ -260,16 +259,12 @@ jobs:
         with:
           tofu_version: 1.10.0
           tofu_wrapper: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
       - run: tofu fmt -check -recursive infra
       - run: tofu -chdir=infra init -backend=false
       - run: tofu -chdir=infra validate
       - run: python3 -c 'import yaml' || sudo apt-get install -y python3-yaml
-      - run: bash scripts/rollout-check.test.sh
       - run: bash scripts/release-values.test.sh
+      - run: bash scripts/deploy-workflow.test.sh
+      - run: bash scripts/image.test.sh
       - run: bash scripts/fetch-passages.test.sh
-      - run: bash infra/scripts/origin-secret.test.sh
       - run: bash infra/scripts/api-token.test.sh
-      - run: bash infra/scripts/lifecycle.test.sh
