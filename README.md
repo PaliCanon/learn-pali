@@ -333,7 +333,7 @@ cargo deny check advisories bans sources licenses
 ```
 
 The same run in CI (`.github/workflows/ci.yml`), plus MSRV (`--locked`, on
-1.88), cargo-deny and coverage (cargo-llvm-cov over the four crates →
+1.89), cargo-deny and coverage (cargo-llvm-cov over the four crates →
 Codecov). The app has `ssr`, `hydrate` and `csr` features that do not build
 together, so there is no `--workspace`; the three other crates have none.
 Functions stay under 50 lines (`clippy.toml`).

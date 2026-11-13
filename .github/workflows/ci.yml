@@ -182,7 +182,7 @@ jobs:
       - run: cargo doc --locked --no-deps -p learn_pali --features ssr -p learn_core -p learn_cli -p build_deck
 
   msrv:
-    name: msrv (1.88)
+    name: msrv (1.89)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -192,7 +192,7 @@ jobs:
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: dtolnay/rust-toolchain@1.88
+      - uses: dtolnay/rust-toolchain@1.89
       # --locked: the committed Cargo.lock is what the MSRV claim is verified
       # against; a fresh resolution could pull a dependency with a higher MSRV.
       - run: cargo check --locked -p learn_pali --features ssr
