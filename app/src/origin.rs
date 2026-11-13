@@ -60,7 +60,7 @@ impl fmt::Debug for OriginSecret {
 pub enum OriginError {
     /// The variable is set to nothing, or to blanks.
     Empty,
-    /// A deployed build (Cloud Run, or `LEPTOS_ENV` prod) has no origin secret.
+    /// Cloud Run (`K_SERVICE` present) has no origin secret.
     Required,
 }
 
@@ -77,11 +77,11 @@ impl fmt::Display for OriginError {
         match self {
             OriginError::Empty => write!(
                 f,
-                "{ORIGIN_VAR} is set but empty: give it a value, or unset it for a local run"
+                "{ORIGIN_VAR} is set but empty: give it a value, or unset it outside Cloud Run"
             ),
             OriginError::Required => write!(
                 f,
-                "{ORIGIN_VAR} is not set: a deployed build answers only the requests that carry it"
+                "{ORIGIN_VAR} is not set: a Cloud Run service answers only the requests that carry it"
             ),
         }
     }
@@ -92,7 +92,7 @@ impl std::error::Error for OriginError {}
 /// Whether the service checks where a request came from.
 #[derive(Clone, Debug)]
 pub enum Origin {
-    /// No check: a local run.
+    /// No check: outside Cloud Run with no configured secret.
     Open,
     /// Every request must carry the secret.
     Checked(OriginSecret),
@@ -101,16 +101,16 @@ pub enum Origin {
 impl Origin {
     /// Reads `ORIGIN_SECRET` through `get` (`std::env::var(..).ok()` in
     /// production, a table in tests): set means checked (trimmed), unset
-    /// means open for a local run and an error for a deployed build, blank
+    /// means open outside Cloud Run and an error on Cloud Run, blank
     /// is an error either way.
     ///
     /// # Errors
-    /// [`OriginError`] when the variable is blank, or unset in a deployed build.
+    /// [`OriginError`] when the variable is blank, or unset on Cloud Run.
     pub fn from_env(get: impl Fn(&str) -> Option<String>) -> Result<Origin, OriginError> {
         match get(ORIGIN_VAR) {
             Some(value) if value.trim().is_empty() => Err(OriginError::Empty),
             Some(value) => Ok(Origin::Checked(OriginSecret::new(value.trim()))),
-            None if deployed(&get) => Err(OriginError::Required),
+            None if on_cloud_run(&get) => Err(OriginError::Required),
             None => Ok(Origin::Open),
         }
     }
@@ -141,15 +141,9 @@ impl Origin {
     }
 }
 
-/// Whether this is a deployed build: Cloud Run sets `K_SERVICE` in every
-/// container, and the image sets `LEPTOS_ENV` to `PROD`. A local
-/// `cargo leptos watch` (`LEPTOS_ENV=DEV`) is neither.
-fn deployed(get: &impl Fn(&str) -> Option<String>) -> bool {
-    let production = get("LEPTOS_ENV").is_some_and(|env| {
-        let env = env.trim();
-        env.eq_ignore_ascii_case("prod") || env.eq_ignore_ascii_case("production")
-    });
-    production || get("K_SERVICE").is_some()
+/// Cloud Run sets `K_SERVICE`; mere production mode does not identify a public origin.
+fn on_cloud_run(get: &impl Fn(&str) -> Option<String>) -> bool {
+    get("K_SERVICE").is_some()
 }
 
 /// The guard, as an axum middleware.
@@ -209,6 +203,47 @@ mod tests {
             env.iter()
                 .find(|(k, _)| *k == name)
                 .map(|(_, v)| (*v).to_owned())
+        }
+    }
+
+    #[test]
+    fn origin_cloud_run_matrix() {
+        for (service, secret, checked, failure) in [
+            (None, None, false, None),
+            (
+                Some("service-dev"),
+                None,
+                false,
+                Some(OriginError::Required),
+            ),
+            (Some(""), None, false, Some(OriginError::Required)),
+            (None, Some(SECRET), true, None),
+            (Some("service-dev"), Some(SECRET), true, None),
+            (None, Some(""), false, Some(OriginError::Empty)),
+            (
+                Some("service-dev"),
+                Some(" "),
+                false,
+                Some(OriginError::Empty),
+            ),
+        ] {
+            let mut env = vec![("LEPTOS_ENV", "PROD")];
+            if let Some(service) = service {
+                env.push(("K_SERVICE", service));
+            }
+            if let Some(secret) = secret {
+                env.push((ORIGIN_VAR, secret));
+            }
+            let got = Origin::from_env(lookup(&env));
+            if let Some(expected) = failure {
+                assert_eq!(got.unwrap_err(), expected);
+            } else {
+                let origin = got.unwrap();
+                assert_eq!(matches!(origin, Origin::Checked(_)), checked);
+                if let Origin::Checked(secret) = origin {
+                    assert!(secret.matches(SECRET.as_bytes()));
+                }
+            }
         }
     }
 
@@ -288,6 +323,8 @@ mod tests {
         for (case, env) in [
             ("nothing set", vec![]),
             ("LEPTOS_ENV=DEV", vec![("LEPTOS_ENV", "DEV")]),
+            ("LEPTOS_ENV=PROD", vec![("LEPTOS_ENV", "PROD")]),
+            ("LEPTOS_ENV=Production", vec![("LEPTOS_ENV", "Production")]),
         ] {
             let origin = Origin::from_env(lookup(&env)).unwrap();
             assert!(matches!(origin, Origin::Open), "{case}");
@@ -295,20 +332,12 @@ mod tests {
     }
 
     #[test]
-    fn an_unset_secret_in_a_deployed_build_refuses_to_start() {
-        for (case, env) in [
-            ("K_SERVICE", vec![("K_SERVICE", "learn-pali-dev")]),
-            ("LEPTOS_ENV=PROD", vec![("LEPTOS_ENV", "PROD")]),
-            ("LEPTOS_ENV=prod", vec![("LEPTOS_ENV", "prod")]),
-            ("LEPTOS_ENV=Production", vec![("LEPTOS_ENV", "Production")]),
-            (
-                "LEPTOS_ENV= production ",
-                vec![("LEPTOS_ENV", " production ")],
-            ),
-        ] {
-            let err = Origin::from_env(lookup(&env)).unwrap_err();
-            assert_eq!(err, OriginError::Required, "{case}");
-        }
+    fn an_unset_secret_on_cloud_run_refuses_to_start() {
+        let env = [("K_SERVICE", "learn-pali-dev")];
+        assert_eq!(
+            Origin::from_env(lookup(&env)).unwrap_err(),
+            OriginError::Required
+        );
     }
 
     #[test]

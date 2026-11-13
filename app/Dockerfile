@@ -123,9 +123,8 @@ USER app
 # asks it what the rollout will ask (deploy.yml): `/` is 200 and names
 # PaliLearn, the hashed .wasm it references is served, `/review` is gone
 # (404), and a request without the header is 403 with an EMPTY body (the
-# guard's refusal; LEPTOS_ENV=PROD makes the service refuse to start without
-# ORIGIN_SECRET). A broken build or a missing
-# hash file fails here, not on Cloud Run. Plain bash (/dev/tcp): the image has
+# guard's refusal; K_SERVICE below simulates Cloud Run's required secret).
+# A broken build or a missing hash file fails here, not on Cloud Run. Plain bash (/dev/tcp): the image has
 # no curl and gains none.
 RUN <<'EOF'
 #!/bin/bash
@@ -135,7 +134,7 @@ req() { exec 3<>"/dev/tcp/127.0.0.1/8080"; printf 'GET %s HTTP/1.0\r\nHost: smok
 get() { req "$1" "x-origin-auth: $secret"$'\r\n\r\n'; }
 anon() { req "$1" $'\r\n'; }
 status() { (get "$1") | { read -r _ code _; echo "$code"; }; }
-ORIGIN_SECRET="$secret" ./learn_pali &
+K_SERVICE=learn-pali-smoke ORIGIN_SECRET="$secret" ./learn_pali &
 pid=$!
 trap 'kill $pid 2>/dev/null || true' EXIT
 page=""

@@ -228,13 +228,13 @@ export RUSTUP_HOME=$HOME/.rustup-pc/rustup CARGO_HOME=$HOME/.rustup-pc/cargo PAT
 cargo leptos watch
 ```
 
-A local run is open: `ORIGIN_SECRET` unset means no check, and the startup
-event has `origin.checked: false`. A deployed build (Cloud Run's `K_SERVICE` set, or
-`LEPTOS_ENV` prod, as the image sets it) needs `ORIGIN_SECRET` and refuses to
-start without it; a blank value is an error even locally. It then answers only
-the requests that carry that value in `x-origin-auth` (the Cloudflare Worker
-adds it), with a 403 and an empty body for every other one (`app/src/origin.rs`).
-The secret is in no log line and no message.
+Outside Cloud Run, `ORIGIN_SECRET` is optional, including when
+`LEPTOS_ENV=PROD`: absent means no origin check and startup logs
+`origin.checked: false`; a value enables the same guard as on Cloud Run.
+Cloud Run (`K_SERVICE` present, even empty) requires a non-blank secret and
+refuses to start without it. A configured blank secret is invalid everywhere.
+For production behind a private Cloudflare tunnel, omit both `K_SERVICE`
+and `ORIGIN_SECRET`; set `LEARN_PALI_DEPLOYMENT_ENV=production` for production log metadata. The Worker and its guard remain in use on Cloud Run.
 
 It depends on `palicanon-ui-lib` by git (`branch = "main"`), with a local
 `[patch]` to `../ui-lib` (a worktree reaches it through the `wt/ui-lib`
