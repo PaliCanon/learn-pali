@@ -1,6 +1,6 @@
 # 080 Require ORIGIN_SECRET on Cloud Run only
 
-status: merged locally
+status: merged
 rank: 7 — blocks moving learn.palicanon.app from Cloud Run to ssh.lsh.tech (lsh-tech, stack palicanon prod); small change
 level: standard — bounded startup predicate, with fail-closed security regression tests
 request: the user, 2026-11-13: "je pense quon peut virer directement !" (about the Worker + ORIGIN_SECRET guard, once served through a Cloudflare tunnel)
@@ -51,7 +51,7 @@ the lsh-tech stack itself.
 
 ## Workflow contract
 
-Current step: merged locally
+Current step: implementation archived; production release pending
 Input: this brief
 Artifact: implementation and qualification below
 Target thread: review
@@ -137,3 +137,61 @@ input and backed up before integrating its tracked, updated counterpart. Other
 tracked edits and untracked paths are verified unchanged. No migration, remote
 push, tag or prod release is authorized or performed by this merge-only step.
 The proposed prod patch still waits for the brief's human release validation.
+
+
+## Retro
+
+2026-11-13, after verified local merge 8ed09c1 (base 684e51d,
+implementation aedd239). The user authorized the merge; the stop hook then
+identified this missing section and archival. This closure changes no code.
+
+- **Result and evidence:** the K_SERVICE-only requirement, optional configured
+  guard and fail-closed blank-secret policy are implemented. The recorded
+  834 SSR tests, 1,259 rollout assertions and lint/docs/format checks cover
+  the merged application tree. Source decisions retain the existing canonical
+  Cloud Run-only origin policy in ../docs/decisions.md (2026-10-11).
+- **What worked:** tests failed on the old production-mode predicate and passed
+  after the change; process tests checked actual binary startup, not just the
+  helper. Worktrees and verified diff restoration preserved unrelated edits.
+- **Errors:** the original role-grounded attempt was refused (Studio
+  28g375e66sos); process b20ca9408781, design c8db6c06b667 and review
+  d0de25d1b275 remained placeholders while work proceeded with direct user
+  authorization. Merge closure omitted Retro/archival. Fix: report the real
+  stage/evidence explicitly and finish the closure checklist before returning.
+- **Partner review:** Gemini role-retro reviewed a process-only summary
+  e6b1817a3622 and answered v4g6b8lt22cu (done). No source diff was exported.
+  The review keeps code merge, process completion and operational release
+  distinct; its release-boundary reminder is retained without alleging an
+  unperformed deployment. This is process review, not independent code review.
+- **Questions for next time:** which signal identifies the hosting platform,
+  which separate policies use production mode, where can a real image be
+  built, and what exact release action did the user authorize?
+- **Follow-ups assessed:** native startup tests already exist and CI already
+  builds images, so no duplicate container-emulation task is opened. Persona
+  recovery/status synchronization is proposed in task 081, not approved by
+  this closure. No new runtime refactor or security-scope change is proposed.
+- **Knowledge:** two lessons were submitted to Sippa pending human review;
+  retro skill and role-retro feedback were reported. The missing persona's
+  publication was not silently claimed fixed.
+- **Tools/workflows used:** local git/worktrees and source review, sccache,
+  cargo tests/clippy/docs/sweep, rollout checks, GitSense's bounded Search
+  impact lookup, Sippa discovery and Studio retrospective. No external code
+  reviewer, Docker build, PR, push, tag or prod deployment is claimed.
+- **Operational follow-up:** local implementation is merged. v0.1.22 remains
+  proposed, with successful CI image building and explicit human release
+  approval still required. Archiving this implementation conversation does
+  not close or authorize that production release or the lsh-tech migration.
+
+
+## Archive
+
+2026-11-13: Studio conversation wz3l3opiqlky was archived after the verified
+local merge and retrospective. Updated evidence: impl 38bf31d3062a, review
+9a48eaaea6fe, retro validation 164986f35230, process 0dbef562ed1c.
+The archive tool returned success for the same conversation/project. No code,
+release, deployment or infrastructure state changed. The pending production
+release gate and proposed follow-up 081 remain explicit in this file/repository.
+
+Sippa lessons pending review: 1cfd9e970110463e8537bfd34941689e (origin/platform
+policy) and a5bbdfdca0d24fafb4950f7c5309334e (local merge closure). Neither was
+approved by the agent.
