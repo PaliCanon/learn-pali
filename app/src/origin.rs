@@ -167,12 +167,19 @@ fn forbidden() -> Response {
     response
 }
 
+/// `GET /healthz`, the uniform liveness check of every public service: 200
+/// and `ok`, answered here without rendering the app, never cached.
+async fn healthz() -> ([(header::HeaderName, &'static str); 1], &'static str) {
+    ([(header::CACHE_CONTROL, "no-store")], "ok")
+}
+
 /// The service's router: the page's routes, the static files and the error
 /// page as the fallback, `origin` guarding all of it as the outermost layer
 /// (the signature asks for it, so `main` cannot forget the guard).
 pub fn router(options: LeptosOptions, origin: Origin) -> axum::Router {
     let routes = generate_route_list(App);
     axum::Router::new()
+        .route("/healthz", axum::routing::get(healthz))
         // The server functions (062: the dictionary search and a word's
         // passage) answer under /api; the Worker passes POST there.
         .route(
