@@ -233,14 +233,7 @@ jobs:
         with:
           components: llvm-tools-preview
       - uses: taiki-e/install-action@cargo-llvm-cov
-      - run: cargo llvm-cov -p learn_pali -p learn_core -p learn_cli -p build_deck --features learn_pali/ssr --lcov --output-path lcov.info
-      - uses: codecov/codecov-action@v7
-        with:
-          files: lcov.info
-          working-directory: learn-pali
-          fail_ci_if_error: false
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+      - run: cargo llvm-cov -p learn_pali -p learn_core -p learn_cli -p build_deck --features learn_pali/ssr
 
   # The infrastructure and its scripts (034 round 1): nothing else in CI runs
   # them. No ui-lib checkout and no Rust: OpenTofu formats and validates
