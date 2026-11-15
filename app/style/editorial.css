@@ -34,7 +34,15 @@
 [data-page="home"]:has([data-review]) { isolation: isolate; }
 [data-page="home"]:has([data-review])::before { content: ""; position: absolute; z-index: -1; right: 0; top: 180px; width: 260px; height: 500px; opacity: .25; background: url("/images/lotus-bud-v1.png") center / cover; mask-image: linear-gradient(transparent, black 25%, black 70%, transparent); pointer-events: none; }
 [data-review] { justify-content: flex-start; gap: 24px; }
-.practice-card { padding: clamp(14px, 3vw, 32px); min-height: 430px; border-color: var(--ps-line); position: relative; }
+/* Review cards inherit the active palette, including the system preference.
+   Keep the reading-sheet shape without the shared paper's fixed light theme. */
+.practice-card {
+  --ps-field: var(--ps-page);
+  padding: clamp(14px, 3vw, 32px); min-height: 430px; position: relative;
+  background: var(--ps-card); color: var(--ps-ink);
+  border-color: var(--ps-line); border-radius: 3px 18px 18px 3px;
+  border-left: 5px solid var(--ps-card-edge); box-shadow: 0 18px 60px #00000012;
+}
 .practice-card [lang="pi"] { font-family: var(--font-serif); font-size: 22px; line-height: 1.6; }
 .practice-card > [tabindex="-1"] { min-height: 350px; background: transparent; border: 0; }
 .practice-card > [tabindex="-1"] > div:first-child { padding-top: 16px; padding-bottom: 22px; }
