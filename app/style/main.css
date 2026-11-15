@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @import "../../../ui-lib/style/theme.css";
+@import "../../../ui-lib/style/editorial.css";
+@import "./editorial.css";
 
 /* Tailwind generates the classes it finds in the Rust sources. */
 @source "../../../ui-lib/src";

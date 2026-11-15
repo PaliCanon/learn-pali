@@ -149,6 +149,7 @@
   "unit_cards": "cards",
   "word_added": "Added",
   "words_more": "+ {{ count }} more",
+  "search_action": "Search a word",
   "search_open": "Add a word",
   "search_title": "Add a word",
   "search_placeholder": "A Pāli word",
@@ -177,5 +178,7 @@
   "review_size_label": "Cards this session",
   "review_all": "All",
   "summary_remaining_n": "{{ count }} cards still due today",
-  "summary_remaining_1": "{{ count }} card still due today"
+  "summary_remaining_1": "{{ count }} card still due today",
+  "home_invitation": "A little, every day.",
+  "home_rhythm": "Make room for Pāli. Let each word become familiar."
 }

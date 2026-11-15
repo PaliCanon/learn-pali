@@ -92,18 +92,27 @@ pub(crate) enum Failure {
 pub(crate) fn SearchButton(
     /// Performs the home's actions.
     act: Callback<HomeAction>,
+    /// A visible label for the prominent home entry point.
+    #[prop(default = false)]
+    labeled: bool,
 ) -> impl IntoView {
     let t = strings();
     move || {
+        let label = if labeled {
+            td_string!(t.locale(), search_action)
+        } else {
+            td_string!(t.locale(), search_open)
+        };
         view! {
             <Button
                 variant=Variant::Ghost
                 size=Size::Md
-                label=td_string!(t.locale(), search_open).to_string()
-                layout="rounded-full"
+                label=label.to_string()
+                layout="gap-2 rounded-full"
                 on_click=move |_| act.run(HomeAction::AddWord)
             >
                 <Icon name=IconName::Search size=20 />
+                {labeled.then_some(label)}
             </Button>
         }
     }

@@ -10,7 +10,9 @@ use leptos_meta::{HashedStylesheet, MetaTags};
 use leptos_meta::{Title, provide_meta_context};
 use leptos_router::components::{Router, Routes};
 use leptos_router::hooks::use_location;
-use palicanon_ui_lib::{AppShell, IconName, NavEntry, NavList, NavSection, provide_language};
+use palicanon_ui_lib::{
+    AppShell, IconName, NavEntry, NavList, NavSection, ShellAppearance, provide_language,
+};
 #[cfg(feature = "ssr")]
 use palicanon_ui_lib::{HydrationRoot, language_attribute, theme_attribute};
 
@@ -103,17 +105,17 @@ fn nav(current: Signal<String>) -> NavList {
                     icon: IconName::Search,
                     href: "https://search.palicanon.app",
                 },
-                // `IconName::Grid` stands in until ui-lib has a Learn icon.
+                // `IconName::BookOpen` stands in until ui-lib has a Learn icon.
                 NavEntry {
                     label: td_string!(t.locale(), nav_learn),
-                    icon: IconName::Grid,
+                    icon: IconName::BookOpen,
                     href: "/",
                 },
-                // `IconName::Motion` stands in until ui-lib has a Map icon, as in
+                // `IconName::Network` stands in until ui-lib has a Map icon, as in
                 // vizualisation.
                 NavEntry {
                     label: td_string!(t.locale(), nav_map),
-                    icon: IconName::Motion,
+                    icon: IconName::Network,
                     href: "https://map.palicanon.app",
                 },
             ],
@@ -141,6 +143,10 @@ fn Layout() -> impl IntoView {
             dictionary=Some(web_dictionary())
         >
             <AppShell
+                appearance=ShellAppearance::Editorial
+                product_label=Some(
+                    Signal::derive(move || td_string!(strings().locale(), nav_learn).to_owned()),
+                )
                 nav=nav(location.pathname.into())
                 settings_extra=move || view! { <LearnSettings /> }
                 footer=|| view! { <SiteFooter /> }

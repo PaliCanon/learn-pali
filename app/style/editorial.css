@@ -1,0 +1,54 @@
+[data-page="home"] { width: 100%; max-width: 1120px; margin: 0 auto; padding: 40px clamp(22px, 4vw, 64px) 48px; justify-content: flex-start; gap: 24px; }
+[data-page="home"]:has([data-home-state]) > a:first-child { display: none; }
+.learn-title { font-size: clamp(38px, 4.2vw, 54px); line-height: 1.05; color: var(--ps-heading); margin: 6px 0 4px; }
+.learn-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.learn-heading > button { min-height: 44px; padding-inline: 18px; border-radius: 999px; border: 1px solid var(--ps-line); color: var(--ps-gold-text); background: var(--ps-chip); text-decoration: none; }
+[data-home-state] { gap: 32px; }
+[data-home-state]:is([data-home-state="due"],[data-home-state="nothing-due"],[data-home-state="empty"]) > [data-cta-box] {
+  position: relative; min-height: 230px; padding: 32px 44% 32px 34px; justify-content: center;
+  border: 1px solid var(--ps-card-edge); border-radius: 14px; isolation: isolate; overflow: hidden;
+  background: var(--ps-card);
+}
+[data-home-state] > [data-cta-box]::after {
+  content: ''; position: absolute; z-index: -1; inset: 0 0 0 54%;
+  background: url('/images/bodhi-leaves-v1.png') center 48% / cover;
+  mask-image: linear-gradient(to right, transparent, black 35%); pointer-events: none;
+}
+[data-home-state="broken"] > [data-cta-box]::after, [data-home-state="loading"] > [data-cta-box]::after { display: none; }
+.learn-invitation { font: 400 36px/1.1 var(--font-serif); letter-spacing: -.025em; color: var(--ps-heading); }
+.learn-intro { font-size: 15px; line-height: 1.6; max-width: 34ch; color: var(--ps-muted); }
+[data-home-state] [data-cta-row] { justify-content: flex-start; margin-top: 8px; }
+[data-home-state] [data-cta-row] > button { min-height: 44px; padding-inline: 22px; }
+.learn-stages > section > ul { grid-template-columns: repeat(6,minmax(0,1fr)); gap: 0; border-block: 1px solid var(--ps-line); border-radius: 0; }
+.learn-stages button { min-height: 90px; border-radius: 0; padding: 15px 10px; }
+.learn-stages li + li button { border-left: 1px solid var(--ps-line); }
+.learn-stages button > span:first-child { font-size: 12px; }
+.learn-stages button > span:last-child { font: 400 32px/1.1 var(--font-serif); }
+[data-term-list] { max-height: 28rem; scrollbar-width: thin; scrollbar-color: var(--ps-line) transparent; padding-right: 6px; }
+[data-term-list] > ul { gap: 0; }
+[data-term-card] { border-radius: 0; border-width: 0 0 1px; border-color: var(--ps-line); background: transparent; }
+[data-term-card] > button { min-height: 76px; padding-block: 18px; }
+[data-term-card] [lang="pi"] { font-family: var(--font-serif); font-size: 26px; }
+[data-add-row] { justify-content: flex-end; margin-top: 18px; }
+[data-page="home"]:has([data-review]) { max-width: 900px; padding-top: 28px; position: relative; }
+[data-page="home"]:has([data-review]) { isolation: isolate; }
+[data-page="home"]:has([data-review])::before { content: ""; position: absolute; z-index: -1; right: 0; top: 180px; width: 260px; height: 500px; opacity: .25; background: url("/images/lotus-bud-v1.png") center / cover; mask-image: linear-gradient(transparent, black 25%, black 70%, transparent); pointer-events: none; }
+[data-review] { justify-content: flex-start; gap: 24px; }
+.practice-card { padding: clamp(14px, 3vw, 32px); min-height: 430px; border-color: var(--ps-line); position: relative; }
+.practice-card [lang="pi"] { font-family: var(--font-serif); font-size: 22px; line-height: 1.6; }
+.practice-card > [tabindex="-1"] { min-height: 350px; background: transparent; border: 0; }
+.practice-card > [tabindex="-1"] > div:first-child { padding-top: 16px; padding-bottom: 22px; }
+.practice-card [data-facet="meaning"] > [lang="pi"] { font-size: clamp(40px, 7vw, 72px); line-height: 1.25; }
+.practice-card > [tabindex="-1"] > div:first-child p:has([data-pali-text]) [lang="pi"] { font-size: inherit; }
+.practice-card [data-grade-actions] { border-top: 1px solid var(--ps-line); padding-top: 22px; flex-wrap: wrap; }
+.practice-card [role="dialog"] { font-family: var(--font-sans); }
+.practice-card [role="dialog"] [lang="pi"] { font-size: 18px !important; }
+@media (max-width: 760px) {
+  [data-page="home"] { padding: 28px 22px 40px; }
+  [data-home-state]:is([data-home-state="due"],[data-home-state="nothing-due"],[data-home-state="empty"]) > [data-cta-box] { padding: 28px 24px; min-height: 250px; }
+  [data-home-state] > [data-cta-box]::after { opacity: .25; inset-inline-start: 30%; }
+  .learn-invitation { font-size: 32px; max-width: 260px; }
+  .learn-stages > section > ul { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .learn-stages li:nth-child(4) button { border-left: 0; }
+  .practice-card { min-height: 390px; }
+}

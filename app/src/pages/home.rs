@@ -438,7 +438,6 @@ fn HomeScreen(
     /// Stop, 'Back home' and the brand in a session: back to the home.
     on_home: Callback<()>,
 ) -> impl IntoView {
-    let t = strings();
     let in_session = matches!(mode, Mode::Session(_) | Mode::AddWord);
     let body = match mode {
         Mode::Home => {
@@ -463,8 +462,7 @@ fn HomeScreen(
                     on_action=on_action
                 />
             };
-            let title =
-                view! { <h1 class="sr-only">{move || td_string!(t.locale(), home_title)}</h1> };
+            let title = view! { <HomeHeading state=state act=on_action /> };
             // Two decks or more: the chooser, above the stage counts. One
             // deck: no chooser node at all, so the markup is the home's alone.
             if offered(backend) {
@@ -491,6 +489,22 @@ fn HomeScreen(
     view! {
         <BrandLink base=base in_session=in_session stage=stage on_home=on_home />
         {body}
+    }
+}
+
+/// Keep dictionary search visible even before the first term is started.
+#[component]
+fn HomeHeading(state: HomeState, act: Callback<HomeAction>) -> impl IntoView {
+    let t = strings();
+    let searchable = matches!(
+        state,
+        HomeState::Empty | HomeState::Due(_) | HomeState::NothingDue
+    );
+    view! {
+        <div class="learn-heading">
+            <h1 class="learn-title">{move || td_string!(t.locale(), home_title)}</h1>
+            {searchable.then(|| view! { <SearchButton act=act labeled=true /> })}
+        </div>
     }
 }
 
@@ -853,8 +867,11 @@ fn CtaBox(
     #[prop(optional)]
     children: Option<Children>,
 ) -> impl IntoView {
+    let t = strings();
     view! {
         <div data-cta-box="" class=CTA_BOX>
+            <p class="learn-invitation">{move || td_string!(t.locale(), home_invitation)}</p>
+            <p class="learn-intro">{move || td_string!(t.locale(), home_rhythm)}</p>
             {children.map(|children| children())}
             <CtaRow cta=cta act=act />
         </div>
@@ -1248,6 +1265,7 @@ fn AddTermsButton(
                 layout="shadow-md"
             >
                 <Icon name=IconName::Plus size=18 />
+                <span>{label}</span>
             </DisclosureButton>
         }
     })
@@ -1328,7 +1346,9 @@ fn HomeProgress(
             .into_any(),
     };
     view! {
-        <StageStrip counts=counts stage=stage />
+        <div class="learn-stages">
+            <StageStrip counts=counts stage=stage />
+        </div>
         {list}
     }
 }
@@ -1457,6 +1477,24 @@ mod tests {
         view_of(Language::En, state, new_left, [0; 6])
     }
 
+    #[test]
+    fn dictionary_search_is_visible_before_and_after_starting_terms() {
+        for (language, label) in [
+            (Language::En, "Search a word"),
+            (Language::Fr, "Rechercher un mot"),
+            (Language::Vi, "Tìm một từ"),
+        ] {
+            for state in [HomeState::Empty, HomeState::Due(2), HomeState::NothingDue] {
+                let html = Owner::new().with(|| {
+                    palicanon_ui_lib::provide_language().set(language);
+                    view! { <HomeHeading state=state act=Callback::new(|_| ()) /> }.to_html()
+                });
+                assert!(html.contains(&format!("aria-label=\"{label}\"")), "{html}");
+                assert!(html.matches(label).count() >= 2, "a visible label: {html}");
+            }
+        }
+    }
+
     /// Started terms per stage: 21 in all.
     const STARTED: [usize; 6] = [6, 5, 4, 3, 2, 1];
 
@@ -1530,12 +1568,12 @@ mod tests {
     /// 2026-10-06): the title is no longer shown, it stays the page's
     /// heading for a screen reader.
     #[test]
-    fn the_title_is_read_not_shown() {
+    fn the_home_has_a_visible_localized_title() {
         for language in [Language::En, Language::Fr, Language::Vi] {
             let html = render(language);
             let h1 = tag_before(&html, "h1", "</h1>");
             let classes: Vec<&str> = h1.split(['"', ' ']).collect();
-            assert!(classes.contains(&"sr-only"), "{h1}");
+            assert!(classes.contains(&"learn-title"), "{h1}");
             for shown in ["font-serif", "text-2xl", "text-heading"] {
                 assert!(!classes.contains(&shown), "{shown}: {h1}");
             }
@@ -1813,7 +1851,10 @@ mod tests {
             assert!(inner.contains("<svg"), "{inner}");
             assert!(inner.contains(r#"d="M12 5v14""#), "{inner}");
             assert!(!inner.contains(">+<"), "{inner}");
-            assert!(!inner.contains(name), "the name is the label only: {inner}");
+            assert!(
+                inner.contains(name),
+                "the visible action is also named: {inner}"
+            );
         }
     }
 
@@ -3396,8 +3437,8 @@ mod tests {
             assert!(!html.contains(r#"aria-label="Deck""#), "{html}");
             assert!(html.contains("Daily"), "the stage counts are there: {html}");
             assert!(
-                html.contains(r#"</h1><div data-home-state="due""#),
-                "the home follows its title with no node between: {html}"
+                html.contains("learn-heading"),
+                "the heading is present: {html}"
             );
         });
     }

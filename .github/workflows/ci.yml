@@ -259,5 +259,6 @@ jobs:
       - run: bash scripts/release-values.test.sh
       - run: bash scripts/deploy-workflow.test.sh
       - run: bash scripts/image.test.sh
+      - run: bash scripts/manifest-ref.test.sh
       - run: bash scripts/fetch-passages.test.sh
       - run: bash infra/scripts/api-token.test.sh

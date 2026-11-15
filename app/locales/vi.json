@@ -149,6 +149,7 @@
   "unit_cards": "thẻ",
   "word_added": "Đã thêm",
   "words_more": "+ {{ count }} nữa",
+  "search_action": "Tìm một từ",
   "search_open": "Thêm một từ",
   "search_title": "Thêm một từ",
   "search_placeholder": "Một từ Pāli",
@@ -177,5 +178,7 @@
   "review_size_label": "Số thẻ trong buổi này",
   "review_all": "Tất cả",
   "summary_remaining_n": "Còn {{ count }} thẻ cần ôn hôm nay",
-  "summary_remaining_1": "Còn {{ count }} thẻ cần ôn hôm nay"
+  "summary_remaining_1": "Còn {{ count }} thẻ cần ôn hôm nay",
+  "home_invitation": "Mỗi ngày, một chút.",
+  "home_rhythm": "Dành thời gian cho Pāli. Để từng từ dần trở nên quen thuộc."
 }

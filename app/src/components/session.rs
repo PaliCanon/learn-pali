@@ -62,7 +62,8 @@ use crate::store::Load;
 use crate::today::{browser_today, session_today};
 
 /// Content-sized practice card; long answers scroll with the page.
-pub(crate) const CARD_BOX: &str = "practice-card w-full rounded-xl border border-line bg-card";
+pub(crate) const CARD_BOX: &str =
+    "practice-card pc-editorial-paper w-full rounded-xl border border-line bg-card";
 /// The small caption above a front (the facet's name).
 const CAPTION: &str = "text-xs font-medium uppercase tracking-wide text-muted";
 /// The answer of a revealed Context blank: the gold mark.
@@ -841,10 +842,19 @@ fn CardFront(
 
 /// The practice badge (when it is one), the facet's name, then the body of
 /// the facet.
+fn facet_key(facet: Facet) -> &'static str {
+    match facet {
+        Facet::Meaning => "meaning",
+        Facet::Recall => "recall",
+        Facet::Forms => "forms",
+        Facet::Context => "context",
+    }
+}
+
 fn front_view(card: Card, language: Language, revealed: Signal<bool>) -> impl IntoView {
     let locale = Locale::from(language);
     view! {
-        <div class="flex flex-col gap-2 p-4">
+        <div class="flex flex-col gap-2 p-4" data-facet=facet_key(card.facet)>
             {card
                 .practice
                 .then(|| view! { <p class=BADGE>{td_string!(locale, practice_badge)}</p> })}

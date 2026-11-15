@@ -38,7 +38,6 @@
 use std::cell::Cell;
 
 use leptos::prelude::*;
-use leptos_router::MatchNestedRoutes;
 use leptos_router::components::Route;
 use leptos_router::hooks::use_matched;
 use leptos_router::path;
@@ -62,7 +61,7 @@ use crate::sync_triggers::install;
 /// the app in its own `ParentRoute` at `/learn`; `/learn` and `/learn/` both
 /// show the home there.
 #[component(transparent)]
-pub fn LearnRoutes() -> impl MatchNestedRoutes + Send + Clone + 'static {
+pub fn LearnRoutes() -> impl leptos_router::MatchNestedRoutes + Send + Clone + 'static {
     view! { <Route path=path!("") view=LearnHome /> }.into_inner()
 }
 

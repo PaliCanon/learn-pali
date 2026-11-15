@@ -149,6 +149,7 @@
   "unit_cards": "cartes",
   "word_added": "Ajouté",
   "words_more": "+ {{ count }} de plus",
+  "search_action": "Rechercher un mot",
   "search_open": "Ajouter un mot",
   "search_title": "Ajouter un mot",
   "search_placeholder": "Un mot pāli",
@@ -177,5 +178,7 @@
   "review_size_label": "Cartes pour cette session",
   "review_all": "Tout",
   "summary_remaining_n": "{{ count }} cartes restent à réviser aujourd’hui",
-  "summary_remaining_1": "{{ count }} carte reste à réviser aujourd’hui"
+  "summary_remaining_1": "{{ count }} carte reste à réviser aujourd’hui",
+  "home_invitation": "Un peu, chaque jour.",
+  "home_rhythm": "Faites une place au pāli. Apprivoisez chaque mot à votre rythme."
 }

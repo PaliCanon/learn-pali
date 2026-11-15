@@ -1,5 +1,5 @@
-# Checks PaliCanon/ui-lib out beside this repository (`ui-lib/`), at the tag
-# app/Cargo.toml pins, and guards that the checkout's version is that tag.
+# Checks PaliCanon/ui-lib out beside this repository (`ui-lib/`), at the immutable tag or revision
+# app/Cargo.toml pins, and verifies the checkout.
 # Used by every job that builds (ci.yml, deploy.yml); this repository must
 # already be checked out in `learn-pali/`.
 #
@@ -11,8 +11,8 @@
 # so cargo fetches nothing private; app/Dockerfile asserts it (its
 # `RUN ! grep -q '^source = "git+' Cargo.lock` guard) and a step below
 # fails the job, naming Cargo.lock, before anything is fetched.
-name: ui-lib at the pinned tag
-description: Check out PaliCanon/ui-lib at the tag app/Cargo.toml pins, guarded.
+name: ui-lib at the pinned ref
+description: Check out PaliCanon/ui-lib at the ref app/Cargo.toml pins, guarded.
 inputs:
   app-id:
     description: The GitHub App's id (a repository secret of the caller).
@@ -26,9 +26,8 @@ runs:
     - id: pin
       shell: bash
       run: |
-        tag=$(sed -n 's/^palicanon-ui-lib = .*tag = "\(v[^"]*\)".*/\1/p' learn-pali/app/Cargo.toml)
-        if [ -z "$tag" ]; then echo "::error::app/Cargo.toml pins no ui-lib tag"; exit 1; fi
-        echo "tag=$tag" >> "$GITHUB_OUTPUT"
+        ref=$(bash learn-pali/scripts/manifest-ref.sh learn-pali/app/Cargo.toml palicanon-ui-lib)
+        echo "ref=$ref" >> "$GITHUB_OUTPUT"
     - name: Cargo.lock holds no git source
       shell: bash
       run: |
@@ -49,12 +48,19 @@ runs:
       with:
         repository: PaliCanon/ui-lib
         path: ui-lib
-        ref: ${{ steps.pin.outputs.tag }}
+        ref: ${{ steps.pin.outputs.ref }}
         token: ${{ steps.app.outputs.token }}
         persist-credentials: false
     - shell: bash
+      env:
+        UI_LIB_REF: ${{ steps.pin.outputs.ref }}
       run: |
-        version=$(sed -n 's/^version = "\(.*\)"/\1/p' ui-lib/Cargo.toml | head -1)
-        if [ "v$version" != "${{ steps.pin.outputs.tag }}" ]; then
-          echo "::error::ui-lib ${{ steps.pin.outputs.tag }} says version $version"; exit 1
+        if [[ "$UI_LIB_REF" == v* ]]; then
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' ui-lib/Cargo.toml | head -1)
+          if [ "v$version" != "$UI_LIB_REF" ]; then
+            echo "::error::ui-lib $UI_LIB_REF says version $version"; exit 1
+          fi
+        else
+          [[ "$UI_LIB_REF" =~ ^[[:xdigit:]]{40}$ ]] || exit 1
+          test "$(git -C ui-lib rev-parse HEAD)" = "$UI_LIB_REF"
         fi
