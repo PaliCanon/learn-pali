@@ -30,6 +30,8 @@ mod page;
 mod pages;
 pub mod release;
 mod seed;
+#[cfg(feature = "ssr")]
+mod seo;
 mod store;
 mod sync;
 mod sync_pacing;
