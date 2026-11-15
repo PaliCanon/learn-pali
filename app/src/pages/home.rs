@@ -855,8 +855,7 @@ fn press(cta: CtaSlot, act: Callback<HomeAction>) {
 }
 
 /// The CTA box: `children` (the Empty state's sentence) above the CTA row,
-/// which renders only when the state has a CTA (069: the search icon sits
-/// beside Practice on the full home, not on an empty one).
+/// which renders only when the state has a CTA.
 #[component]
 fn CtaBox(
     /// The row's left content; none in the Empty state (then no row).
@@ -878,8 +877,7 @@ fn CtaBox(
     }
 }
 
-/// The CTA row (HC), one thin row: the state's [`Cta`] centred, alone
-/// (069: the search icon moved beside the '+', [`NewTerms::plus_with_search`]).
+/// The CTA row (HC), one thin row: the state's [`Cta`] centred, alone.
 /// No CTA, no row (user 2026-10-24: « seulement sur l'accueil quand on a
 /// tout »): an empty home keeps its '+' alone.
 #[component]
@@ -936,7 +934,7 @@ fn next_review_line(language: Language, date: Date) -> AnyView {
 
 /// Nothing due: '▶ Practice', named 'Practice ahead, N terms' (N follows
 /// the slider), which opens [`PracticeDialog`], then the next review's
-/// date. The row keeps room at Practice's right for the search icon.
+/// date.
 #[component]
 fn PracticeAhead(
     /// The batch, the stage, the started terms, the date.
@@ -1220,26 +1218,6 @@ impl NewTerms {
         (new_left > 0)
             .then(|| ViewFn::from(move || view! { <AddTermsButton new_left=new_left open=open /> }))
     }
-
-    /// The '+' with the search icon beside it (069, user 2026-10-24:
-    /// « essaie le search près du add »), on the full home only; the
-    /// search alone when every term is started.
-    fn plus_with_search(self) -> ViewFn {
-        let NewTerms {
-            new_left,
-            open,
-            act,
-        } = self;
-        ViewFn::from(move || {
-            view! {
-                <span data-add-with-search="" class="inline-flex items-center gap-4">
-                    {(new_left > 0)
-                        .then(|| view! { <AddTermsButton new_left=new_left open=open /> })}
-                    <SearchButton act=act />
-                </span>
-            }
-        })
-    }
 }
 
 /// The disclosure that opens [`NewTermsDialog`]: a '+', small, Accent,
@@ -1330,9 +1308,7 @@ fn HomeProgress(
 ) -> impl IntoView {
     let list = match saved {
         Some(Saved { state }) => {
-            // The full home (a progress saved): the '+' with the search
-            // beside it (069).
-            let add = Some(new_terms.plus_with_search());
+            let add = new_terms.plus();
             let orphans = orphan_rows(&state, deck);
             view! {
                 <StageTerms progress=state stage=stage add=add deck=deck />
@@ -1690,7 +1666,7 @@ mod tests {
     }
 
     #[test]
-    fn the_search_icon_sits_beside_the_plus_under_the_list_on_the_full_home() {
+    fn new_terms_is_the_only_action_under_the_list() {
         for state in [HomeState::Due(3), NOTHING_DUE] {
             let html = with_progress(Language::En, state, None);
             let row = element_at(&html, at(&html, "data-cta-row"));
@@ -1698,11 +1674,10 @@ mod tests {
                 !row.contains("Add a word"),
                 "the CTA alone on its row: {row}"
             );
-            let pair = element_at(&html, at(&html, "data-add-with-search"));
-            let plus = at(pair, r#"aria-label="New terms""#);
-            let search = at(pair, r#"aria-label="Add a word""#);
-            assert!(plus < search, "the '+' then the search: {pair}");
-            assert_eq!(pair.matches("<button").count(), 2, "{pair}");
+            let add = element_at(&html, at(&html, "data-add-row"));
+            assert!(add.contains(r#"aria-label="New terms""#), "{add}");
+            assert_eq!(add.matches("<button").count(), 1, "{add}");
+            assert!(!html.contains(r#"aria-label="Add a word""#), "{html}");
         }
         let html = view_of(Language::En, HomeState::Due(3), 10, STARTED);
         assert!(
