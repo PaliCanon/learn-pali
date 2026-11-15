@@ -180,6 +180,8 @@ pub fn router(options: LeptosOptions, origin: Origin) -> axum::Router {
     let routes = generate_route_list(App);
     axum::Router::new()
         .route("/healthz", axum::routing::get(healthz))
+        // robots.txt and the sitemap, answered without rendering the app.
+        .merge(crate::seo::routes())
         // The server functions (062: the dictionary search and a word's
         // passage) answer under /api; the Worker passes POST there.
         .route(
