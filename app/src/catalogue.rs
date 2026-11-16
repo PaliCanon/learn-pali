@@ -89,7 +89,12 @@ mod tests {
 
     #[test]
     fn the_nav_and_home_strings_have_their_three_values() {
-        let rows: [(&str, Vec<&str>, [&str; 3]); 3] = [
+        let rows: [(&str, Vec<&str>, [&str; 3]); 4] = [
+            (
+                "nav_audio",
+                values!(nav_audio),
+                ["Audio", "Audio", "Âm thanh"],
+            ),
             (
                 "nav_search",
                 values!(nav_search),
@@ -200,6 +205,10 @@ mod tests {
         serde_json::from_str(json).expect("a flat JSON object")
     }
 
+    /// The keys whose French word is the English one ("Audio" is French too),
+    /// so equal strings there are a translation, not a fallback.
+    const SAME_IN_FRENCH: [&str; 1] = ["nav_audio"];
+
     /// Every English key exists in French and Vietnamese, each translated:
     /// a missing key would fall back to English in that language's UI.
     #[test]
@@ -213,6 +222,9 @@ mod tests {
             for (key, english) in &en {
                 let value = other.get(key);
                 assert!(value.is_some(), "{code}.json lacks {key}");
+                if code == "fr" && SAME_IN_FRENCH.contains(&key.as_str()) {
+                    continue;
+                }
                 assert_ne!(value, Some(english), "{code}.json: {key} is English");
             }
             assert_eq!(other.len(), en.len(), "{code}.json has extra keys");

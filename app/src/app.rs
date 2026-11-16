@@ -1,7 +1,7 @@
 //! The service's shell around the pages: the HTML document ([`shell`],
 //! server-rendered) and the app root ([`App`], what hydration mounts),
-//! `AppShell`'s rail with the services (Search, Learn), the theme and
-//! languages.
+//! `AppShell`'s rail with the services (Search, Learn, Map, Audio), the
+//! theme and languages.
 
 use leptos::prelude::*;
 use leptos_i18n::td_string;
@@ -92,8 +92,9 @@ pub fn App() -> impl IntoView {
 }
 
 /// The rail's entries: the services, Search (the main site), Learn (this
-/// one, the current entry on `/`), then Map. The same three, in the same
-/// order and with the same hrefs, as search-front's and vizualisation's rails.
+/// one, the current entry on `/`), Map, then Audio. The same four, in the
+/// same order and with the same hrefs, as search-front's, vizualisation's
+/// and the audio site's rails.
 fn nav(current: Signal<String>) -> NavList {
     let t = strings();
     let sections = Signal::derive(move || {
@@ -117,6 +118,13 @@ fn nav(current: Signal<String>) -> NavList {
                     label: td_string!(t.locale(), nav_map),
                     icon: IconName::Network,
                     href: "https://map.palicanon.app",
+                },
+                // `IconName::Motion` (three lines of different lengths, as a level
+                // meter) stands in until ui-lib has a headphones icon.
+                NavEntry {
+                    label: td_string!(t.locale(), nav_audio),
+                    icon: IconName::Motion,
+                    href: "https://audio.palicanon.app",
                 },
             ],
         }]
@@ -252,7 +260,7 @@ mod tests {
     }
 
     #[test]
-    fn the_rail_lists_search_then_learn_then_map() {
+    fn the_rail_lists_search_then_learn_then_map_then_audio() {
         let html = render_layout(Language::En, "/");
         let tags = anchors(&html);
         let search = tags
@@ -267,11 +275,15 @@ mod tests {
             .iter()
             .position(|t| t.contains(r#"href="https://map.palicanon.app""#))
             .expect(&html);
+        let audio = tags
+            .iter()
+            .position(|t| t.contains(r#"href="https://audio.palicanon.app""#))
+            .expect(&html);
         assert!(
-            search < learn && learn < map,
-            "Search first, Learn second, Map third: {html}"
+            search < learn && learn < map && map < audio,
+            "Search first, Learn second, Map third, Audio fourth: {html}"
         );
-        // The same two entries, in the same order, in the phone's navigation.
+        // The same entries, in the same order, in the phone's navigation.
         let again = tags
             .iter()
             .rposition(|t| t.contains(r#"href="https://search.palicanon.app""#))
@@ -295,6 +307,7 @@ mod tests {
         for tag in anchors(&html) {
             if tag.contains(r#"href="https://search.palicanon.app""#)
                 || tag.contains(r#"href="https://map.palicanon.app""#)
+                || tag.contains(r#"href="https://audio.palicanon.app""#)
             {
                 assert!(!tag.contains("aria-current"), "{tag}");
             }
@@ -309,15 +322,16 @@ mod tests {
 
     #[test]
     fn the_entries_are_labelled_in_every_language() {
-        for (language, search, learn, map) in [
-            (Language::En, "Search", "Learn", "Map"),
-            (Language::Fr, "Recherche", "Apprendre", "Carte"),
-            (Language::Vi, "Tìm kiếm", "Học", "Bản đồ"),
+        for (language, search, learn, map, audio) in [
+            (Language::En, "Search", "Learn", "Map", "Audio"),
+            (Language::Fr, "Recherche", "Apprendre", "Carte", "Audio"),
+            (Language::Vi, "Tìm kiếm", "Học", "Bản đồ", "Âm thanh"),
         ] {
             let html = render_layout(language, "/");
             assert!(html.contains(&format!(">{search}</span>")), "{html}");
             assert!(html.contains(&format!(">{learn}</span>")), "{html}");
             assert!(html.contains(&format!(">{map}</span>")), "{html}");
+            assert!(html.contains(&format!(">{audio}</span>")), "{html}");
         }
     }
 
